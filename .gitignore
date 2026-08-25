@@ -1,0 +1,27 @@
+.venv/
+.venv-windows/
+.data/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.py[cod]
+*.db
+.DS_Store
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+
+# IDE / tooling
+.idea/
+.jbeval/
+.vscode/
+examples/validation-project/
+
+# Local runtime config (copy from project.config.example.json)
+project.config.json

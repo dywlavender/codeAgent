@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<mapper namespace="demo.withdraw.WithdrawMapper">
+  <select id="findRepayType" resultType="string">
+    SELECT repay_type FROM withdraw_apply WHERE apply_id = #{applyId}
+  </select>
+</mapper>

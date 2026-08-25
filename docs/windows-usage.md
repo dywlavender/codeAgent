@@ -1,0 +1,204 @@
+# Windows 使用方案
+
+## 先选一种模式
+
+| 模式 | 适用场景 | 数据库内容 | 启动命令 |
+|---|---|---|---|
+| 配置项目验证 | 使用根目录 `project.config.json` | 当前为验证项目 | 双击 `start-windows.bat` |
+| Demo | 显式体验内置通用示例 | 内置通用示例 | `start-windows.bat -Mode Demo` |
+| Empty | 先建立空知识库，稍后手工导入 | 无示例数据 | `start-windows.bat -Mode Empty` |
+| Repository | 直接索引本地 Java/MyBatis 项目 | 真实代码事实 | `start-windows.bat -Mode Repository -Repository "D:\code\loan-system"` |
+
+没有项目配置时脚本默认创建 `.data\knowledge.db`，监听 `127.0.0.1:8082`，并打开浏览器；项目配置可以通过 `startup.database` 和 `startup.port` 覆盖这两个默认值。它不会修改被索引的代码仓库。
+
+## 前置环境
+
+- Windows 10 或 Windows 11。
+- Python 3.11 或更高版本。安装时勾选 `Add Python to PATH`。
+- Node.js 20 LTS 或更高版本，需包含 npm。
+- 首次启动需要访问 PyPI 和 npm。之后可使用 `-SkipInstall -SkipFrontendBuild`。
+
+不要求全局安装 Java、Maven、Neo4j 或 SQLite。Java 源码分析读取文件，不编译目标项目。
+
+## 一键启动
+
+### 双击体验
+
+在资源管理器中双击：
+
+```text
+start-windows.bat
+```
+
+首次运行会执行：
+
+1. 检查 Python 和 Node.js 版本。
+2. 创建 `.venv-windows` 虚拟环境。
+3. 安装 Python 包；Tree-sitter 不可用时自动退回保守解析器。
+4. 用 `npm ci` 按锁文件安装并构建前端。
+5. 按当前模式或 `project.config.json` 幂等初始化/同步知识库。
+6. 启动工作台并打开配置中的地址；当前验证配置为 `http://127.0.0.1:8083/`。
+
+关闭启动窗口或按 `Ctrl+C` 会停止服务。
+
+每次执行启动脚本，检测到同一项目的工作台已经运行时会先停止旧进程，再启动新进程，避免旧代码或旧配置继续生效。
+
+### 索引真实代码库
+
+从项目根目录打开 `cmd.exe`：
+
+```bat
+start-windows.bat -Mode Repository ^
+  -Repository "D:\IdeaProjects\loan-system" ^
+  -RepositoryId "loan-system"
+```
+
+路径可以包含空格和中文。当前索引器支持 `.java` 和 MyBatis `.xml`，并自动跳过 `.git`、`.idea`、`target`、`build`、`.gradle`、`node_modules`。
+
+### 使用 Git 配置自动同步
+
+复制根目录的 `project.config.example.json` 为 `project.config.json`，填写仓库的 `gitUrl` 和 `branch`：
+
+```bat
+start-windows.bat
+```
+
+根目录存在 `project.config.json` 时会自动加载。首次运行自动克隆；以后先检查远端。本地已是最新版本时不会更新工作区，本地落后时才快进更新。同步完成后只增量索引变化源码。私有仓库复用 Windows Git Credential Manager 或 SSH Key。
+
+当前仓库的 `project.config.json` 已配置内置验证项目、`.data\validation-project.db` 和 8083 端口。直接运行 `start-windows.bat` 即可验证配置驱动的同步；显式传入 `-Database` 或 `-Port` 时会覆盖配置文件值。切换真实项目时，将它替换为 `project.config.example.json` 的副本并填写实际 Git 地址。
+
+Knowledge Update Agent 和 Query Agent 共用 `.env` 中的模型配置。推荐复制根目录 `.env.example` 为 `.env`，然后填写模型参数、模型密钥和管理员口令：
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，填写 BUSINESS_CODE_MODEL_API_KEY 和 BUSINESS_CODE_ADMIN_TOKEN
+.\start-windows.bat
+```
+
+也可以继续在当前 PowerShell 会话中直接设置同名 `BUSINESS_CODE_MODEL_*` 环境变量；如果 `.env` 存在，文件值优先。模型供应商、模型名、兼容接口地址和重试参数也都在 `.env` 中配置，不写入 JSON。项目和仓库配置示例见根目录 `project.config.example.json`。
+
+### 使用空知识库
+
+```bat
+start-windows.bat -Mode Empty -Database ".data\company.db"
+```
+
+之后使用 `.venv-windows\Scripts\business-code-agent.exe` 导入资料：
+
+```bat
+.venv-windows\Scripts\business-code-agent.exe ingest-repo ^
+  "D:\IdeaProjects\loan-system" ^
+  --repository-id loan-system ^
+  --db ".data\company.db"
+
+.venv-windows\Scripts\business-code-agent.exe requirement-import ^
+  "D:\documents\REQ-2026-018.docx" ^
+  --id REQ-2026-018 ^
+  --db ".data\company.db"
+
+知识说明请在工作台“知识治理”页面提交，系统会生成待审核提案；管理员接受后才发布功能知识。
+```
+
+导入后再次运行：
+
+```bat
+start-windows.bat -Mode Empty -Database ".data\company.db" -SkipInstall -SkipFrontendBuild
+```
+
+`Empty` 只创建或迁移表，不会清空现有数据库。
+
+## 常用参数
+
+```text
+-Mode Demo|Empty|Repository
+-Database <SQLite 文件>
+-Repository <Java 仓库目录>
+-RepositoryId <稳定仓库 ID>
+-ProjectConfig <项目 Git 配置 JSON>
+-HostAddress 127.0.0.1
+-Port 8082
+-SkipInstall
+-SkipFrontendBuild
+-NoBrowser
+```
+
+例如端口被占用时：
+
+```bat
+start-windows.bat -Port 9082
+```
+
+默认只监听本机。只有明确需要局域网访问时才使用：
+
+```bat
+start-windows.bat -HostAddress 0.0.0.0
+```
+
+此时服务会要求 `admin.apiTokenEnv` 对应的环境变量已经设置；否则拒绝启动。还应配置 Windows 防火墙和数据库脱敏，不要直接暴露到互联网。
+
+## 日常使用流程
+
+### 代码事实分析
+
+1. 用 Repository 模式索引代码。
+2. 打开 Code，搜索字段、Symbol、表或列。
+3. 在 Agent 中询问“字段在哪里生成、读取和校验”。
+4. 代码证据不足时查看回答中的 Unknown，不把候选结果当结论。
+
+### 业务知识闭环
+
+1. 打开“知识治理”，选择管理员说明、需求、文档、用户反馈或代码变化。
+2. 输入来源标识和必要内容，可选指定受影响业务功能。
+3. Knowledge Update Agent 生成结构化差异提案。
+4. 管理员接受、驳回或暂缓；只有接受后才发布新的功能知识版本。
+5. 用户端 Query Agent 只读取已发布版本。
+
+旧版独立业务知识命令已移除。新的知识写入统一走“知识治理”接口，用户侧只读取已发布功能知识。
+
+### 需求驱动分析
+
+1. 使用 `requirement-import` 导入 `.docx`、`.md` 或 `.txt`。
+2. 使用 `requirement-enrich` 关联代码和业务知识。
+3. Agent 默认使用 Digest；只有需要核实规则时读取命中的原文 Chunk。
+4. 新版本使用相同 Requirement ID 导入，系统保留版本变化，不自动覆盖人工业务事实。
+
+## 停止、重启与升级
+
+- 停止：在启动窗口按 `Ctrl+C`，或关闭该窗口。
+- 快速重启：增加 `-SkipInstall -SkipFrontendBuild`。
+- 代码更新或 `package-lock.json` 更新后：不要跳过安装和构建。
+- 数据库会在启动时自动迁移；升级前仍建议复制 `.data\knowledge.db` 作为备份。
+
+## 常见问题
+
+### PowerShell 执行策略阻止脚本
+
+请运行 `start-windows.bat`，它只对本次进程使用 `ExecutionPolicy Bypass`，不会修改系统全局策略。
+
+### 找不到 Python
+
+安装 Python 3.11+，勾选 PATH。脚本优先使用 Windows `py.exe`，其次使用 `python.exe`。
+
+### npm 或 PyPI 安装失败
+
+首次启动需要网络。如在公司代理下，先配置 npm/pip 代理或内部镜像，再重新运行。错误不会被吞掉，窗口会停留并显示原因。
+
+### 端口已占用
+
+使用 `-Port 9082`，或停止占用 8082 的旧服务。
+
+### 工作台提示未构建
+
+不要使用 `-SkipFrontendBuild`，让脚本执行 `npm ci` 和 `npm run build`。
+
+### 真实项目能索引但业务原因为空
+
+这是证据边界，不是启动故障。代码只能证明当前行为；“为什么”和规则来源通常还需要导入 Requirement 或人工确认的功能知识。
+
+### 知识更新提示缺少模型凭据
+
+检查根目录 `.env` 中的 `BUSINESS_CODE_MODEL_ENABLED` 和 `BUSINESS_CODE_MODEL_API_KEY`。如果暂时不使用模型，将 `BUSINESS_CODE_MODEL_ENABLED` 设为 `false`，系统会生成保守的人工复核提案。旧配置仍支持 `project.config.json` 中的 `model` / `queryModel`，但 `.env` 中只要出现 `BUSINESS_CODE_MODEL_*`，就以 `.env` 为准。
+
+### 知识治理要求管理员口令
+
+检查 `project.config.json` 中的 `admin.apiTokenEnv`，在启动前设置对应环境变量。进入“知识治理”后输入同一口令解锁；口令仅保留在当前浏览器标签会话中。

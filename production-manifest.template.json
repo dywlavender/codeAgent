@@ -1,0 +1,28 @@
+{
+  "scope": "production",
+  "attestation": {
+    "confirmedBy": "填写确认该业务事实的人员或团队",
+    "confirmedAt": "YYYY-MM-DD",
+    "caseSource": "填写案例来自哪个生产系统/需求评审"
+  },
+  "repositories": [
+    {"id": "producer-system", "path": "/absolute/path/to/producer-java-repo"},
+    {"id": "consumer-system", "path": "/absolute/path/to/consumer-java-repo"}
+  ],
+  "requirements": [
+    "/absolute/path/to/requirement.json"
+  ],
+  "businessKnowledge": [
+    "/absolute/path/to/confirmed-business-knowledge.json"
+  ],
+  "case": {
+    "question": "填写真实问题",
+    "field": "fieldName",
+    "expectedProducer": "package.Producer.method",
+    "expectedConsumer": "package.Consumer.method",
+    "expectedRequirement": "REQ-ID",
+    "expectedBusinessKnowledge": "BK-ID",
+    "expectedRawChunks": 1,
+    "expectNoDirectCall": true
+  }
+}

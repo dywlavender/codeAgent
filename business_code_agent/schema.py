@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+import sqlite3
+
+
+SCHEMA = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS repository (
+  id TEXT PRIMARY KEY, root_path TEXT NOT NULL, indexed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS code_file (
+  id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, path TEXT NOT NULL,
+  content_hash TEXT NOT NULL, UNIQUE(repository_id, path)
+);
+CREATE TABLE IF NOT EXISTS code_symbol (
+  id TEXT PRIMARY KEY, file_id TEXT NOT NULL, kind TEXT NOT NULL,
+  qualified_name TEXT NOT NULL, name TEXT NOT NULL, line_start INTEGER NOT NULL,
+  line_end INTEGER NOT NULL, UNIQUE(file_id, qualified_name, line_start)
+);
+CREATE TABLE IF NOT EXISTS evidence (
+  id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+  source_version TEXT NOT NULL, locator TEXT NOT NULL, line_start INTEGER,
+  line_end INTEGER, chunk_id TEXT, content_hash TEXT NOT NULL, excerpt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS evidence_lifecycle (
+  evidence_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+  superseded_at TEXT, trigger_type TEXT, trigger_id TEXT
+);
+CREATE TABLE IF NOT EXISTS code_fact (
+  id TEXT PRIMARY KEY, symbol_id TEXT NOT NULL, fact_type TEXT NOT NULL,
+  subject TEXT NOT NULL, target TEXT NOT NULL, evidence_id TEXT NOT NULL,
+  UNIQUE(symbol_id, fact_type, subject, target, evidence_id)
+);
+CREATE TABLE IF NOT EXISTS ingestion_change (
+  id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, file_path TEXT NOT NULL,
+  change_type TEXT NOT NULL, previous_hash TEXT, current_hash TEXT,
+  indexed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS parse_diagnostic (
+  file_id TEXT PRIMARY KEY, backend TEXT NOT NULL, has_error INTEGER NOT NULL,
+  root_type TEXT NOT NULL, checked_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, source_path TEXT NOT NULL,
+  version TEXT NOT NULL, content_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', current_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS requirement_change (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, change_type TEXT NOT NULL,
+  previous_hash TEXT, current_hash TEXT NOT NULL, recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_version (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, version INTEGER NOT NULL,
+  source_file TEXT NOT NULL, source_type TEXT NOT NULL, content_hash TEXT NOT NULL,
+  original_text TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(requirement_id, version)
+);
+CREATE TABLE IF NOT EXISTS requirement_digest_v2 (
+  requirement_version_id TEXT PRIMARY KEY, business_goal TEXT, background TEXT,
+  digest_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_rule (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL, statement TEXT NOT NULL,
+  objects_json TEXT NOT NULL, conditions_json TEXT NOT NULL, result TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_chunk_v2 (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL,
+  section_path_json TEXT NOT NULL, sequence INTEGER NOT NULL, content TEXT NOT NULL,
+  content_hash TEXT NOT NULL, page INTEGER, paragraph_start INTEGER,
+  paragraph_end INTEGER, start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL,
+  evidence_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_evidence (
+  fact_type TEXT NOT NULL, fact_id TEXT NOT NULL, chunk_id TEXT NOT NULL,
+  start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL,
+  PRIMARY KEY(fact_type, fact_id, chunk_id, start_offset, end_offset)
+);
+CREATE TABLE IF NOT EXISTS requirement_relation (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL,
+  source_object_type TEXT NOT NULL, source_object_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+  origin TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL,
+  reason TEXT NOT NULL, requirement_evidence_id TEXT, code_evidence_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(requirement_version_id, source_object_type, source_object_id, relation_type, target_type, target_id)
+);
+CREATE TABLE IF NOT EXISTS requirement_version_change (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL,
+  from_version_id TEXT, to_version_id TEXT NOT NULL,
+  added_rules_json TEXT NOT NULL, removed_rules_json TEXT NOT NULL,
+  changed_rules_json TEXT NOT NULL, affected_knowledge_json TEXT NOT NULL,
+  affected_code_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS requirement_fts USING fts5(
+  requirement_id UNINDEXED, requirement_version_id UNINDEXED,
+  title, digest, rules, tags
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS requirement_chunk_fts USING fts5(
+  requirement_id UNINDEXED, requirement_version_id UNINDEXED,
+  chunk_id UNINDEXED, section_path, content
+);
+CREATE TABLE IF NOT EXISTS requirement_digest (
+  requirement_id TEXT PRIMARY KEY, digest_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_chunk (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+  content TEXT NOT NULL, evidence_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS business_function (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  current_version_id TEXT, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS business_function_version (
+  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, version INTEGER NOT NULL,
+  status TEXT NOT NULL, snapshot_json TEXT NOT NULL,
+  source_proposal_id TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(function_id, version),
+  FOREIGN KEY(function_id) REFERENCES business_function(id)
+);
+CREATE TABLE IF NOT EXISTS function_scenario (
+  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
+  name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  PRIMARY KEY(function_version_id, id),
+  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS function_rule (
+  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
+  statement TEXT NOT NULL, conditions_json TEXT NOT NULL,
+  result TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  PRIMARY KEY(function_version_id, id),
+  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS function_entry (
+  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
+  entry_type TEXT NOT NULL, label TEXT NOT NULL,
+  target_type TEXT NOT NULL DEFAULT '', target_id TEXT NOT NULL DEFAULT '',
+  locator TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  PRIMARY KEY(function_version_id, id),
+  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS function_data_impact (
+  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
+  object_type TEXT NOT NULL, object_name TEXT NOT NULL,
+  operation TEXT NOT NULL, before_state TEXT NOT NULL DEFAULT '',
+  after_state TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(function_version_id, id),
+  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS function_item_evidence (
+  function_version_id TEXT NOT NULL, item_type TEXT NOT NULL,
+  item_id TEXT NOT NULL, evidence_id TEXT NOT NULL,
+  PRIMARY KEY(function_version_id, item_type, item_id, evidence_id),
+  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE,
+  FOREIGN KEY(evidence_id) REFERENCES evidence(id)
+);
+CREATE TABLE IF NOT EXISTS knowledge_update_proposal (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+  trigger_type TEXT NOT NULL, trigger_id TEXT NOT NULL,
+  action TEXT NOT NULL, target_function_id TEXT NOT NULL,
+  base_version_id TEXT, proposed_snapshot_json TEXT NOT NULL,
+  status TEXT NOT NULL, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  reviewed_by TEXT, reviewed_at TEXT, published_by TEXT, published_at TEXT
+);
+CREATE TABLE IF NOT EXISTS knowledge_update_proposal_item (
+  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  item_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT,
+  before_json TEXT, after_json TEXT, rationale TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0,
+  FOREIGN KEY(proposal_id) REFERENCES knowledge_update_proposal(id) ON DELETE CASCADE,
+  UNIQUE(proposal_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS proposal_item_evidence (
+  proposal_item_id TEXT NOT NULL, evidence_id TEXT NOT NULL,
+  PRIMARY KEY(proposal_item_id, evidence_id),
+  FOREIGN KEY(proposal_item_id) REFERENCES knowledge_update_proposal_item(id) ON DELETE CASCADE,
+  FOREIGN KEY(evidence_id) REFERENCES evidence(id)
+);
+CREATE TABLE IF NOT EXISTS knowledge_proposal_review (
+  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, decision TEXT NOT NULL,
+  reviewer TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT NOT NULL,
+  FOREIGN KEY(proposal_id) REFERENCES knowledge_update_proposal(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_business_function_status ON business_function(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_function_version_function ON business_function_version(function_id, version);
+CREATE INDEX IF NOT EXISTS idx_knowledge_proposal_status ON knowledge_update_proposal(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_knowledge_proposal_target ON knowledge_update_proposal(target_function_id, created_at);
+CREATE TABLE IF NOT EXISTS agent_run (
+  id TEXT PRIMARY KEY, question TEXT NOT NULL, state_json TEXT NOT NULL,
+  evidence_status TEXT NOT NULL, iterations INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_agent_run (
+  id TEXT PRIMARY KEY, question TEXT NOT NULL, intent TEXT NOT NULL,
+  status TEXT NOT NULL, evidence_status TEXT NOT NULL, iterations INTEGER NOT NULL,
+  source_characters INTEGER NOT NULL, answer_json TEXT NOT NULL,
+  state_json TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS query_agent_step (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_name TEXT NOT NULL,
+  iteration INTEGER NOT NULL, input_summary_json TEXT NOT NULL,
+  output_summary_json TEXT NOT NULL, evidence_count INTEGER NOT NULL,
+  duration_ms REAL NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_tool_call (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL, tool_input_json TEXT NOT NULL,
+  result_count INTEGER NOT NULL, iteration INTEGER NOT NULL,
+  duration_ms REAL NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_checkpoint (
+  run_id TEXT NOT NULL, sequence INTEGER NOT NULL, node_name TEXT NOT NULL,
+  state_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY(run_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS query_conversation (
+  id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_message (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_message_conversation ON query_message(conversation_id, created_at);
+CREATE TABLE IF NOT EXISTS query_feedback (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
+  comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES query_agent_run(id)
+);
+"""
+
+
+def connect(path: str) -> sqlite3.Connection:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.executescript(SCHEMA)
+    _migrate(connection)
+    return connection
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    """Retire the old business schema and add safe columns to older databases."""
+    _purge_retired_business_schema(connection)
+    additions = {
+        "requirement": (
+            ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
+            ("current_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("created_at", "TEXT"), ("updated_at", "TEXT"),
+        ),
+    }
+    for table, columns in additions.items():
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        for name, declaration in columns:
+            if name not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+    connection.commit()
+
+
+def _purge_retired_business_schema(connection: sqlite3.Connection) -> None:
+    """Remove the pre-governance business-knowledge storage on first open.
+
+    The application no longer has a reader or writer for these tables.  A
+    one-time migration keeps an existing local database from retaining a
+    second, confusing source of truth.  Only evidence owned by the retired
+    records is removed; code and requirement evidence remain untouched.
+    """
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='business_knowledge'"
+    ).fetchone():
+        old_evidence = [row[0] for row in connection.execute(
+            "SELECT evidence_id FROM business_knowledge WHERE evidence_id IS NOT NULL"
+        )]
+        retired_tables = (
+            "business_knowledge_fts", "business_knowledge_fts_config",
+            "business_knowledge_fts_content", "business_knowledge_fts_data",
+            "business_knowledge_fts_docsize", "business_knowledge_fts_idx",
+            "business_review", "relation_evidence", "knowledge_relation",
+            "business_knowledge_tag", "knowledge_change", "business_knowledge",
+        )
+        for table in retired_tables:
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                connection.execute(f'DROP TABLE "{table}"')
+        if old_evidence:
+            marks = ",".join("?" for _ in old_evidence)
+            connection.execute(f"DELETE FROM evidence_lifecycle WHERE evidence_id IN ({marks})", old_evidence)
+            connection.execute(f"DELETE FROM evidence WHERE id IN ({marks})", old_evidence)
+    _purge_retired_runs(connection)
+
+
+def _purge_retired_runs(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        "SELECT id FROM query_agent_run WHERE state_json LIKE '%BK-%' OR answer_json LIKE '%BK-%'"
+    ).fetchall()
+    run_ids = [row[0] for row in rows]
+    if not run_ids:
+        return
+    marks = ",".join("?" for _ in run_ids)
+    for table in ("query_feedback", "query_tool_call", "query_agent_step", "query_checkpoint", "query_message"):
+        connection.execute(f"DELETE FROM {table} WHERE run_id IN ({marks})", run_ids)
+    connection.execute(f"DELETE FROM query_agent_run WHERE id IN ({marks})", run_ids)

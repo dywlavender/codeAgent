@@ -1,0 +1,27 @@
+{
+  "project": {
+    "id": "loan-system",
+    "name": "贷款核心系统"
+  },
+  "admin": {
+    "name": "knowledge-admin",
+    "apiTokenEnv": "BUSINESS_CODE_ADMIN_TOKEN"
+  },
+  "startup": {
+    "database": ".data/knowledge.db",
+    "port": 8082
+  },
+  "repositoryRoot": ".data/repositories",
+  "repositories": [
+    {
+      "id": "loan-core",
+      "gitUrl": "git@github.com:your-company/loan-core.git",
+      "branch": "main"
+    },
+    {
+      "id": "loan-job",
+      "gitUrl": "https://github.com/your-company/loan-job.git",
+      "branch": "develop"
+    }
+  ]
+}
