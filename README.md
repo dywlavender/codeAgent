@@ -146,7 +146,7 @@ business-code-agent requirement-import examples/validation-project/docs/requirem
   "repositories": [
     {
       "id": "loan-core",
-      "gitUrl": "git@github.com:your-company/loan-core.git",
+      "gitUrl": "https://github.com/your-company/loan-core.git",
       "branch": "main"
     },
     {
