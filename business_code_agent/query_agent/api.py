@@ -72,6 +72,14 @@ def make_server(
                     body = self._body()
                     self._json(201, service.generate(body, created_by=admin_access["name"]))
                     return
+                if path == "/api/knowledge-admin/generate":
+                    if not self._require_admin():
+                        return
+                    from ..knowledge_update.service import KnowledgeAdminService
+                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
+                    body = self._body()
+                    self._json(201, service.generate_from_sources(body, created_by=admin_access["name"]))
+                    return
                 review_match = re.fullmatch(r"/api/knowledge-admin/proposals/([^/]+)/review", path)
                 if review_match:
                     if not self._require_admin():
@@ -140,6 +148,14 @@ def make_server(
                     query = parse_qs(parsed.query).get("q", [""])[0]
                     self._json(200, {"items": RequirementService(service.db).search(query)})
                     return
+                if parsed.path == "/api/knowledge-graph":
+                    from ..knowledge_graph import KnowledgeGraphService
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    params = parse_qs(parsed.query)
+                    query = params.get("q", [""])[0]
+                    node_type = params.get("type", [""])[0]
+                    self._json(200, KnowledgeGraphService(service.db).search(query, node_type))
+                    return
                 if parsed.path in {
                     "/api/knowledge-admin/pending",
                     "/api/knowledge-admin/functions",
@@ -170,6 +186,15 @@ def make_server(
                 if match:
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                     self._json(200, service.get_run(match.group(1)))
+                    return
+                symbol_match = re.fullmatch(r"/api/code/symbol/([^/]+)", parsed.path)
+                if symbol_match:
+                    from ..tools import EvidenceTools
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    tools = EvidenceTools(service.db)
+                    detail = tools.read_source(symbol_match.group(1))
+                    detail["relations"] = tools.get_symbol_relations(symbol_match.group(1))
+                    self._json(200, detail)
                     return
                 if not parsed.path.startswith("/api/"):
                     relative = parsed.path.lstrip("/")

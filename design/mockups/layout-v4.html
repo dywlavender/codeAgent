@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Atlas · 原型 V4</title>
+<style>
+/* ===== V4：温暖极简（对话产品质感） ===== */
+:root {
+  --canvas:#f7f7f4;
+  --side:#f1f0eb;
+  --side-hover:#e9e8e2;
+  --raised:#ffffff;
+  --muted:#f3f2ee;
+  --well:#fafaf7;
+  --border:#ebeae4;
+  --border-strong:#deddd5;
+  --text:#23221e;
+  --secondary:#75746b;
+  --faint:#a3a29a;
+  --brand:#0d8a63;
+  --brand-deep:#0a6b4c;
+  --brand-soft:#e7f4ee;
+  --on-brand:#ffffff;
+  --code:#4179ad;
+  --code-soft:#edf4fa;
+  --req:#b0731c;
+  --req-soft:#fcf3e3;
+  --danger:#d0483b;
+  --danger-soft:#fdedeb;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:"SFMono-Regular","JetBrains Mono",Consolas,monospace;
+  --r-s:8px; --r-m:12px; --r-l:16px;
+  --sh-sm:0 1px 2px rgba(30,28,20,.05);
+  --sh-md:0 2px 10px rgba(30,28,20,.06);
+  --sh-lg:0 8px 32px rgba(30,28,20,.09);
+}
+* { box-sizing:border-box; margin:0; }
+body { font-family:var(--sans); background:var(--canvas); color:var(--text); font-size:13.5px; -webkit-font-smoothing:antialiased; }
+button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#d5d4cc; border-radius:8px; border:3px solid transparent; background-clip:content-box; }
+::-webkit-scrollbar-track { background:transparent; }
+
+/* ===== 原型工具条 ===== */
+.proto-bar { position:fixed; top:0; left:0; right:0; z-index:99; display:flex; align-items:center; gap:6px; padding:7px 14px; background:#26251f; }
+.proto-bar em { font:600 11px var(--mono); font-style:normal; color:#8fd4b6; margin-right:8px; }
+.proto-bar button { padding:4px 12px; border-radius:99px; color:#b8b7ac; font:500 11px var(--mono); }
+.proto-bar button:hover { background:#3a392f; }
+.proto-bar button.on { background:#0d8a63; color:#fff; }
+.proto-bar .role { margin-left:auto; display:flex; gap:4px; align-items:center; font-size:10px; color:#8b8a80; }
+.proto-bar .role button.on { background:#b0731c; }
+.screen { display:none; padding-top:33px; height:100vh; }
+.screen.on { display:block; }
+
+/* ===== 骨架 ===== */
+.app { display:grid; grid-template-columns:248px minmax(0,1fr); height:calc(100vh - 33px); }
+.side { background:var(--side); display:flex; flex-direction:column; }
+.brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; }
+.brand .mark { width:30px; height:30px; display:grid; place-items:center; border-radius:10px; background:var(--brand); color:var(--on-brand); font:700 12px var(--mono); box-shadow:var(--sh-sm); }
+.brand b { display:block; font-size:13.5px; font-weight:650; letter-spacing:-.01em; }
+.brand small { display:block; font-size:10px; color:var(--faint); margin-top:1px; }
+.newchat { margin:2px 12px 6px; display:flex; align-items:center; justify-content:center; gap:8px; padding:9px; border-radius:var(--r-m); background:var(--raised); font-size:13px; font-weight:550; box-shadow:var(--sh-sm); border:1px solid var(--border); }
+.newchat:hover { box-shadow:var(--sh-md); }
+.newchat span { color:var(--brand); font-weight:650; }
+.snav { padding:6px 12px; display:flex; flex-direction:column; gap:2px; }
+.zone-label { font-size:10.5px; font-weight:600; color:var(--faint); padding:12px 10px 5px; letter-spacing:.02em; }
+.snav > button { position:relative; display:flex; align-items:center; gap:9px; width:100%; padding:8px 10px; border-radius:10px; color:var(--secondary); font-size:13px; text-align:left; }
+.snav > button:hover { background:var(--side-hover); color:var(--text); }
+.snav > button.on { background:var(--raised); color:var(--text); font-weight:550; box-shadow:var(--sh-sm); }
+.badge-n { margin-left:auto; font:600 10px var(--sans); background:var(--brand); color:#fff; border-radius:99px; min-width:18px; height:18px; display:grid; place-items:center; padding:0 5px; }
+.recent { flex:1; overflow-y:auto; padding:4px 12px; }
+.recent .zone-label { padding-left:10px; }
+.recent .item { display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; }
+.recent .item:hover { background:var(--side-hover); }
+.recent .item.on { background:var(--raised); box-shadow:var(--sh-sm); }
+.recent p { font-size:12.5px; color:var(--secondary); line-height:1.5; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+.recent .item.on p { color:var(--text); font-weight:500; }
+.recent small { font-size:10px; color:var(--faint); }
+.admin-entry { margin:8px 12px 14px; padding:10px 12px; border-radius:var(--r-m); color:var(--secondary); font-size:12.5px; display:flex; align-items:center; gap:9px; border:1px dashed var(--border-strong); }
+.admin-entry:hover { background:var(--side-hover); color:var(--text); }
+
+.main { display:flex; flex-direction:column; min-width:0; background:var(--raised); }
+.topbar { display:flex; align-items:center; gap:8px; padding:10px 22px; border-bottom:1px solid var(--border); font-size:13px; }
+.topbar b { font-weight:600; }
+.topbar .crumb { color:var(--faint); font-size:12.5px; }
+.topbar .right { margin-left:auto; display:flex; align-items:center; gap:10px; font-size:11.5px; color:var(--faint); }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--brand); display:inline-block; margin-right:5px; vertical-align:0; }
+
+.tag { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:99px; font-size:11px; font-weight:550; }
+.tag.ok { color:var(--brand-deep); background:var(--brand-soft); }
+.tag.warn { color:var(--req); background:var(--req-soft); }
+
+.ref { display:inline-flex; align-items:center; gap:3px; padding:1px 7px; margin:0 2px; border-radius:99px; background:var(--code-soft); color:var(--code); font:600 10.5px var(--mono); cursor:pointer; vertical-align:1px; transition:.12s; }
+.ref:hover { transform:translateY(-1px); box-shadow:var(--sh-sm); }
+
+/* ===== 对话区 ===== */
+.chat-wrap { flex:1; overflow-y:auto; display:flex; flex-direction:column; scroll-behavior:smooth; }
+.chat-col { width:min(768px,100%); margin:0 auto; padding:36px 28px 16px; flex:1; }
+.welcome { text-align:center; padding-top:16vh; }
+.welcome .glyph { width:52px; height:52px; display:grid; place-items:center; border-radius:16px; background:linear-gradient(135deg,var(--brand),#27b184); color:#fff; margin:0 auto 22px; font:700 19px var(--mono); box-shadow:0 8px 24px rgba(13,138,99,.25); }
+.welcome h1 { font-size:26px; font-weight:650; letter-spacing:-.03em; margin-bottom:10px; }
+.welcome p { color:var(--secondary); font-size:14px; line-height:1.8; max-width:46ch; margin:0 auto; }
+.qchips { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:28px; }
+.qchips button { padding:10px 16px; border-radius:99px; border:1px solid var(--border-strong); font-size:13px; color:var(--secondary); background:var(--raised); transition:.15s; }
+.qchips button:hover { border-color:var(--brand); color:var(--brand-deep); box-shadow:var(--sh-md); transform:translateY(-1px); }
+
+.composer-stick { position:sticky; bottom:0; padding:8px 28px 20px; background:linear-gradient(to top,var(--raised) 55%,rgba(255,255,255,0)); }
+.composer { width:min(768px,100%); margin:0 auto; background:var(--raised); border:1px solid var(--border-strong); border-radius:24px; padding:13px 16px 11px; box-shadow:var(--sh-lg); }
+.composer:focus-within { border-color:#bfdfd2; outline:4px solid rgba(13,138,99,.07); }
+.composer textarea { width:100%; border:0; outline:0; resize:none; font:inherit; font-size:14px; min-height:24px; color:var(--text); }
+.composer textarea::placeholder { color:var(--faint); }
+.composer .row { display:flex; align-items:center; margin-top:9px; }
+.composer .hint { font-size:11px; color:var(--faint); }
+.send { margin-left:auto; width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:var(--brand); color:#fff; box-shadow:var(--sh-sm); transition:.15s; }
+.send:hover { background:var(--brand-deep); transform:scale(1.05); }
+
+.turn-q { display:flex; justify-content:flex-end; margin-bottom:26px; }
+.turn-q .bubble { background:var(--muted); border-radius:20px 20px 6px 20px; padding:11px 17px; max-width:78%; font-size:14px; line-height:1.7; }
+.turn-a { display:flex; flex-direction:column; }
+.a-head { display:flex; align-items:center; gap:8px; margin-bottom:16px; }
+.a-avatar { width:28px; height:28px; display:grid; place-items:center; border-radius:9px; background:linear-gradient(135deg,var(--brand),#27b184); color:#fff; font:700 11px var(--mono); box-shadow:var(--sh-sm); }
+.a-name { font-size:13px; font-weight:650; }
+.a-sub { font-size:11px; color:var(--faint); display:flex; gap:6px; align-items:center; }
+.mode-switch { margin-left:auto; display:inline-flex; background:var(--muted); border-radius:99px; padding:3px; }
+.mode-switch span { font-size:11.5px; font-weight:550; color:var(--faint); padding:5px 13px; border-radius:99px; cursor:pointer; transition:.15s; }
+.mode-switch span.on { background:var(--raised); color:var(--text); box-shadow:var(--sh-sm); }
+
+.doc { font-size:14px; }
+.doc .sec { padding:14px 0 18px; border-bottom:1px solid var(--border); }
+.doc .sec:last-child { border-bottom:0; }
+.doc h2 { font-size:11.5px; font-weight:650; color:var(--faint); letter-spacing:.06em; margin-bottom:10px; display:flex; align-items:center; gap:7px; }
+.doc h2::before { content:""; width:14px; height:2px; border-radius:2px; background:var(--border-strong); }
+.concl { font-size:15.5px; line-height:1.85; }
+.steps { display:flex; flex-direction:column; gap:0; }
+.step { display:grid; grid-template-columns:26px minmax(0,1fr); gap:12px; padding:9px 0; align-items:start; border-bottom:1px dashed var(--border); }
+.step:last-child { border-bottom:0; }
+.step n { width:24px; height:24px; display:grid; place-items:center; border-radius:8px; background:var(--brand-soft); color:var(--brand-deep); font:600 11.5px var(--mono); }
+.step p { line-height:1.75; padding-top:1px; }
+.factrow { padding:11px 0; border-bottom:1px dashed var(--border); }
+.factrow:last-child { border-bottom:0; }
+.factline { display:flex; gap:11px; align-items:flex-start; }
+.fdot { width:8px; height:8px; border-radius:50%; margin-top:7px; flex:none; background:var(--code); }
+.factline.biz .fdot { background:var(--brand); } .factline.req .fdot { background:var(--req); }
+.factline .ftxt { flex:1; line-height:1.75; }
+.factline .fmeta { font-size:11px; color:var(--faint); margin-top:3px; display:flex; gap:8px; align-items:center; }
+.inline-ev { margin-top:10px; border-radius:var(--r-m); background:var(--well); border:1px solid var(--border); overflow:hidden; }
+.inline-ev summary { list-style:none; display:flex; gap:9px; align-items:center; padding:9px 14px; font-size:11.5px; font-weight:550; color:var(--secondary); cursor:pointer; user-select:none; }
+.inline-ev summary::-webkit-details-marker { display:none; }
+.inline-ev summary::after { content:"展开原文"; margin-left:auto; font-size:11px; color:var(--brand-deep); font-weight:550; }
+.inline-ev[open] summary::after { content:"收起"; }
+.inline-ev summary::before { content:"▸"; color:var(--faint); font-size:10px; transition:.15s; }
+.inline-ev[open] summary::before { transform:rotate(90deg); }
+.inline-ev .ev-body { border-top:1px solid var(--border); padding:12px 15px; }
+.inline-ev pre { font:400 11.5px/1.8 var(--mono); color:var(--secondary); white-space:pre-wrap; }
+.inline-ev .hl { background:color-mix(in srgb,var(--brand) 16%,transparent); border-radius:3px; padding:0 2px; }
+.kpill { padding:2px 8px; border-radius:99px; font:600 10px var(--mono); }
+.kpill.code { background:var(--code-soft); color:var(--code); }
+.kpill.biz { background:var(--brand-soft); color:var(--brand-deep); }
+.kpill.req { background:var(--req-soft); color:var(--req); }
+.followups { display:flex; gap:9px; flex-wrap:wrap; margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
+.followups button { padding:8px 14px; border-radius:99px; border:1px solid var(--border-strong); font-size:12.5px; color:var(--secondary); transition:.15s; }
+.followups button:hover { border-color:var(--brand); color:var(--brand-deep); background:var(--brand-soft); }
+
+/* ===== 对照态 ===== */
+.stage-compare { flex:1; display:none; min-height:0; }
+.stage-compare.on { display:grid; grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr); }
+.chat-wrap.hidden { display:none; }
+.compare-left, .compare-right { overflow-y:auto; min-width:0; }
+.compare-left { border-right:1px solid var(--border); background:var(--canvas); }
+.cmp-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:12px; padding:11px 20px; background:rgba(247,247,244,.86); backdrop-filter:blur(10px); border-bottom:1px solid var(--border); font-size:11.5px; color:var(--faint); }
+.back-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 13px; border-radius:99px; background:var(--raised); font-size:12px; font-weight:550; color:var(--text); box-shadow:var(--sh-sm); border:1px solid var(--border); }
+.back-btn:hover { box-shadow:var(--sh-md); }
+.ev-group { padding:16px 20px; }
+.ev-group > h3 { font-size:11px; font-weight:650; color:var(--faint); letter-spacing:.05em; margin-bottom:10px; display:flex; align-items:center; gap:7px; }
+.ev-card { border-radius:var(--r-m); border:1px solid var(--border); background:var(--raised); margin-bottom:10px; overflow:hidden; box-shadow:var(--sh-sm); }
+.ev-card header { display:flex; gap:9px; align-items:center; padding:11px 15px; }
+.ev-card header b { font:600 12px var(--mono); }
+.ev-card header small { font-size:10.5px; color:var(--faint); margin-left:auto; }
+.ev-card pre { font:400 11.5px/1.8 var(--mono); color:var(--secondary); padding:2px 16px 14px; white-space:pre-wrap; }
+.ev-card .hl { background:color-mix(in srgb,var(--brand) 16%,transparent); border-radius:3px; padding:0 2px; }
+
+.btn { padding:9px 16px; border-radius:99px; font-size:13px; font-weight:550; border:1px solid var(--border-strong); color:var(--secondary); transition:.15s; }
+.btn:hover { color:var(--text); box-shadow:var(--sh-sm); }
+.btn.pri { background:var(--brand); border-color:var(--brand); color:#fff; }
+.btn.pri:hover { background:var(--brand-deep); }
+.btn.danger { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 35%,var(--border)); }
+.btn.danger:hover { background:var(--danger-soft); }
+
+.gov-layout { flex:1; display:grid; grid-template-columns:minmax(330px,.8fr) minmax(0,1.2fr); min-height:0; }
+.gov-list { border-right:1px solid var(--border); background:var(--canvas); overflow-y:auto; }
+.gov-list .lh { padding:16px 20px 10px; font-size:11px; font-weight:650; color:var(--faint); letter-spacing:.05em; }
+.gitem { display:flex; gap:12px; width:100%; text-align:left; padding:13px 20px; align-items:flex-start; border-bottom:1px solid var(--border); }
+.gitem:hover { background:var(--side); }
+.gitem.on { background:var(--raised); box-shadow:inset 3px 0 0 var(--brand); }
+.gico { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; font-weight:700; font-size:13px; background:var(--req-soft); color:var(--req); }
+.gitem b { font-size:13px; font-weight:600; display:block; }
+.gitem small { display:block; color:var(--secondary); font-size:11.5px; margin-top:3px; line-height:1.5; }
+.gitem .tm { font-size:10.5px; color:var(--faint); margin-top:5px; display:block; }
+.gov-detail { overflow-y:auto; padding:26px 30px; }
+.gov-detail header { padding-bottom:18px; border-bottom:1px solid var(--border); margin-bottom:18px; }
+.gov-detail small.id { font:600 11px var(--mono); color:var(--faint); }
+.gov-detail h2 { font-size:18px; font-weight:650; letter-spacing:-.01em; margin:7px 0 6px; }
+.gov-detail header p { color:var(--secondary); font-size:13px; line-height:1.7; }
+.diff { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.diff .card { border-radius:var(--r-m); border:1px solid var(--border); background:var(--well); padding:14px 16px; }
+.diff .card.before { border-top:3px solid var(--danger); }
+.diff .card.after { border-top:3px solid var(--brand); }
+.diff .card span { font-size:11px; font-weight:650; color:var(--faint); }
+.diff .card p { font:400 12px/1.85 var(--mono); margin-top:8px; white-space:pre-wrap; color:var(--secondary); }
+.evid { display:flex; flex-direction:column; gap:8px; }
+.evid article { border-radius:var(--r-m); border:1px solid var(--border); background:var(--well); padding:11px 14px; display:flex; gap:11px; align-items:flex-start; }
+.evid article .kpill { flex:none; margin-top:2px; }
+.evid article div b { font:600 11.5px var(--mono); display:block; margin-bottom:3px; }
+.evid article div p { font-size:12px; color:var(--secondary); line-height:1.65; }
+.review-bar { margin-top:22px; padding-top:18px; border-top:1px solid var(--border); display:flex; gap:9px; }
+.review-bar input { flex:1; border:1px solid var(--border-strong); border-radius:99px; padding:10px 18px; font:inherit; font-size:13px; background:var(--well); }
+.review-bar input:focus { outline:0; border-color:var(--brand); box-shadow:0 0 0 4px rgba(13,138,99,.08); }
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <em>V4 · ChatGPT/Kimi 质感</em>
+  <button class="on" data-s="home">① 首页</button>
+  <button data-s="read">② 阅读·内联证据</button>
+  <button data-s="compare">③ 对照·分屏核验</button>
+  <button data-s="gov">④ 管理员·治理</button>
+  <div class="role">视角：
+    <button id="ru" class="on">普通用户</button>
+    <button id="ra">管理员</button>
+  </div>
+</div>
+
+<!-- ========== ① 首页 ========== -->
+<div class="screen on" id="s-home">
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><br><small>证据优先的业务知识库</small></span></div>
+    <button class="newchat" onclick="go('read')"><span>＋</span> 开始新分析</button>
+    <nav class="snav">
+      <button class="on">💬 问答</button>
+      <button>📚 浏览知识库</button>
+      <div class="admin-only">
+        <div class="zone-label">管理</div>
+        <button onclick="go('gov')">◉ 知识治理 <span class="badge-n">3</span></button>
+        <button>⇪ 需求导入</button>
+      </div>
+    </nav>
+    <div class="recent">
+      <div class="zone-label">最近分析</div>
+      <button class="item"><p>提款为什么校验 repayType？</p><small>昨天</small></button>
+      <button class="item"><p>申请和提款阶段的关系</p><small>周一</small></button>
+      <button class="item"><p>结算任务的触发时机</p><small>上周五</small></button>
+    </div>
+    <button class="admin-entry admin-gate">🔑 管理员入口</button>
+  </aside>
+  <div class="main">
+    <header class="topbar"><b>贷款生命周期验证项目</b><div class="right"><span><span class="dot"></span>知识源已连接</span><span>1,284 facts</span></div></header>
+    <div class="chat-wrap">
+      <div class="chat-col">
+        <div class="welcome">
+          <div class="glyph">{}</div>
+          <h1>今天想弄清楚什么？</h1>
+          <p>我会同时检索代码事实、已发布的业务知识和需求原文来回答。<br>每个结论都带证据编号，没有证据的部分会明确告诉你。</p>
+          <div class="qchips">
+            <button onclick="go('read')">提款为什么校验 repayType？</button>
+            <button>结算任务什么时候触发？</button>
+            <button>申请和提款的字段怎么流转？</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer-stick">
+        <div class="composer">
+          <textarea placeholder="输入业务问题…" rows="1"></textarea>
+          <div class="row"><span class="hint">Enter 发送 · Shift+Enter 换行</span><button class="send">↑</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ========== ② 阅读·内联证据 ========== -->
+<div class="screen" id="s-read">
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><br><small>证据优先的业务知识库</small></span></div>
+    <button class="newchat" onclick="go('home')"><span>＋</span> 开始新分析</button>
+    <nav class="snav">
+      <button class="on">💬 问答</button>
+      <button>📚 浏览知识库</button>
+      <div class="admin-only">
+        <div class="zone-label">管理</div>
+        <button onclick="go('gov')">◉ 知识治理 <span class="badge-n">3</span></button>
+        <button>⇪ 需求导入</button>
+      </div>
+    </nav>
+    <div class="recent">
+      <div class="zone-label">最近分析</div>
+      <button class="item on"><p>repayType 在哪里生成、读取和校验？</p><small>刚刚</small></button>
+      <button class="item"><p>提款为什么校验 repayType？</p><small>昨天</small></button>
+      <button class="item"><p>申请和提款阶段的关系</p><small>周一</small></button>
+    </div>
+    <button class="admin-entry admin-gate">🔑 管理员入口</button>
+  </aside>
+  <div class="main">
+    <header class="topbar"><span class="crumb">问答</span><b>/ repayType 数据流转</b><div class="right"><span class="tag ok">✓ 证据充分</span><span>3 轮 · 2.4s</span></div></header>
+    <div class="chat-wrap" id="cw-read">
+      <div class="chat-col">
+        <div class="turn-q"><span class="bubble">repayType 字段在哪里生成、读取和校验？</span></div>
+        <div class="turn-a">
+          <div class="a-head">
+            <span class="a-avatar">{}</span>
+            <div><div class="a-name">Code Atlas</div><div class="a-sub">数据流转 · 模型归纳 · 引用 6 条证据</div></div>
+            <div class="mode-switch"><span class="on">📖 阅读</span><span onclick="go('compare')">⚖️ 对照</span></div>
+          </div>
+          <div class="doc">
+            <div class="sec">
+              <h2>结论</h2>
+              <p class="concl">repayType 在申请创建时写入默认值 <b>"01"</b> <a class="ref">EV-201</a>；提款前由 WithdrawalService 校验白名单 {01, 02} <a class="ref">EV-118</a>；取值约束来自需求 REQ-VAL-001 §3.2 <a class="ref">EV-042</a>。</p>
+            </div>
+            <div class="sec">
+              <h2>业务流程</h2>
+              <div class="steps">
+                <div class="step"><n>1</n><p>ApplicationService.create() 组装申请单并写入 repayType <a class="ref">EV-201</a></p></div>
+                <div class="step"><n>2</n><p>WithdrawalService.withdraw() 前置校验 repayType ∈ {01, 02} <a class="ref">EV-118</a></p></div>
+                <div class="step"><n>3</n><p>SettlementJob 日终按 repayType 分桶计息 <a class="ref">EV-077</a></p></div>
+              </div>
+            </div>
+            <div class="sec">
+              <h2>已确认事实</h2>
+              <div class="factrow">
+                <div class="factline"><span class="fdot"></span><div><div class="ftxt">WithdrawApply.repayType 由前端传入，缺省 "01"，落表 t_withdraw_apply.repay_type</div><div class="fmeta"><span class="kpill code">CODE</span><span>EV-201</span></div></div></div>
+                <details class="inline-ev" open>
+                  <summary><span class="kpill code">源码</span>ApplicationMapper.xml : 34</summary>
+                  <div class="ev-body">
+<pre>&lt;insert id="createApply"&gt;
+  INSERT INTO t_withdraw_apply (apply_no, repay_type, amount)
+  VALUES (#{applyNo}, <span class="hl">#{repayType}</span>, #{amount})
+&lt;/insert&gt;</pre>
+                  </div>
+                </details>
+              </div>
+              <div class="factrow">
+                <div class="factline biz"><span class="fdot"></span><div><div class="ftxt">只有 01（等额本息）和 02（先息后本）允许进入提款，其余拒绝并返回 R-301</div><div class="fmeta"><span class="kpill biz">业务知识</span><span>EV-118 · 提款方式校验 V2</span></div></div></div>
+              </div>
+              <div class="factrow">
+                <div class="factline req"><span class="fdot"></span><div><div class="ftxt">还款方式在提款环节不可变更，系统应校验为受支持类别</div><div class="fmeta"><span class="kpill req">需求</span><span>REQ-VAL-001 §3.2 · EV-042</span></div></div></div>
+                <details class="inline-ev">
+                  <summary><span class="kpill req">需求原文</span>REQ-VAL-001.md · §3.2</summary>
+                  <div class="ev-body">
+<pre>3.2 还款方式约束
+借款申请提交后，还款方式在<span class="hl">提款环节不可变更</span>。
+系统应校验还款方式为受支持的类别。</pre>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+          <div class="followups">
+            <button>R-301 的错误码链路 ›</button>
+            <button>SettlementJob 的分桶逻辑 ›</button>
+            <button>👍 👎 复制</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer-stick">
+        <div class="composer">
+          <textarea placeholder="继续追问…" rows="1"></textarea>
+          <div class="row"><span class="hint">Enter 发送</span><button class="send">↑</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 对照态 -->
+    <div class="stage-compare" id="cmp-read">
+      <div class="compare-left">
+        <div class="cmp-head"><button class="back-btn" onclick="go('read')">← 返回阅读</button><span>回答 · 点右侧分组核对引用</span></div>
+        <div class="chat-col" style="padding-top:24px">
+          <div class="turn-q"><span class="bubble">repayType 字段在哪里生成、读取和校验？</span></div>
+          <div class="turn-a">
+            <div class="a-head">
+              <span class="a-avatar">{}</span>
+              <div><div class="a-name">Code Atlas</div></div>
+              <div class="mode-switch"><span onclick="go('read')">📖 阅读</span><span class="on">⚖️ 对照</span></div>
+            </div>
+            <div class="doc">
+              <div class="sec">
+                <h2>结论</h2>
+                <p class="concl">写入默认值 "01" <a class="ref" style="background:var(--code);color:#fff">EV-201</a> → 白名单校验 {01,02} <a class="ref">EV-118</a> → 约束 REQ-VAL-001 §3.2 <a class="ref">EV-042</a>。</p>
+              </div>
+              <div class="sec" style="border-bottom:0">
+                <h2>业务流程</h2>
+                <div class="steps">
+                  <div class="step"><n>1</n><p>写入默认值 <a class="ref" style="background:var(--code);color:#fff">EV-201</a></p></div>
+                  <div class="step"><n>2</n><p>前置白名单校验 <a class="ref">EV-118</a></p></div>
+                  <div class="step"><n>3</n><p>日终分桶计息 <a class="ref">EV-077</a></p></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="compare-right">
+        <div class="cmp-head"><span>EVIDENCE</span><span style="margin-left:auto">CODE 3 · BUSINESS 1 · REQUIREMENT 1</span></div>
+        <div class="ev-group">
+          <h3><span class="kpill code">CODE</span> 代码证据</h3>
+          <div class="ev-card">
+            <header><span class="kpill code">EV-201</span><b>createApply</b><small>ApplicationMapper.xml : 34</small></header>
+<pre>&lt;insert id="createApply"&gt;
+  INSERT INTO t_withdraw_apply
+  VALUES (#{applyNo}, <span class="hl">#{repayType}</span>, #{amount})
+&lt;/insert&gt;</pre>
+          </div>
+          <div class="ev-card">
+            <header><span class="kpill code">EV-118</span><b>checkRepayType</b><small>WithdrawalService : 52</small></header>
+<pre>if (!<span class="hl">ALLOWED.contains(repayType)</span>) {
+  throw new BizException("R-301");
+}
+// ALLOWED = {"01", "02"}</pre>
+          </div>
+          <div class="ev-card">
+            <header><span class="kpill code">EV-077</span><b>SettlementJob.settle</b><small>job : 88</small></header>
+<pre>map.computeIfAbsent(<span class="hl">apply.getRepayType()</span>,
+  k -&gt; new ArrayList&lt;&gt;());</pre>
+          </div>
+        </div>
+        <div class="ev-group">
+          <h3><span class="kpill biz">BUSINESS</span> 业务知识</h3>
+          <div class="ev-card">
+            <header><span class="kpill biz">EV-118B</span><b>提款方式校验 · 规则 R-2</b><small>V2 已发布</small></header>
+<pre>仅允许 01 与 02 进入提款流程，
+其余拒绝（错误码 R-301）。</pre>
+          </div>
+        </div>
+        <div class="ev-group">
+          <h3><span class="kpill req">REQUIREMENT</span> 需求依据</h3>
+          <div class="ev-card">
+            <header><span class="kpill req">EV-042</span><b>REQ-VAL-001.md §3.2</b><small>V1 · chunk 12</small></header>
+<pre>3.2 还款方式约束
+还款方式在<span class="hl">提款环节不可变更</span>。</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ========== ④ 管理员·治理 ========== -->
+<div class="screen" id="s-gov">
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><br><small>证据优先的业务知识库</small></span></div>
+    <button class="newchat" onclick="go('home')"><span>＋</span> 开始新分析</button>
+    <nav class="snav">
+      <button>💬 问答</button>
+      <button>📚 浏览知识库</button>
+      <div class="admin-only">
+        <div class="zone-label">管理</div>
+        <button class="on" onclick="go('gov')">◉ 知识治理 <span class="badge-n">3</span></button>
+        <button>⇪ 需求导入</button>
+      </div>
+    </nav>
+    <div class="recent">
+      <div class="zone-label">待处理</div>
+      <button class="item on"><p>还款方式新增 03 类别</p><small>需求变更 · 2 小时前</small></button>
+      <button class="item"><p>SettlementJob 口径调整</p><small>代码变化 · 昨天</small></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar"><span class="crumb">治理</span><b>/ 待审核提案</b><div class="right"><span class="tag warn">管理员会话</span><span>3 条待审</span></div></header>
+    <div class="gov-layout">
+      <div class="gov-list">
+        <div class="lh">待处理 · 3</div>
+        <button class="gitem on">
+          <span class="gico">!</span>
+          <span><b>还款方式新增 03 类别</b><small>REQ-VAL-002 变更 · 影响「申请还款方式确定」</small><span class="tm">需求 · 2 小时前</span></span>
+        </button>
+        <button class="gitem">
+          <span class="gico">!</span>
+          <span><b>SettlementJob 计息口径调整</b><small>v1.2-batch-scope 变更 · 影响「日终结算」</small><span class="tm">代码变化 · 昨天</span></span>
+        </button>
+      </div>
+      <div class="gov-detail">
+        <header>
+          <small class="id">KUP-0042 · 基于 申请还款方式确定 V3</small>
+          <h2>还款方式新增 03 类别（先息后息）</h2>
+          <p>需求将枚举从 {01, 02} 扩展为 {01, 02, 03}，影响申请写入与提款校验两处规则。</p>
+        </header>
+        <h3 style="font-size:11px;font-weight:650;color:var(--faint);letter-spacing:.05em;margin-bottom:10px">知识差异</h3>
+        <div class="diff">
+          <div class="card before"><span>当前已发布 V3</span><p>仅允许：
+· 01 等额本息
+· 02 先息后本
+
+其余拒绝（R-301）</p></div>
+          <div class="card after"><span>建议更新为 V4</span><p>允许：
+· 01 等额本息
+· 02 先息后本
+· 03 先息后息（新增）
+
+白名单同步扩展</p></div>
+        </div>
+        <h3 style="font-size:11px;font-weight:650;color:var(--faint);letter-spacing:.05em;margin:18px 0 10px">来源证据</h3>
+        <div class="evid">
+          <article><span class="kpill req">需求</span><div><b>REQ-VAL-002.md §2.1</b><p>"新增 03 先息后息类别，适用于存量客户续签。"</p></div></article>
+          <article><span class="kpill code">代码</span><div><b>checkRepayType · WithdrawalService:52</b><p>当前硬编码 {"01","02"}，与需求变更冲突。</p></div></article>
+        </div>
+        <div class="review-bar">
+          <input placeholder="审核说明（可选）…">
+          <button class="btn">暂缓</button>
+          <button class="btn danger">驳回</button>
+          <button class="btn pri">✓ 接受并发布 V4</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function go(name) {
+  document.querySelectorAll('.proto-bar [data-s]').forEach(b => b.classList.toggle('on', b.dataset.s === name));
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+  document.getElementById('s-' + name).classList.add('on');
+}
+document.querySelectorAll('.proto-bar [data-s]').forEach(b => b.onclick = () => go(b.dataset.s));
+const ru = document.getElementById('ru'), ra = document.getElementById('ra');
+ru.onclick = () => { document.querySelectorAll('.admin-only,.admin-gate').forEach(el => el.style.display = 'none'); ru.classList.add('on'); ra.classList.remove('on'); };
+ra.onclick = () => { document.querySelectorAll('.admin-only').forEach(el => el.style.display = ''); document.querySelectorAll('.admin-gate').forEach(el => el.style.display = 'none'); ra.classList.add('on'); ru.classList.remove('on'); };
+ru.onclick();
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '1') go('home'); if (e.key === '2') go('read');
+  if (e.key === '3') go('gov'); if (e.key === '`' || e.key === 'c') go('compare');
+});
+</script>
+</body>
+</html>

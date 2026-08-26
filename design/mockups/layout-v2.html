@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Atlas · 布局重构原型</title>
+<style>
+/* ============ 原型令牌（与 design-tokens.css 同源） ============ */
+:root {
+  --canvas:#f2f4f3; --surface:#fafbfa; --raised:#ffffff;
+  --muted:#e8ebe9; --well:#f6f8f7;
+  --border:#d6dbd8; --border-strong:#b9c2bd;
+  --text:#171d1a; --secondary:#55605a; --faint:#79857f;
+  --chrome:#101512; --chrome-hover:#1b2320; --chrome-border:#232d28;
+  --chrome-text:#93a09a; --chrome-active:#ecf3ee;
+  --brand:#1f7551; --brand-strong:#14563c; --brand-soft:#e2f0e8; --on-brand:#f7fffa;
+  --code:#38678c; --code-soft:#e7eff5;
+  --req:#8f5f14; --req-soft:#f9efd9;
+  --danger:#a03a3a; --danger-soft:#fbe9e7;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:"SFMono-Regular","Cascadia Code","JetBrains Mono",Consolas,monospace;
+  --r-s:3px; --r-m:5px;
+}
+* { box-sizing:border-box; margin:0; }
+body { font-family:var(--sans); background:var(--canvas); color:var(--text); font-size:13px; }
+button { font:inherit; color:inherit; cursor:pointer; background:none; border:0; }
+
+/* ============ 原型切换器（非产品 UI） ============ */
+.proto-bar {
+  position:fixed; top:0; left:0; right:0; z-index:99;
+  display:flex; align-items:center; gap:6px;
+  padding:7px 14px;
+  background:#0c100e; color:#93a09a;
+  font:500 11px var(--mono);
+  border-bottom:1px solid var(--chrome-border);
+}
+.proto-bar em { font-style:normal; color:#58bd8b; margin-right:6px; letter-spacing:.08em; }
+.proto-bar button {
+  padding:4px 12px; border-radius:var(--r-s);
+  border:1px solid var(--chrome-border); color:var(--chrome-text); font:500 11px var(--mono);
+}
+.proto-bar button.on { background:#17301f; border-color:#2c5b41; color:#ecf3ee; }
+.proto-bar .tip { margin-left:auto; font-size:10px; color:#5d6a63; }
+.screen { display:none; padding-top:34px; height:100vh; }
+.screen.on { display:block; }
+
+/* ============ 应用骨架 ============ */
+.app { display:grid; grid-template-columns:216px minmax(0,1fr); height:calc(100vh - 34px); }
+.rail { background:var(--chrome); color:var(--chrome-text); display:flex; flex-direction:column; border-right:1px solid var(--chrome-border); }
+.brand { display:flex; align-items:center; gap:10px; padding:16px 16px 18px; color:var(--chrome-active); }
+.brand .mark { width:26px; height:26px; display:grid; place-items:center; border-radius:var(--r-s); background:var(--brand); color:var(--on-brand); font:700 11px var(--mono); }
+.brand b { font-size:12.5px; font-weight:650; display:block; }
+.brand small { font:400 9px var(--mono); letter-spacing:.09em; color:var(--chrome-text); }
+.mode-nav { padding:0 8px; display:grid; gap:2px; }
+.mode-nav .zone { font:500 9px var(--mono); letter-spacing:.14em; color:#5d6a63; padding:10px 10px 5px; }
+.mode-nav button { position:relative; display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border-radius:var(--r-s); color:var(--chrome-text); font-size:12.5px; text-align:left; }
+.mode-nav button:hover { background:var(--chrome-hover); color:var(--chrome-active); }
+.mode-nav button.on { color:var(--chrome-active); font-weight:600; }
+.mode-nav button.on::before { content:""; position:absolute; left:-8px; top:7px; bottom:7px; width:2px; background:var(--brand); }
+.mode-nav svg { flex:none; }
+.mode-nav .kbd { margin-left:auto; font:400 9px var(--mono); color:#4a554f; border:1px solid var(--chrome-border); border-radius:3px; padding:1px 5px; }
+.recent { margin-top:auto; border-top:1px solid var(--chrome-border); padding:10px 8px 12px; overflow-y:auto; }
+.recent .zone { font:500 9px var(--mono); letter-spacing:.14em; color:#5d6a63; padding:2px 10px 8px; display:flex; justify-content:space-between; }
+.recent .zone span:last-child { color:#4a554f; }
+.recent button { display:grid; grid-template-columns:7px minmax(0,1fr); gap:9px; width:100%; padding:7px 10px; border-radius:var(--r-s); text-align:left; align-items:start; }
+.recent button:hover { background:var(--chrome-hover); }
+.recent i { width:5px; height:5px; border-radius:1px; margin-top:5px; background:#4a554f; }
+.recent i.ok { background:var(--brand); } .recent i.warn { background:#dfae60; } .recent i.bad { background:#e78682; }
+.recent p { font-size:11.5px; line-height:1.45; color:#b8c2bb; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.recent small { font:400 9px var(--mono); color:#5d6a63; }
+
+.main { display:grid; grid-template-rows:46px minmax(0,1fr); min-width:0; }
+.topbar { display:flex; align-items:center; gap:10px; padding:0 20px; background:var(--raised); border-bottom:1px solid var(--border); }
+.topbar .crumb { font:500 11px var(--mono); color:var(--faint); letter-spacing:.04em; }
+.topbar .slash { color:var(--border-strong); }
+.topbar b { font-size:12.5px; font-weight:600; }
+.topbar .right { margin-left:auto; display:flex; align-items:center; gap:14px; font:400 10.5px var(--mono); color:var(--faint); }
+.dot { width:6px; height:6px; border-radius:50%; background:var(--brand); display:inline-block; }
+.lock { display:inline-flex; align-items:center; gap:5px; color:var(--req); }
+
+.stage { min-height:0; position:relative; display:grid; grid-template-columns:minmax(0,1fr); }
+.stage.with-inspector { grid-template-columns:minmax(0,1fr) 372px; }
+.inspector { border-left:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; min-height:0; }
+.inspector .insp-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+.inspector .insp-head h3 { font-size:12.5px; font-weight:600; }
+.inspector .insp-head small { display:block; font:400 9px var(--mono); color:var(--faint); margin-top:2px; letter-spacing:.06em; }
+.inspector .insp-body { overflow-y:auto; padding:14px 16px; }
+
+/* ---- 标签/徽章 ---- */
+.tag { display:inline-flex; align-items:center; padding:2px 7px; border-radius:var(--r-s); font:500 10px var(--mono); letter-spacing:.05em; border:1px solid color-mix(in srgb,currentColor 30%,transparent); }
+.tag.ok { color:var(--brand-strong); background:var(--brand-soft); }
+.tag.warn { color:var(--req); background:var(--req-soft); }
+.tag.bad { color:var(--danger); background:var(--danger-soft); }
+.ref { display:inline-block; padding:0 5px; margin:0 1px; border-radius:3px; border:1px solid color-mix(in srgb,var(--code) 40%,transparent); background:var(--code-soft); color:var(--code); font:500 10px var(--mono); cursor:pointer; vertical-align:1px; }
+.ref:hover, .ref.on { background:var(--code); color:#fff; }
+
+/* ================= 屏幕A：问 · 空态 ================= */
+.ask-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:40px; }
+.ask-empty .glyph { width:38px; height:38px; display:grid; place-items:center; border-radius:var(--r-m); background:var(--text); color:var(--brand); margin-bottom:18px; font:700 15px var(--mono); }
+.ask-empty h1 { font-size:21px; font-weight:650; letter-spacing:-.03em; margin-bottom:9px; }
+.ask-empty > p { color:var(--secondary); font-size:12.5px; line-height:1.7; max-width:52ch; text-align:center; }
+.composer { width:min(680px,100%); margin-top:26px; background:var(--raised); border:1px solid var(--border-strong); border-radius:var(--r-m); padding:11px 12px; box-shadow:0 10px 28px rgba(16,21,18,.07); }
+.composer:focus-within { border-color:var(--brand); outline:3px solid color-mix(in srgb,var(--brand) 15%,transparent); }
+.composer textarea { width:100%; border:0; outline:0; resize:none; font:inherit; color:var(--text); min-height:40px; }
+.composer textarea::placeholder { color:var(--faint); }
+.composer .row { display:flex; align-items:center; margin-top:6px; }
+.composer .hint { font:400 10px var(--mono); color:var(--faint); }
+.composer .send { margin-left:auto; width:30px; height:30px; display:grid; place-items:center; border-radius:var(--r-s); background:var(--brand); color:var(--on-brand); }
+.qchips { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; justify-content:center; }
+.qchips button { border:1px solid var(--border); border-radius:var(--r-s); padding:6px 11px; font-size:11.5px; color:var(--secondary); }
+.qchips button::before { content:"› "; color:var(--brand); font-family:var(--mono); }
+.qchips button:hover { border-color:var(--brand); color:var(--text); }
+
+/* ================= 屏幕B：问 · 有答案 ================= */
+.answer-scroll { overflow-y:auto; min-height:0; }
+.answer-col { width:min(720px,100%); margin:0 auto; padding:30px 32px 120px; }
+.turn-q { display:flex; flex-direction:column; align-items:flex-end; margin-bottom:20px; }
+.turn-q .who, .turn-a .who { font:500 9px var(--mono); letter-spacing:.12em; color:var(--faint); margin-bottom:6px; }
+.turn-q .bubble { background:var(--muted); border-radius:var(--r-m); padding:9px 13px; max-width:76%; line-height:1.65; }
+.turn-a { display:grid; grid-template-columns:24px minmax(0,1fr); gap:11px; }
+.avatar { width:24px; height:24px; display:grid; place-items:center; border-radius:var(--r-s); background:var(--text); color:var(--brand); font:700 10px var(--mono); }
+.meta { display:flex; gap:12px; align-items:center; font:400 10px var(--mono); color:var(--secondary); padding-bottom:12px; border-bottom:1px solid var(--border); margin-bottom:4px; }
+.doc section { display:grid; grid-template-columns:88px minmax(0,1fr); gap:22px; padding:17px 0; border-bottom:1px solid var(--border); }
+.doc h2 { font:500 10px var(--mono); letter-spacing:.12em; color:var(--faint); padding-top:3px; }
+.doc h2 i { font-style:normal; color:color-mix(in srgb,var(--faint) 65%,transparent); }
+.doc .concl { font-size:14px; line-height:1.85; font-weight:550; }
+.steps { display:grid; gap:0; }
+.step { display:grid; grid-template-columns:22px minmax(0,1fr); gap:9px; padding:7px 0; border-bottom:1px dashed var(--border); }
+.step:last-child { border-bottom:0; }
+.step n { width:19px; height:19px; display:grid; place-items:center; border:1px solid var(--border-strong); border-radius:var(--r-s); font:500 10px var(--mono); color:var(--secondary); }
+.fact { display:grid; grid-template-columns:2px minmax(0,1fr); gap:10px; padding:6px 0; }
+.fact i { background:var(--blue); border-radius:1px; }
+.fact.biz i { background:var(--brand); } .fact.req i { background:var(--req); }
+.fact p { font-size:12.5px; line-height:1.68; }
+.fact small { display:block; font:400 9px var(--mono); color:var(--faint); margin-top:3px; }
+.followups { border-top:1px solid var(--border); margin-top:14px; padding-top:13px; display:flex; gap:7px; flex-wrap:wrap; }
+.followups span { font:500 9px var(--mono); letter-spacing:.1em; color:var(--faint); align-self:center; }
+.followups button { border:1px solid var(--border); border-radius:var(--r-s); padding:6px 10px; font-size:11.5px; color:var(--secondary); display:inline-flex; gap:6px; align-items:center; }
+.followups button:hover { border-color:var(--brand); color:var(--text); }
+
+/* ================= 屏幕C：查 ================= */
+.explore { display:grid; grid-template-rows:auto minmax(0,1fr); height:100%; }
+.explore-head { padding:18px 26px 0; }
+.explore-head h1 { font-size:19px; font-weight:650; letter-spacing:-.02em; margin-bottom:4px; }
+.explore-head > p { color:var(--secondary); font-size:12px; margin-bottom:14px; }
+.gsearch { display:flex; align-items:center; gap:9px; background:var(--raised); border:1px solid var(--border-strong); border-radius:var(--r-m); padding:0 6px 0 13px; height:42px; max-width:720px; }
+.gsearch svg { color:var(--faint); }
+.gsearch input { flex:1; border:0; outline:0; font:inherit; background:none; }
+.gsearch kbd { font:400 10px var(--mono); color:var(--faint); border:1px solid var(--border); border-radius:3px; padding:2px 6px; }
+.type-tabs { display:flex; gap:2px; margin-top:14px; border-bottom:1px solid var(--border); }
+.type-tabs button { padding:8px 14px 9px; font:500 12px var(--sans); color:var(--secondary); border-bottom:2px solid transparent; margin-bottom:-1px; display:inline-flex; gap:6px; align-items:center; }
+.type-tabs button i { font:400 10px var(--mono); color:var(--faint); font-style:normal; }
+.type-tabs button.on { color:var(--text); font-weight:600; border-color:var(--brand); }
+.explore-body { display:grid; grid-template-columns:minmax(360px,.9fr) minmax(0,1.1fr); gap:1px; background:var(--border); min-height:0; }
+.result-list { background:var(--surface); overflow-y:auto; }
+.rrow { width:100%; display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:11px; align-items:center; text-align:left; padding:11px 16px; border-bottom:1px solid var(--border); }
+.rrow:hover { background:var(--muted); }
+.rrow.on { background:var(--brand-soft); box-shadow:inset 2px 0 0 var(--brand); }
+.rico { width:26px; height:26px; display:grid; place-items:center; border-radius:var(--r-s); border:1px solid color-mix(in srgb,var(--code) 35%,transparent); background:var(--code-soft); color:var(--code); }
+.rico.biz { border-color:color-mix(in srgb,var(--brand) 35%,transparent); background:var(--brand-soft); color:var(--brand-strong); }
+.rrow b { display:block; font:500 11.5px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rrow small { font-size:10.5px; color:var(--secondary); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.detail-pane { background:var(--raised); overflow-y:auto; padding:22px 24px; }
+.detail-pane .path { font:400 10px var(--mono); color:var(--faint); display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.detail-pane h2 { font-size:16px; font-weight:650; letter-spacing:-.01em; margin-bottom:14px; display:flex; align-items:center; gap:10px; }
+.dsec { margin-top:16px; }
+.dsec h3 { font:500 10px var(--mono); letter-spacing:.12em; color:var(--faint); margin-bottom:8px; }
+.chips { display:flex; flex-wrap:wrap; gap:5px; }
+.chips span { border:1px solid var(--border); border-radius:var(--r-s); background:var(--well); padding:4px 8px; font:400 10.5px var(--mono); color:var(--secondary); }
+.src { background:var(--well); border:1px solid var(--border); border-radius:var(--r-s); padding:12px 14px; font:400 11px/1.75 var(--mono); color:var(--secondary); white-space:pre; overflow-x:auto; }
+.src .ln { color:var(--border-strong); user-select:none; margin-right:14px; }
+.src .hl { background:color-mix(in srgb,var(--brand) 14%,transparent); display:inline-block; width:100%; }
+.askfromhere { margin-top:18px; display:flex; gap:8px; }
+.btn { display:inline-flex; align-items:center; gap:7px; padding:7px 13px; border-radius:var(--r-s); font-size:12px; font-weight:600; border:1px solid var(--border-strong); color:var(--secondary); }
+.btn.pri { background:var(--brand); border-color:var(--brand); color:var(--on-brand); }
+.btn.pri:hover { background:var(--brand-strong); }
+.btn:not(.pri):hover { color:var(--text); border-color:var(--text); }
+
+/* ================= 屏幕D：治 ================= */
+.gov { display:grid; grid-template-columns:minmax(330px,.8fr) minmax(0,1.2fr); gap:1px; background:var(--border); height:100%; }
+.gov-list { background:var(--surface); overflow-y:auto; }
+.grow { width:100%; display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:11px; align-items:start; text-align:left; padding:12px 16px; border-bottom:1px solid var(--border); }
+.grow:hover, .grow.on { background:var(--muted); }
+.grow .rico.warn { border-color:color-mix(in srgb,var(--req) 40%,transparent); background:var(--req-soft); color:var(--req); }
+.grow b { display:block; font-size:12px; font-weight:600; }
+.grow small { display:block; color:var(--secondary); font-size:11px; margin-top:2px; }
+.grow .tm { font:400 9px var(--mono); color:var(--faint); margin-top:4px; display:block; }
+.gov-detail { background:var(--raised); overflow-y:auto; padding:22px 24px; }
+.gov-detail header { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:15px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+.gov-detail header small { font:400 10px var(--mono); color:var(--faint); }
+.gov-detail header h2 { font-size:15.5px; font-weight:650; margin:5px 0 4px; }
+.gov-detail header p { color:var(--secondary); font-size:12px; line-height:1.6; }
+.diff { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.diff .card { border:1px solid var(--border); border-top:2px solid var(--danger); border-radius:var(--r-s); background:var(--well); padding:11px 12px; }
+.diff .card.aft { border-top-color:var(--brand); }
+.diff .card span { font:500 9px var(--mono); letter-spacing:.1em; color:var(--faint); }
+.diff .card p { font:400 10.5px/1.7 var(--mono); margin-top:7px; white-space:pre-wrap; }
+.evid { display:grid; gap:6px; }
+.evid article { border:1px solid var(--border); border-radius:var(--r-s); background:var(--well); padding:8px 11px; display:grid; grid-template-columns:56px minmax(0,1fr); gap:2px 9px; align-items:baseline; }
+.evid article > span { font:500 9px var(--mono); color:var(--code); grid-row:1/span 2; }
+.evid article b { font:500 10px var(--mono); }
+.evid article p { font-size:10.5px; color:var(--secondary); line-height:1.5; }
+.review-bar { margin-top:20px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+.review-bar input { flex:1; border:1px solid var(--border); border-radius:var(--r-s); padding:8px 11px; font:inherit; font-size:12px; background:var(--well); }
+.review-bar input:focus { outline:0; border-color:var(--brand); }
+.btn.reject { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 45%,var(--border)); }
+.btn.reject:hover { background:var(--danger-soft); }
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <em>LAYOUT-V2 原型</em>
+  <button class="on" data-s="a">问·空态</button>
+  <button data-s="b">问·回答+检查器</button>
+  <button data-s="c">查·统一探索</button>
+  <button data-s="d">治·提案审核</button>
+  <span class="tip">静态原型 · 仅示意布局与密度，非最终像素</span>
+</div>
+
+<!-- ================= A 问·空态 ================= -->
+<div class="screen on" id="s-a">
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><small>EVIDENCE WORKSPACE</small></span></div>
+    <nav class="mode-nav">
+      <button class="on">▣ 问<span class="kbd">1</span></button>
+      <button>◈ 查<span class="kbd">2</span></button>
+      <div class="zone">管理</div>
+      <button>◉ 治理<span class="kbd">3</span></button>
+    </nav>
+    <div class="recent">
+      <div class="zone"><span>最近分析</span><span>＋</span></div>
+      <button><i class="ok"></i><span><p>提款为什么校验 repayType？</p><small>业务逻辑 · 昨天</small></span></button>
+      <button><i class="warn"></i><span><p>申请和提款阶段的关系</p><small>跨流程 · 周一</small></span></button>
+      <button><i class="bad"></i><span><p>结算批任务的扣款顺序</p><small>数据流转 · 周五</small></span></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="crumb">问</span><span class="slash">/</span><b>贷款生命周期验证项目</b>
+      <div class="right"><span><span class="dot"></span> 知识源已连接</span><span>1,284 facts</span></div>
+    </header>
+    <div class="stage">
+      <div class="ask-empty">
+        <div class="glyph">{}</div>
+        <h1>从证据开始分析</h1>
+        <p>每个问题同时检索代码事实、已发布业务知识和需求依据。结论必须引用证据编号，没有证据的部分会明确留空。</p>
+        <div class="composer">
+          <textarea placeholder="输入业务问题，Enter 发送…">repayType 在哪里被生成、读取和校验？</textarea>
+          <div class="row"><span class="hint">检索 CODE · BUSINESS · REQUIREMENT 三源　|　/ 聚焦　⇧⏎ 换行</span><button class="send">↑</button></div>
+        </div>
+        <div class="qchips">
+          <button>提款为什么要校验 repayType？</button>
+          <button>申请阶段和提款阶段是什么关系？</button>
+          <button>结算任务什么时候触发？</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================= B 问·回答+检查器 ================= -->
+<div class="screen" id="s-b">
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><small>EVIDENCE WORKSPACE</small></span></div>
+    <nav class="mode-nav">
+      <button class="on">▣ 问<span class="kbd">1</span></button>
+      <button>◈ 查<span class="kbd">2</span></button>
+      <div class="zone">管理</div>
+      <button>◉ 治理<span class="kbd">3</span></button>
+    </nav>
+    <div class="recent">
+      <div class="zone"><span>最近分析</span><span>＋</span></div>
+      <button><i class="ok"></i><span><p><b style="color:#ecf3ee">repayType 在哪里生成读取校验？</b></p><small>刚刚 · 数据流转</small></span></button>
+      <button><i class="ok"></i><span><p>提款为什么校验 repayType？</p><small>昨天</small></span></button>
+      <button><i class="warn"></i><span><p>申请和提款阶段的关系</p><small>周一</small></span></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="crumb">问</span><span class="slash">/</span><b>贷款生命周期验证项目</b>
+      <div class="right"><span class="tag ok">证据充分</span><span>3 轮扩展 · 2.4s</span></div>
+    </header>
+    <div class="stage with-inspector">
+      <div class="answer-scroll">
+        <div class="answer-col">
+          <div class="turn-q"><span class="who">YOU</span><span class="bubble">repayType 字段在哪里生成、读取和校验？</span></div>
+          <div class="turn-a">
+            <span class="avatar">{}</span>
+            <div>
+              <span class="who">CODE ATLAS · 数据流转 · 模型归纳</span>
+              <div class="doc meta" style="display:block;border:0;padding:0">
+                <section>
+                  <h2><i>01</i> 结论</h2>
+                  <p class="concl">repayType 由申请服务在创建申请时写入 <a class="ref on">EV-201</a>，提款前由 WithdrawalService 校验只允许 01/02 两类 <a class="ref">EV-118</a>，其取值范围来自需求 REQ-VAL-001 的规则约束 <a class="ref">EV-042</a>。</p>
+                </section>
+                <section>
+                  <h2><i>02</i> 业务流程</h2>
+                  <div class="steps">
+                    <div class="step"><n>1</n><p>ApplicationService.create() 组装申请单，写入 repayType 默认值 <a class="ref">EV-201</a></p></div>
+                    <div class="step"><n>2</n><p>WithdrawalService.withdraw() 前置校验 repayType ∈ {01,02} <a class="ref">EV-118</a></p></div>
+                    <div class="step"><n>3</n><p>SettlementJob 日终按 repayType 分桶计算利息 <a class="ref">EV-077</a></p></div>
+                  </div>
+                </section>
+                <section>
+                  <h2><i>03</i> 已确认事实</h2>
+                  <div class="fact"><i></i><div><p>WithdrawApply.repayType 由前端传入，缺省为 "01"，落表 t_withdraw_apply.repay_type</p><small>CODE · EV-201 EV-202</small></div></div>
+                  <div class="fact biz"><i></i><div><p>只有 01（等额本息）和 02（先息后本）允许进入提款，其余拒绝并提示 R-301</p><small>BUSINESS · EV-118</small></div></div>
+                  <div class="fact req"><i></i><div><p>REQ-VAL-001 §3.2：还款方式在提款环节不可变更</p><small>REQUIREMENT · EV-042</small></div></div>
+                </section>
+                <section style="border-bottom:0">
+                  <h2><i>04</i> 待确认</h2>
+                  <p style="font-size:11px;color:var(--faint)">✓ 无遗留缺口 —— 所有结论均有对应证据</p>
+                </section>
+              </div>
+              <div class="followups">
+                <span>继续追问</span>
+                <button>repayType 校验失败时的错误码链路 ›</button>
+                <button>SettlementJob 的分桶逻辑 ›</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="inspector">
+        <div class="insp-head">
+          <div><h3>EV-201</h3><small>CODE EVIDENCE · ApplicationMapper.xml:34</small></div>
+          <span class="tag ok">ACTIVE</span>
+        </div>
+        <div class="insp-body">
+          <pre class="src" style="white-space:pre-wrap"><span class="ln">34</span>&lt;insert id="createApply"&gt;
+<span class="ln">35</span>  INSERT INTO t_withdraw_apply
+<span class="ln">36</span>    (apply_no, repay_type, amount)
+<span class="ln">37</span>  VALUES
+<span class="ln">38</span>    (#{applyNo},
+<span class="ln">39</span><span class="hl">     #{repayType, jdbcType=VARCHAR},</span>
+<span class="ln">40</span>     #{amount})&lt;/insert&gt;</pre>
+          <div class="dsec">
+            <h3>关联事实关系</h3>
+            <div class="chips">
+              <span>WRITE t_withdraw_apply.repay_type</span>
+              <span>GENERATE default "01"</span>
+              <span>READ WithdrawalService.check</span>
+            </div>
+          </div>
+          <div class="askfromhere">
+            <button class="btn">◈ 在代码库中打开</button>
+            <button class="btn pri">▣ 就此追问</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================= C 查·统一探索 ================= -->
+<div class="screen" id="s-c">
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><small>EVIDENCE WORKSPACE</small></span></div>
+    <nav class="mode-nav">
+      <button>▣ 问<span class="kbd">1</span></button>
+      <button class="on">◈ 查<span class="kbd">2</span></button>
+      <div class="zone">管理</div>
+      <button>◉ 治理<span class="kbd">3</span></button>
+    </nav>
+    <div class="recent">
+      <div class="zone"><span>最近分析</span><span>＋</span></div>
+      <button><i class="ok"></i><span><p>repayType 在哪里生成读取校验？</p><small>昨天</small></span></button>
+      <button><i class="ok"></i><span><p>提款为什么校验 repayType？</p><small>周一</small></span></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="crumb">查</span><span class="slash">/</span><b>贷款生命周期验证项目</b>
+      <div class="right"><span><span class="dot"></span> 已索引 3 仓库</span><span>1,284 facts</span></div>
+    </header>
+    <div class="explore">
+      <div class="explore-head">
+        <h1>探索</h1>
+        <p>一个入口检索代码事实、已发布功能知识和需求依据。</p>
+        <div class="gsearch">
+          <svg width="15" height="15" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></svg>
+          <input value="repayType" placeholder="搜索字段、Symbol、功能、需求编号…"><kbd>/</kbd>
+        </div>
+        <div class="type-tabs">
+          <button>全部 <i>9</i></button>
+          <button class="on">Code Fact <i>5</i></button>
+          <button>功能知识 <i>2</i></button>
+          <button>需求 <i>2</i></button>
+        </div>
+      </div>
+      <div class="explore-body">
+        <div class="result-list">
+          <button class="rrow on"><span class="rico">J</span><span><b>WithdrawApply.repayType</b><small>FIELD · 3 条事实 · application-service</small></span><span class="tag ok">ACTIVE</span></button>
+          <button class="rrow"><span class="rico">M</span><span><b>ApplicationMapper.createApply</b><span><small>METHOD · 写入 repay_type · mapper xml:34</small></span></span></button>
+          <button class="rrow"><span class="rico">M</span><span><b>WithdrawalService.checkRepayType</b><small>METHOD · 校验 01/02 · withdrawal-service</small></span></button>
+          <button class="rrow"><span class="rico biz">知</span><span><b>申请还款方式确定</b><small>功能知识 · V3 · 12 条证据</small></span><span class="tag ok">PUBLISHED</span></button>
+          <button class="rrow"><span class="rico biz">知</span><span><b>提款方式校验</b><small>功能知识 · V2 · 8 条证据</small></span><span class="tag ok">PUBLISHED</span></button>
+        </div>
+        <div class="detail-pane">
+          <div class="path">application-service / LoanApplication.java : 41-58 <span class="tag ok">ACTIVE</span></div>
+          <h2>WithdrawApply.repayType</h2>
+          <div class="dsec" style="margin-top:0">
+            <h3>事实关系</h3>
+            <div class="chips">
+              <span>GENERATE default "01"</span><span>WRITE t_withdraw_apply.repay_type</span>
+              <span>READ WithdrawalService</span><span>READ SettlementJob 分桶</span><span>CHECK ∈{01,02}</span>
+            </div>
+          </div>
+          <div class="dsec">
+            <h3>源码</h3>
+<pre class="src"><span class="ln">41</span>public class LoanApplication {
+<span class="ln">42</span>  private String applyNo;
+<span class="ln">43</span>
+<span class="ln">44</span>  /** 还款方式 01 等额本息 02 先息后本 */
+<span class="ln">45</span><span class="hl">  private String repayType;</span>
+<span class="ln">46</span>
+<span class="ln">47</span>  private BigDecimal amount;
+<span class="ln">48</span>}</pre>
+          </div>
+          <div class="dsec">
+            <h3>出现在知识中</h3>
+            <div class="chips"><span>申请还款方式确定 · V3</span><span>提款方式校验 · V2</span></div>
+          </div>
+          <div class="askfromhere">
+            <button class="btn">◈ 追踪全部读写</button>
+            <button class="btn pri">▣ 追问这个字段</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================= D 治·提案审核 ================= -->
+<div class="screen" id="s-d">
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="mark">{}</span><span><b>Code Atlas</b><small>EVIDENCE WORKSPACE</small></span></div>
+    <nav class="mode-nav">
+      <button>▣ 问<span class="kbd">1</span></button>
+      <button>◈ 查<span class="kbd">2</span></button>
+      <div class="zone">管理</div>
+      <button class="on">◉ 治理<span class="kbd">3</span></button>
+    </nav>
+    <div class="recent">
+      <div class="zone"><span>待处理</span><span>3</span></div>
+      <button><i class="warn"></i><span><p>repayType 允许 03（先息后息）</p><small>需求变更 · 2 小时前</small></span></button>
+      <button><i class="warn"></i><span><p>SettlementJob 批量口径调整</p><small>代码变化 · 昨天</small></span></button>
+      <button><i class="ok"></i><span><p>提款方式校验 · V2 已发布</p><small>上周</small></span></button>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <span class="crumb">治</span><span class="slash">/</span><b>贷款生命周期验证项目</b>
+      <div class="right"><span class="lock">◉ 管理员会话</span><span>3 条待审</span></div>
+    </header>
+    <div class="gov">
+      <div class="gov-list">
+        <button class="grow on"><span class="rico warn">!</span><span><b>还款方式新增 03 类别</b><small>REQ-VAL-002 变更触发 · 影响「申请还款方式确定」</small><span class="tm">REQ · 2 小时前</span></span><span class="tag warn">待审核</span></button>
+        <button class="grow"><span class="rico warn">!</span><span><b>SettlementJob 计息口径调整</b><small>v1.2-batch-scope 变更 · 影响「日终结算」</small><span class="tm">CODE_CHANGE · 昨天</span></span><span class="tag warn">待审核</span></button>
+        <button class="grow"><span class="rico" style="border-color:color-mix(in srgb,var(--code) 35%,transparent);background:var(--code-soft);color:var(--code)">i</span><span><b>提款方式校验 · V2</b><small>已发布版本 · 当前生效</small><span class="tm">上周</span></span><span class="tag ok">已发布</span></button>
+      </div>
+      <div class="gov-detail">
+        <header>
+          <div>
+            <small>KUP-0042 · 基于 申请还款方式确定 V3</small>
+            <h2>还款方式新增 03 类别（先息后息）</h2>
+            <p>需求 REQ-VAL-002 将还款方式枚举从 {01,02} 扩展为 {01,02,03}，影响申请写入与提款校验两处业务规则。</p>
+          </div>
+          <span class="tag warn">待审核</span>
+        </header>
+        <div class="dsec" style="margin-top:0">
+          <h3>知识差异</h3>
+          <div class="diff">
+            <div class="card"><span>当前已发布 V3</span><p>还款方式仅允许：
+· 01 等额本息
+· 02 先息后本
+其余值在提款前置校验中拒绝（R-301）。</p></div>
+            <div class="card aft"><span>建议更新为 V4</span><p>还款方式允许：
+· 01 等额本息
+· 02 先息后本
+· 03 先息后息（新增，2026-Q3 起）
+校验白名单同步扩展。</p></div>
+          </div>
+        </div>
+        <div class="dsec">
+          <h3>来源证据</h3>
+          <div class="evid">
+            <article><span>REQUIREMENT</span><b>REQ-VAL-002.md §2.1</b><p>"新增 03 先息后息类别，适用于存量客户续签。"</p></article>
+            <article><span>CODE</span><b>WithdrawalService.checkRepayType</b><p>当前硬编码白名单 {"01","02"}，与需求变更冲突。</p></article>
+          </div>
+        </div>
+        <div class="review-bar">
+          <input placeholder="审核说明（可选）…">
+          <button class="btn">暂缓</button>
+          <button class="btn reject">驳回</button>
+          <button class="btn pri">✓ 接受并发布 V4</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const btns = document.querySelectorAll('.proto-bar button');
+btns.forEach(b => b.onclick = () => {
+  btns.forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+  b.classList.add('on');
+  document.getElementById('s-' + b.dataset.s).classList.add('on');
+});
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const map = {'1':'a','2':'c','3':'d'};
+  if (map[e.key]) btns[{'a':0,'c':2,'d':3}[map[e.key]]].click();
+});
+// 点击证据引用切换检查器内容（示意）
+document.querySelectorAll('.ref').forEach(r => r.onclick = () => {
+  document.querySelectorAll('.ref').forEach(x => x.classList.remove('on'));
+  r.classList.add('on');
+});
+</script>
+</body>
+</html>

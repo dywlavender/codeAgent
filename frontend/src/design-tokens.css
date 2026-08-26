@@ -6,41 +6,54 @@
  *   1. primitive  - palette, type scale, spacing and shape values
  *   2. semantic   - meaning in the product (canvas, text, evidence state)
  *   3. component  - contracts consumed by navigation, panels and controls
+ *
+ * Visual language: instrument panel. Graphite chrome, hairline rules,
+ * monospace metadata, one saturated accent reserved for active state.
  */
 
 :root {
   color-scheme: light;
 
-  /* Primitive: neutral and brand palette */
+  /* Primitive: neutral palette (graphite, slightly cool) */
   --primitive-neutral-0: #ffffff;
-  --primitive-neutral-25: #fbfcfb;
-  --primitive-neutral-50: #f4f7f5;
-  --primitive-neutral-100: #edf2ee;
-  --primitive-neutral-200: #dbe4de;
-  --primitive-neutral-300: #c8d5cd;
-  --primitive-neutral-500: #7b8a81;
-  --primitive-neutral-600: #56645c;
-  --primitive-neutral-900: #16221d;
-  --primitive-brand-100: #e4f2ea;
+  --primitive-neutral-25: #fafbfa;
+  --primitive-neutral-50: #f2f4f3;
+  --primitive-neutral-100: #e8ebe9;
+  --primitive-neutral-200: #d6dbd8;
+  --primitive-neutral-300: #b9c2bd;
+  --primitive-neutral-500: #79857f;
+  --primitive-neutral-600: #55605a;
+  --primitive-neutral-700: #37423c;
+  --primitive-neutral-900: #171d1a;
+
+  /* Primitive: chrome (navigation graphite, independent of theme) */
+  --primitive-chrome-bg: #101512;
+  --primitive-chrome-bg-hover: #1b2320;
+  --primitive-chrome-text: #93a09a;
+  --primitive-chrome-text-active: #ecf3ee;
+  --primitive-chrome-border: #232d28;
+
+  /* Primitive: brand + evidence source hues */
+  --primitive-brand-100: #e2f0e8;
   --primitive-brand-500: #1f7551;
-  --primitive-brand-700: #15573d;
-  --primitive-blue-100: #eaf2f7;
-  --primitive-blue-500: #356e95;
-  --primitive-amber-100: #fff3d9;
-  --primitive-amber-600: #9a6418;
-  --primitive-red-100: #fde9e7;
+  --primitive-brand-700: #14563c;
+  --primitive-blue-500: #38678c;
+  --primitive-blue-100: #e7eff5;
+  --primitive-amber-600: #8f5f14;
+  --primitive-amber-100: #f9efd9;
   --primitive-red-600: #a03a3a;
+  --primitive-red-100: #fbe9e7;
 
   /* Primitive: type, rhythm, shape and motion */
   --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  --font-display: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-display: var(--font-body);
   --font-code: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
   --type-xs: 0.6875rem;
   --type-sm: 0.75rem;
   --type-md: 0.8125rem;
   --type-lg: 0.9375rem;
-  --type-xl: 1.25rem;
-  --type-display: 1.75rem;
+  --type-xl: 1.1875rem;
+  --type-display: 1.625rem;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -48,20 +61,22 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 7px;
   --radius-pill: 999px;
-  --motion-fast: 140ms;
-  --motion-normal: 180ms;
-  --shadow-1: 0 1px 2px rgb(22 34 29 / 5%);
-  --shadow-2: 0 8px 26px rgb(22 34 29 / 8%);
+  --motion-fast: 120ms;
+  --motion-normal: 160ms;
+  --shadow-1: none;
+  --shadow-2: 0 12px 32px rgb(16 21 18 / 14%);
+  --rule-weight: 1px;
 
   /* Semantic: surfaces, text, borders and evidence states */
   --color-canvas: var(--primitive-neutral-50);
   --color-surface: var(--primitive-neutral-25);
   --color-surface-raised: var(--primitive-neutral-0);
   --color-surface-muted: var(--primitive-neutral-100);
+  --color-well: #f6f8f7;
   --color-text: var(--primitive-neutral-900);
   --color-text-secondary: var(--primitive-neutral-600);
   --color-text-faint: var(--primitive-neutral-500);
@@ -79,16 +94,21 @@
   --color-requirement-soft: var(--primitive-amber-100);
   --color-danger: var(--primitive-red-600);
   --color-danger-soft: var(--primitive-red-100);
+  --color-graph-tag: var(--primitive-neutral-600);
+  --color-graph-tag-soft: var(--primitive-neutral-100);
   --color-focus: var(--color-brand);
+  --color-chrome-bg: var(--primitive-chrome-bg);
+  --color-chrome-text: var(--primitive-chrome-text);
+  --color-chrome-border: var(--primitive-chrome-border);
 
   /* Component: stable contracts for the main workbench */
-  --component-nav-width: 224px;
-  --component-topbar-height: 64px;
-  --component-nav-bg: var(--color-surface-raised);
-  --component-nav-text: var(--color-text-secondary);
-  --component-nav-hover-bg: var(--color-surface-muted);
-  --component-nav-active-bg: var(--color-brand-soft);
-  --component-nav-active-text: var(--color-brand-strong);
+  --component-nav-width: 216px;
+  --component-topbar-height: 52px;
+  --component-nav-bg: var(--color-chrome-bg);
+  --component-nav-text: var(--color-chrome-text);
+  --component-nav-hover-bg: var(--primitive-chrome-bg-hover);
+  --component-nav-active-bg: transparent;
+  --component-nav-active-text: var(--primitive-chrome-text-active);
   --component-panel-bg: var(--color-surface);
   --component-card-bg: var(--color-surface-raised);
   --component-card-border: var(--color-border);
@@ -97,10 +117,10 @@
   --component-button-primary-bg: var(--color-brand);
   --component-button-primary-hover: var(--color-brand-strong);
   --component-button-primary-text: var(--color-on-brand);
-  --component-button-height: 36px;
+  --component-button-height: 34px;
   --component-control-radius: var(--radius-sm);
   --component-panel-radius: var(--radius-md);
-  --component-focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-focus) 16%, transparent);
+  --component-focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent);
   --icon-size-sm: 14px;
   --icon-size-md: 18px;
   --icon-size-lg: 22px;
@@ -109,25 +129,32 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-canvas: #121815;
-  --color-surface: #181f1b;
-  --color-surface-raised: #1e2722;
-  --color-surface-muted: #25312a;
-  --color-text: #e5ebe7;
-  --color-text-secondary: #aab6ae;
-  --color-text-faint: #7f8d84;
-  --color-border: #344139;
-  --color-border-strong: #4a584e;
-  --color-brand: #69c294;
-  --color-brand-strong: #8bd6ad;
-  --color-brand-soft: #203b2e;
-  --color-on-brand: #102319;
-  --color-code: #8ab8d1;
-  --color-code-soft: #263e4b;
-  --color-business: #69c294;
-  --color-business-soft: #203b2e;
-  --color-requirement: #e2ad5e;
-  --color-requirement-soft: #423522;
+  --primitive-chrome-bg: #0c100e;
+  --primitive-chrome-bg-hover: #161d19;
+  --primitive-chrome-border: #1c2420;
+  --color-canvas: #12161a;
+  --color-surface: #15191d;
+  --color-surface-raised: #1a2024;
+  --color-surface-muted: #22292e;
+  --color-well: #10141a;
+  --color-text: #e6eae7;
+  --color-text-secondary: #a3ada6;
+  --color-text-faint: #76817a;
+  --color-border: #29323a;
+  --color-border-strong: #3a454d;
+  --color-brand: #58bd8b;
+  --color-brand-strong: #82d3aa;
+  --color-brand-soft: #17301f;
+  --color-on-brand: #0c2117;
+  --color-code: #85b3cf;
+  --color-code-soft: #1f3341;
+  --color-business: #58bd8b;
+  --color-business-soft: #17301f;
+  --color-requirement: #dfae60;
+  --color-requirement-soft: #3b3018;
   --color-danger: #e78682;
-  --color-danger-soft: #452a29;
+  --color-danger-soft: #402726;
+  --color-graph-tag: #b3bdb6;
+  --color-graph-tag-soft: #262e2a;
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 46%);
 }
