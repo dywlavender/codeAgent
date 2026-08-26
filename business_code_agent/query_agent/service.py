@@ -10,6 +10,17 @@ from .agent import BusinessCodeQueryAgent
 from .langchain_adapter import LangChainQueryAnalyzer, LangChainQueryComposer
 
 
+def _safe_json_loads(text):
+    """Parse stored JSON, returning an empty dict for legacy/corrupt rows."""
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 class QueryService:
     def __init__(self, db, *, db_path: str | None = None, project_config: str | None = None):
         self.db = db
@@ -80,8 +91,10 @@ class QueryService:
         if not run:
             raise KeyError(run_id)
         value = dict(run)
-        value["answer"] = json.loads(value.pop("answer_json"))
-        value["state"] = json.loads(value.pop("state_json"))
+        # Legacy or interrupted rows may carry missing/corrupt JSON; degrade
+        # gracefully instead of failing the whole replay endpoint.
+        value["answer"] = _safe_json_loads(value.pop("answer_json"))
+        value["state"] = _safe_json_loads(value.pop("state_json"))
         value["steps"] = [dict(row) for row in self.db.execute(
             "SELECT * FROM query_agent_step WHERE run_id=? ORDER BY created_at,id", (run_id,)
         )]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import re
 import time
 from datetime import datetime, timezone
@@ -19,6 +21,8 @@ from .retriever import QueryRetriever
 from .understanding import QuestionUnderstandingService
 from .langchain_adapter import QueryModelInvocationError
 
+
+logger = logging.getLogger(__name__)
 
 class BusinessCodeQueryAgent:
     """One bounded agent. Tools retrieve; deterministic nodes decide proof gaps."""
@@ -129,6 +133,7 @@ class BusinessCodeQueryAgent:
                     answer_mode = "MODEL"
                     recorder.step("SYNTHESIZE", state.iteration, {}, {"claims": len(composed.get("claims", []))}, self._evidence_count(state), 0.0)
                 except QueryModelInvocationError:
+                    logger.warning("回答归纳模型调用失败，第 %s 轮降级为确定性合成", state.iteration)
                     recorder.step("SYNTHESIZE_FALLBACK", state.iteration, {}, {"reason": "model_unavailable"}, self._evidence_count(state), 0.0)
             answer["answerMode"] = answer_mode
             answer["resolvedQuestion"] = " ".join(state.search_terms)
@@ -157,12 +162,14 @@ class BusinessCodeQueryAgent:
         deterministic_question = _contextual_question(question, history)
         deterministic = self.understander.understand(deterministic_question)
         if not self.query_analyzer:
+            logger.info("未配置理解模型，问题理解使用确定性流程")
             return QueryAgentState.from_understanding(question, deterministic), "FALLBACK"
         try:
             semantic = self.query_analyzer.understand(question, history)
             merged = _merge_understanding(deterministic, semantic)
             return QueryAgentState.from_understanding(question, merged), "MODEL"
         except QueryModelInvocationError:
+            logger.warning("理解模型调用失败，降级为确定性解析")
             return QueryAgentState.from_understanding(question, deterministic), "FALLBACK"
 
     @staticmethod

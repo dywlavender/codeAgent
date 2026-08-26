@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -23,6 +25,9 @@ UPDATE_SET_RE = re.compile(r"\bset\s+([\w.]+)\s*=", re.IGNORECASE)
 SKIP_DIRS = {"target", "build", ".git", ".idea", ".gradle", "node_modules"}
 
 
+logger = logging.getLogger(__name__)
+
+
 class JavaIndexer:
     """Conservative M1 parser with a replaceable Tree-sitter boundary.
 
@@ -43,6 +48,7 @@ class JavaIndexer:
 
             return Parser(Language(tree_sitter_java.language()))
         except ImportError:
+            logger.warning("tree-sitter 未安装，Java 解析回退到保守解析器（pip install '.[tree-sitter]' 可启用）")
             return None
 
     def ingest(self, root: str, repository_id: str = "repo-main") -> dict[str, int]:
@@ -53,6 +59,7 @@ class JavaIndexer:
             (repository_id, str(root_path), datetime.now(timezone.utc).isoformat()),
         )
         counts = {"files": 0, "symbols": 0, "facts": 0}
+        logger.info("开始索引仓库 %s 于 %s", repository_id, root_path)
         for path in self._source_files(root_path, "*.java"):
             result = self._ingest_file(repository_id, root_path, path)
             counts = {key: counts[key] + result[key] for key in counts}
@@ -73,6 +80,7 @@ class JavaIndexer:
                      JOIN code_file cf ON cf.id=cs.file_id WHERE cf.repository_id=?""",
                 (repository_id,),
             ).fetchone()[0]
+        logger.info("索引完成 %s：files=%d symbols=%d facts=%d", repository_id, counts["files"], counts["symbols"], counts["facts"])
         return counts
 
     @staticmethod

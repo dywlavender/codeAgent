@@ -7,11 +7,15 @@ callers embedding the loader can opt out with ``override=False``.
 
 from __future__ import annotations
 
+import logging
+
 import ast
 import os
 import re
 from pathlib import Path
 
+
+logger = logging.getLogger(__name__)
 
 _KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -36,6 +40,7 @@ def load_env_file(path: str | Path | None = None, *, override: bool = True) -> l
     if not env_path.is_file():
         return []
 
+    logger.debug("加载 .env 文件: %s", env_path)
     loaded: list[str] = []
     for line_number, raw_line in enumerate(env_path.read_text(encoding="utf-8-sig").splitlines(), 1):
         line = raw_line.strip()

@@ -127,15 +127,16 @@ export default function App() {
       const detail = await request(`/api/query/${run.id}`);
       setRunDetail(detail);
       setQuestion("");
+      const evidenceList = Array.isArray(detail.evidence) ? detail.evidence : [];
       const restoredResult = {
         runId: detail.id, status: detail.status, intent: detail.intent,
         evidenceStatus: detail.evidence_status, iterations: detail.iterations,
-        answer: detail.answer, evidence: detail.evidence,
+        answer: detail.answer || null, evidence: evidenceList,
         answerMode: detail.answerMode || detail.answer_mode || detail.state?.answerMode || detail.state?.answer_mode,
         resolvedQuestion: detail.resolvedQuestion || detail.resolved_question || detail.state?.resolvedQuestion || detail.state?.resolved_question || detail.state?.search_terms?.join(" "),
         suggestedFollowUps: detail.suggestedFollowUps || detail.suggested_follow_ups || detail.answer?.suggestedFollowUps || [],
         entities: detail.entities || detail.resolvedEntities || detail.state?.entities || detail.state?.resolved_entities || [],
-        metrics: { sourceCoverage: [...new Set(detail.evidence.map((item) => item.sourceType))] },
+        metrics: { sourceCoverage: [...new Set(evidenceList.map((item) => item && item.sourceType).filter(Boolean))] },
       };
       setResult(restoredResult);
       setTurns([{ id: detail.id, question: detail.question, status: "success", result: restoredResult, detail }]);

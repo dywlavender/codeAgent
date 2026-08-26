@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import hmac
 import mimetypes
 import os
@@ -11,6 +12,8 @@ from urllib.parse import parse_qs, urlparse
 
 from ..schema import connect
 from .service import QueryService
+
+logger = logging.getLogger(__name__)
 
 
 def make_server(
@@ -112,6 +115,7 @@ def make_server(
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
                 self._json(400, {"error": str(exc)})
             except Exception as exc:
+                logger.exception("查询服务内部错误: %s", type(exc).__name__)
                 self._json(500, {"error": "internal query service error", "type": type(exc).__name__})
             finally:
                 if service:
@@ -212,7 +216,7 @@ def make_server(
                     service.db.close()
 
         def log_message(self, format, *args):
-            return
+            logger.debug("HTTP %s - %s", self.address_string(), format % args)
 
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -224,7 +228,11 @@ def serve(
     *,
     project_config: str | None = None,
 ):
-    make_server(db_path, host, port, project_config=project_config).serve_forever()
+    server = make_server(db_path, host, port, project_config=project_config)
+    logger.info("工作台已启动: http://%s:%s/  (db=%s)", host, port, db_path)
+    if project_config:
+        logger.info("项目配置: %s", project_config)
+    server.serve_forever()
 
 
 def _admin_access(project_config: str | None) -> dict:

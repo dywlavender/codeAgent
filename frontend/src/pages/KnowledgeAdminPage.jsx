@@ -139,7 +139,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
 
       {error && (
         <div style={{ maxWidth: 1180, margin: "0 auto 12px", width: "100%" }}>
-          <Alert type="error" showIcon message="操作未完成" description={error} closable onClose={() => setError("")} />
+          <Alert type="error" showIcon title="操作未完成" description={error} closable onClose={() => setError("")} />
         </div>
       )}
 
@@ -299,7 +299,7 @@ function ProposalDetailCard({ item, submitting, comment, setComment, onReview })
           ))}
         </Space>
       ) : (
-        <Alert type="warning" showIcon message="该提案尚未返回可展示的证据，不建议直接接受。" />
+        <Alert type="warning" showIcon title="该提案尚未返回可展示的证据，不建议直接接受。" />
       )}
 
       <SectionLabel text="影响范围" />

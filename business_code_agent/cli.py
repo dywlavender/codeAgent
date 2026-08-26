@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import json
 import os
 import sys
@@ -37,7 +39,18 @@ def load_demo(db_path: str):
     return db
 
 
+def _configure_logging() -> None:
+    level_name = os.environ.get("BUSINESS_CODE_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
 def main() -> None:
+    _configure_logging()
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     demo = sub.add_parser("demo")

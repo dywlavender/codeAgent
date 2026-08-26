@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import json
 import shutil
 import subprocess
@@ -9,6 +11,8 @@ from pathlib import Path
 from .code_intelligence import JavaIndexer
 from .schema import connect
 
+
+logger = logging.getLogger(__name__)
 
 class ProjectSyncError(RuntimeError):
     pass
@@ -91,6 +95,7 @@ def sync_repository(config: RepositoryConfig) -> dict:
         if config.branch:
             arguments += ["--branch", config.branch, "--single-branch"]
         arguments += [config.git_url, str(target)]
+        logger.info("克隆仓库 %s ← %s (branch=%s)", config.repository_id, config.git_url, config.branch or "default")
         _git(None, *arguments)
         branch = _current_branch(target)
         return _result(config, branch, "CLONED")
@@ -121,9 +126,11 @@ def sync_repository(config: RepositoryConfig) -> dict:
     local_revision = _git(target, "rev-parse", "HEAD")
     remote_revision = _git(target, "rev-parse", remote_ref)
     if local_revision == remote_revision:
+        logger.info("仓库 %s 已是最新 (branch=%s)", config.repository_id, branch)
         return _result(config, branch, "UP_TO_DATE")
 
     if _is_ancestor(target, "HEAD", remote_ref):
+        logger.info("快进更新仓库 %s： %s → %s", config.repository_id, local_revision[:8], remote_revision[:8])
         _git(target, "merge", "--ff-only", remote_ref)
         return _result(config, branch, "UPDATED")
 

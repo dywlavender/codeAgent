@@ -113,7 +113,7 @@ function ChatColumn({ turns, question, setQuestion, submit, stopQuery, status, e
         )}
       </div>
       <div className="composer-stick">
-        {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 10 }} closable />}
+        {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 10 }} closable />}
         <Composer
           composerRef={composerRef}
           question={question}
@@ -175,7 +175,7 @@ function TurnBlock({ turn, submit, viewMode, setViewMode, setDrawerEv }) {
             )}
           </Flex>
           {turn.status === "loading" && <AnswerSkeleton />}
-          {turn.status === "error" && <Alert type="error" showIcon message="分析失败" description={turn.error} />}
+          {turn.status === "error" && <Alert type="error" showIcon title="分析失败" description={turn.error} />}
           {turn.status === "success" && <AnswerDocument result={turn.result} detail={turn.detail} submit={submit} viewMode={viewMode} setDrawerEv={setDrawerEv} />}
         </div>
       </div>
@@ -188,20 +188,29 @@ function AnswerSkeleton() {
 }
 
 function AnswerDocument({ result, detail, submit, viewMode, setDrawerEv }) {
-  const { answer } = result;
+  const answer = result.answer || {};
+  const factsList = Array.isArray(answer.facts) ? answer.facts : [];
+  const conflictList = Array.isArray(answer.conflicts) ? answer.conflicts : [];
+  const unknownList = Array.isArray(answer.unknowns) ? answer.unknowns : [];
+  const flowList = Array.isArray(answer.businessFlow) ? answer.businessFlow : [];
+  const inferenceList = Array.isArray(answer.inferences) ? answer.inferences : [];
   const evidenceById = useMemo(() => {
     const map = {};
-    (result.evidence || []).forEach((item) => { map[item.evidenceId] = item; });
+    (Array.isArray(result.evidence) ? result.evidence : []).forEach((item) => { if (item && item.evidenceId) map[item.evidenceId] = item; });
     return map;
   }, [result]);
   const suggestedFollowUps = result.suggestedFollowUps || result.suggested_follow_ups || answer.suggestedFollowUps || [];
   const resolvedQuestion = result.resolvedQuestion || result.resolved_question;
 
   const citedIds = collectCitedIds(answer);
-  const codeFacts = answer.facts.filter((f) => f.sourceType === "CODE");
-  const businessFacts = answer.facts.filter((f) => f.sourceType === "BUSINESS");
-  const requirementFacts = answer.facts.filter((f) => f.sourceType === "REQUIREMENT");
+  const codeFacts = factsList.filter((f) => f.sourceType === "CODE");
+  const businessFacts = factsList.filter((f) => f.sourceType === "BUSINESS");
+  const requirementFacts = factsList.filter((f) => f.sourceType === "REQUIREMENT");
   const allFacts = [...codeFacts, ...businessFacts, ...requirementFacts];
+
+  if (!result.answer) {
+    return <Alert type="warning" showIcon title="该记录没有可展示的回答数据" description="可能是早期版本或未完成的查询，仅保留了运行元信息。" />;
+  }
 
   const readView = (
     <div className="doc">
@@ -220,9 +229,9 @@ function AnswerDocument({ result, detail, submit, viewMode, setDrawerEv }) {
       </DocSection>
 
       <DocSection label="业务流程">
-        {answer.businessFlow?.length ? (
+        {flowList.length ? (
           <Timeline
-            items={answer.businessFlow.map((item, index) => ({
+            items={flowList.map((item, index) => ({
               color: "green",
               children: <span style={{ lineHeight: 1.75 }}>{item.statement || item.step || String(item)}</span>,
               key: index,
@@ -237,23 +246,23 @@ function AnswerDocument({ result, detail, submit, viewMode, setDrawerEv }) {
         )) : <EmptyText text="当前没有已确认事实。" />}
       </DocSection>
 
-      {(answer.inferences?.length > 0) && (
+      {inferenceList.length > 0 && (
         <DocSection label="推断">
           <ul className="infer-list">
-            {answer.inferences.map((item, index) => <li key={index}>{item.statement || item}</li>)}
+            {inferenceList.map((item, index) => <li key={index}>{item.statement || item}</li>)}
           </ul>
         </DocSection>
       )}
 
       <DocSection label="待确认" last>
-        {answer.conflicts.map((item, index) => (
-          <Alert key={`c-${index}`} type="error" showIcon message="证据冲突" description={item.reason || "不同来源给出了不一致的结论。"} style={{ marginBottom: 8 }} />
+        {conflictList.map((item, index) => (
+          <Alert key={`c-${index}`} type="error" showIcon title="证据冲突" description={item.reason || "不同来源给出了不一致的结论。"} style={{ marginBottom: 8 }} />
         ))}
-        {answer.unknowns.map((item, index) => (
-          <Alert key={`u-${index}`} type="warning" showIcon message="未确认" description={item} style={{ marginBottom: 8 }} />
+        {unknownList.map((item, index) => (
+          <Alert key={`u-${index}`} type="warning" showIcon title="未确认" description={item} style={{ marginBottom: 8 }} />
         ))}
-        {!answer.conflicts.length && !answer.unknowns.length && (
-          <Alert type="success" message="证据闭合" description="当前回答没有遗留的证据缺口。" />
+        {!conflictList.length && !unknownList.length && (
+          <Alert type="success" title="证据闭合" description="当前回答没有遗留的证据缺口。" />
         )}
       </DocSection>
     </div>
@@ -304,15 +313,16 @@ function AnswerDocument({ result, detail, submit, viewMode, setDrawerEv }) {
 }
 
 function CompareView({ result, evidenceById, setDrawerEv }) {
-  const grouped = groupEvidence(result.evidence);
-  const { answer } = result;
+  const grouped = groupEvidence(result && result.evidence);
+  const answer = (result && result.answer) || {};
+  const flowList = Array.isArray(answer.businessFlow) ? answer.businessFlow : [];
   return (
     <Card size="small" styles={{ body: { padding: "14px 18px" } }} title={<Typography.Text strong style={{ fontSize: 13 }}>结论与链路（引用已对齐到右侧）</Typography.Text>}>
       <Typography.Paragraph style={{ fontSize: 14, lineHeight: 1.85 }}>{answer.conclusion}</Typography.Paragraph>
-      {answer.businessFlow?.length > 0 && (
+      {flowList.length > 0 && (
         <Timeline
           style={{ marginTop: 8 }}
-          items={answer.businessFlow.map((item, index) => ({ color: "green", children: item.statement || item.step || String(item), key: index }))}
+          items={flowList.map((item, index) => ({ color: "green", children: item.statement || item.step || String(item), key: index }))}
         />
       )}
       {[["CODE", "代码证据"], ["BUSINESS", "业务知识"], ["REQUIREMENT", "需求依据"]].map(([type, label]) => (
