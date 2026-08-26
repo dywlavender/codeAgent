@@ -119,7 +119,6 @@ export default function App() {
 
   async function doRestore(run) {
     if (!run) return;
-    setPendingRestoreRun(null);
     setError("");
     setStatus("loading");
     navigate("agent");

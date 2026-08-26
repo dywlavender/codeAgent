@@ -9,22 +9,26 @@
   <body>
     <div id="root"></div>
     <script>
-      window.addEventListener("error", function (event) {
-        showFatal(event.error || event.message);
-      });
-      window.addEventListener("unhandledrejection", function (event) {
-        showFatal(event.reason);
-      });
-      function showFatal(reason) {
-        var box = document.getElementById("fatal-box");
-        if (!box) {
-          box = document.createElement("pre");
-          box.id = "fatal-box";
-          box.style.cssText = "position:fixed;inset:auto 16px 16px 16px;z-index:99999;background:#fff;border:1px solid #e0e0dd;border-radius:10px;padding:14px 16px;font:12px/1.7 monospace;color:#cf222e;white-space:pre-wrap;max-height:45vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.08)";
-          document.body.appendChild(box);
+      (function () {
+        function showFatal(reason) {
+          var box = document.getElementById("fatal-box");
+          if (!box) {
+            box = document.createElement("pre");
+            box.id = "fatal-box";
+            box.style.cssText = "position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#fff;border:1px solid #e0e0dd;border-radius:10px;padding:14px 16px;font:12px/1.7 monospace;color:#cf222e;white-space:pre-wrap;max-height:45vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.08)";
+            document.body.appendChild(box);
+          }
+          var message = reason && reason.message ? String(reason.message) : String(reason);
+          var stack = reason && reason.stack ? String(reason.stack) : "";
+          box.textContent += "[运行时错误] " + message + "\n" + stack + "\n\n";
         }
-        box.textContent += "[运行时错误] " + (reason && reason.stack ? reason.stack : String(reason)) + "\n\n";
-      }
+        window.addEventListener("error", function (event) {
+          showFatal(event.error || event.message);
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          showFatal(event.reason);
+        });
+      })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
