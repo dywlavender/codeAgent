@@ -4,7 +4,7 @@ import json
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from ..util import digest, dumps
 from .models import FunctionSnapshot, FunctionStatus, ProposalAction, ProposalStatus
@@ -391,6 +391,7 @@ def _normalise_snapshot(value: FunctionSnapshot | dict[str, Any]) -> dict[str, A
         "name": str(raw["name"]).strip(),
         "domain": str(raw.get("domain", "")).strip(),
         "summary": str(raw.get("summary", "")).strip(),
+        "tags": _normalise_tags(raw.get("tags") or raw.get("knowledge_tags") or raw.get("knowledgeTags")),
         "evidence_ids": _strings(raw.get("evidence_ids", [])),
     }
     definitions = {
@@ -416,6 +417,38 @@ def _normalise_snapshot(value: FunctionSnapshot | dict[str, Any]) -> dict[str, A
             items.append(normalised)
         snapshot[collection] = items
     return snapshot
+
+
+def _normalise_tags(value: Any) -> list[dict[str, Any]]:
+    """Keep graph labels structured without requiring a separate tag table."""
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    values = value if isinstance(value, (list, tuple)) else ([value] if value else [])
+    for original in values:
+        if isinstance(original, str):
+            item = {"name": original}
+        elif isinstance(original, Mapping):
+            item = dict(original)
+        else:
+            continue
+        name = str(item.get("name") or item.get("label") or item.get("value") or "").strip()
+        if not name:
+            continue
+        key = str(
+            item.get("canonical_key") or item.get("canonicalKey") or item.get("key") or name
+        ).strip()
+        identity = key.casefold()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append({
+            "name": name,
+            "key": key,
+            "type": str(item.get("type") or item.get("tag_type") or "TAG").strip(),
+            "alias": str(item.get("alias") or "").strip(),
+            "evidence_ids": _strings(item.get("evidence_ids") or item.get("evidenceIds") or []),
+        })
+    return result
 
 
 def _publication_text(snapshot: dict[str, Any]) -> str:

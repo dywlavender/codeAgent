@@ -218,7 +218,7 @@ Windows PowerShell：
 
 也可以不使用 `.env`，直接在启动脚本所在的终端设置同名环境变量，但启动时如果存在 `.env`，文件中的值会覆盖终端中的同名值。示例配置启用了管理员认证，因此 `BUSINESS_CODE_ADMIN_TOKEN` 也需要填写。
 
-`.env` 中的 `BUSINESS_CODE_MODEL_PROVIDER`、`BUSINESS_CODE_MODEL_NAME`、`BUSINESS_CODE_MODEL_BASE_URL`、`BUSINESS_CODE_MODEL_TEMPERATURE`、`BUSINESS_CODE_MODEL_TIMEOUT` 和 `BUSINESS_CODE_MODEL_MAX_RETRIES` 分别控制供应商、模型、兼容接口地址、温度、超时和重试次数。`openai` 同时支持通过 `BASE_URL` 连接兼容接口；使用其他模型供应商时修改 provider、name，并安装对应的 LangChain 集成包。未配置模型或设置 `BUSINESS_CODE_MODEL_ENABLED=false` 时，Knowledge Update Agent 和 Query Agent 都会降级到确定性流程；Query Agent 会标记 `FALLBACK`，不会把规则拼装伪装成模型归纳。
+`.env` 中的 `BUSINESS_CODE_MODEL_PROVIDER`、`BUSINESS_CODE_MODEL_NAME`、`BUSINESS_CODE_MODEL_BASE_URL`、`BUSINESS_CODE_MODEL_TEMPERATURE`、`BUSINESS_CODE_MODEL_TIMEOUT` 和 `BUSINESS_CODE_MODEL_MAX_RETRIES` 分别控制供应商、模型、兼容接口地址、温度、超时和重试次数。日志级别通过 `BUSINESS_CODE_LOG_LEVEL` 控制（默认 `INFO`，设为 `DEBUG` 可查看 HTTP 访问与检索细节），输出遵循 Python 标准 logging 格式：`时间 级别 模块: 消息`。`openai` 同时支持通过 `BASE_URL` 连接兼容接口；使用其他模型供应商时修改 provider、name，并安装对应的 LangChain 集成包。未配置模型或设置 `BUSINESS_CODE_MODEL_ENABLED=false` 时，Knowledge Update Agent 和 Query Agent 都会降级到确定性流程；Query Agent 会标记 `FALLBACK`，不会把规则拼装伪装成模型归纳。
 
 如果 `BUSINESS_CODE_MODEL_ENABLED=true` 但 `BUSINESS_CODE_MODEL_API_KEY` 没有填写，服务启动时会输出明确警告，并继续使用 `FALLBACK`，不会把确定性结果误标为模型归纳。
 
@@ -241,7 +241,7 @@ Query Agent 的模型只负责问题理解、追问上下文消解和自然语�
 
 ### 增强业务解释
 
-在“知识治理”中提交管理员说明，生成待审核提案。管理员查看证据后接受或驳回；只有接受后才生成可供 Query Agent 使用的已发布功能知识版本。
+在“知识生成”中选择当前代码、需求依据并补充一段业务说明，生成待审核草稿。管理员查看结构化内容和来源证据后接受或驳回；只有接受后才生成可供 Query Agent 使用的已发布功能知识版本。
 
 ### 增强需求依据
 
@@ -262,14 +262,18 @@ Query Agent 的模型只负责问题理解、追问上下文消解和自然语�
 
 ## Agent 工作台
 
+功能知识正文采用 [功能知识正文模板](docs/functional-knowledge-template.md)。正文面向业务人员阅读，Evidence、来源版本和审核状态由系统自动维护。
+
 六个一级入口：
 
 - **Agent**：最近问题、结构化回答、三源 Evidence 和 Run Drawer。
-- **Code**：Symbol、字段活动、表列事实和源码定位。
-- **功能知识**：只展示已发布的业务功能、场景、规则与代码入口。
+- **知识生成**：以当前代码、需求依据和业务补充为输入，生成可审核的功能知识草稿；审核通过后才发布。
+- **知识图谱**：按功能、需求、代码、标签和业务补充查询关系，并在节点详情中查看来源证据。
+- **Code Fact**：Symbol、字段活动、表列事实和源码定位。
 - **Requirements**：Digest、业务规则、代码关系、原文 Chunk 和版本变化。
-- **知识治理**：发起知识更新、处理待审核提案、查看已发布功能知识和版本。
 - **Runs**：步骤、Tool Call、证据缺口与运行结果回放，不展示隐藏思维链。
+
+知识生成页面默认展示三类输入卡片：当前代码、需求依据和业务补充。管理员不需要手工填写来源类型或 Evidence ID；系统会自动装配上下文。生成后先查看“知识草稿”和“来源证据”，再执行接受、驳回或暂缓。知识图谱页面提供搜索框、类型筛选、关系视图和节点检查器；点击节点可以查看相邻知识、标签、版本和证据数量。
 
 ## 知识更新闭环
 
@@ -287,7 +291,7 @@ Query Agent 只检索已发布版本
 
 业务功能知识只保存功能摘要、场景、核心规则、入口和业务级数据影响；详细代码、SQL 和原始文档通过 Evidence 引用按需读取，避免知识正文无限膨胀。代码事实可自动增量刷新，但业务语义永远不会由模型直接发布。
 
-在知识治理中选择“代码变化”时，来源标识可以填写仓库 ID、变化记录 ID 或已索引文件路径，系统会补充最近变化对应的 Code Fact 和 Evidence；选择“需求”时填写已经导入的 Requirement ID，系统会使用当前 Digest、规则和 Chunk Evidence。无法解析来源标识时，界面输入仅作为人工来源，不会伪装成代码或需求事实。
+在知识生成中，管理员只需要选择当前代码、已导入的需求，并补充一段业务说明；系统会自动组装 Code Fact、Requirement Digest 和人工 Evidence，生成待审核草稿。知识标签由 Agent 从三类材料中归纳，管理员在草稿中确认后才会成为图谱连接锚点。代码变化和需求版本变化仍会自动进入待处理列表，无法确认的内容保留为待确认项。
 
 回答固定拆为：
 
@@ -349,8 +353,15 @@ business-code-agent query-run QRUN_ID --db knowledge.db
 - `GET /api/code/search?q=`
 - `GET /api/functions?q=`
 - `GET /api/requirements?q=`
+- `GET /api/knowledge-admin/pending`
+- `GET /api/knowledge-admin/functions`
+- `GET /api/knowledge-admin/proposals`
+- `GET /api/knowledge-admin/proposals/{id}`
+- `POST /api/knowledge-admin/generate`
+- `POST /api/knowledge-admin/proposals/{id}/review`
+- `GET /api/knowledge-graph?q=&type=`
 
-知识写入统一走带管理员口令的知识治理接口；用户侧 `/api/functions` 只返回已发布版本。
+知识写入统一走带管理员口令的知识生成接口；用户侧 `/api/functions` 和 `/api/knowledge-graph` 只读取已发布知识、当前 Code Fact 和需求关联，不直接修改知识。
 
 ## 核心约束
 
@@ -375,7 +386,7 @@ business-code-agent query-validate
 ## 安全说明
 
 - 默认只监听 `127.0.0.1`。
-- 普通问答保持只读；知识治理接口使用管理员口令。当前未提供完整的用户账号体系，不应直接暴露到互联网。
+- 普通问答和知识图谱查询保持只读；知识生成接口使用管理员口令。当前未提供完整的用户账号体系，不应直接暴露到互联网。
 - API 不向浏览器返回仓库本地绝对路径，也不伪造未采集的 Git branch/commit。
 - 使用 `0.0.0.0` 开放局域网访问时会强制要求管理员口令；仍应增加反向代理认证、TLS、防火墙规则和数据脱敏。
 

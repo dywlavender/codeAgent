@@ -31,6 +31,7 @@ Java / MyBatis 索引器自动维护类、方法、字段、直接调用、字�
 正式知识以 `business_function` 为中心，每个发布版本包含：
 
 - 功能摘要和业务域
+- 业务域、业务对象、业务流程、业务场景和关联系统等规范化知识标签；这些标签是知识图的连接锚点，不单独等同于确定关系
 - 业务场景
 - 核心业务规则
 - HTTP、消息、批任务等功能入口
@@ -68,7 +69,7 @@ Knowledge Update Agent 的模型适配使用：
 - 审核和发布权限
 - 基础版本校验
 
-模型配置统一来自根目录 `.env`，CLI 启动时自动加载，且 `.env` 优先于当前进程环境变量。`project.config.json` 保存项目、仓库、启动默认值和管理员入口；启动脚本的显式命令行参数优先于配置文件。Knowledge Update Agent 使用模型生成知识提案；Query Agent 使用模型理解问题、处理同一会话的追问并归纳回答。Query Agent 只能绑定三个只读工具：Code Fact、已发布/确认业务知识、Requirement Digest。证据加载、状态过滤、冲突、充分性和引用校验不交给模型。没有模型时两者都回退到确定性流程，并在结果中标记 `FALLBACK`。知识治理接口与普通问答接口分开；治理接口使用 `admin.apiTokenEnv` 指定的管理员口令，非本机监听时未配置口令会拒绝启动。模型启用但缺少凭据时，服务启动会输出警告并继续降级，不会伪装成模型结果。
+模型配置统一来自根目录 `.env`，CLI 启动时自动加载，且 `.env` 优先于当前进程环境变量。`project.config.json` 保存项目、仓库、启动默认值和管理员入口；启动脚本的显式命令行参数优先于配置文件。Knowledge Update Agent 使用模型生成知识提案；Query Agent 使用模型理解问题、处理同一会话的追问并归纳回答。Query Agent 只能绑定三个只读工具：Code Fact、已发布/确认业务知识、Requirement Digest。证据加载、状态过滤、冲突、充分性和引用校验不交给模型。没有模型时两者都回退到确定性流程，并在结果中标记 `FALLBACK`。知识维护接口（页面称“知识生成”）与普通问答接口分开；维护接口使用 `admin.apiTokenEnv` 指定的管理员口令，知识图谱查询保持只读。非本机监听时未配置口令会拒绝启动。模型启用但缺少凭据时，服务启动会输出警告并继续降级，不会伪装成模型结果。
 
 ## 内容规模控制
 
@@ -99,9 +100,13 @@ Knowledge Update Agent 的模型适配使用：
 - `GET /api/knowledge-admin/proposals`
 - `GET /api/knowledge-admin/proposals/{id}`
 - `POST /api/knowledge-admin/proposals/generate`
+- `POST /api/knowledge-admin/generate`：从当前代码、需求 ID 和业务补充生成一份待审核草稿
 - `POST /api/knowledge-admin/proposals/{id}/review`
+- `GET /api/knowledge-graph`：查询功能、需求、Code Fact、标签和业务补充的只读关系投影
 
-`generate` 支持 `CODE_CHANGE`、`REQUIREMENT`、`DOCUMENT`、`MANUAL` 和 `USER_FEEDBACK`。`review` 支持 `ACCEPT`、`REJECT`、`DEFER`；接受操作会先完成审核状态转换，再单独执行发布校验。
+兼容接口 `POST /api/knowledge-admin/proposals/generate` 支持 `CODE_CHANGE`、`REQUIREMENT`、`DOCUMENT`、`MANUAL` 和 `USER_FEEDBACK`。`review` 支持 `ACCEPT`、`REJECT`、`DEFER`；接受操作会先完成审核状态转换，再单独执行发布校验。
+
+页面使用的 `POST /api/knowledge-admin/generate` 是三源输入适配器，接收 `repositoryId`、`requirementIds`、`topic` 和 `businessNote`，自动装配当前 Code Fact、Requirement Digest 和人工 Evidence，再复用同一提案状态机。旧的 `POST /api/knowledge-admin/proposals/generate` 保留用于兼容已有调用方。`GET /api/knowledge-graph` 是从已发布功能快照、Requirement 关系、Code Fact 和 Evidence 生成的只读投影，不引入第二套知识事实。
 
 问答接口支持 `conversationId` 和最近几轮 `history`。每轮仍单独生成 Query Run，但会话表保存用户问题和回答摘要，用于追问消解。`POST /api/query/{runId}/feedback` 只记录有帮助/没有帮助及可选说明，不直接修改知识。
 

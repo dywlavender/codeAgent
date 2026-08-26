@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import json
 import re
 from typing import Any, Mapping, Sequence
@@ -15,6 +17,8 @@ from .analysis_models import (
 )
 from .ports import CodeFactMaintainer, KnowledgeGovernanceStore, UpdateAnalyzer
 
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeUpdateAgent:
     """Domain orchestrator for knowledge maintenance.
@@ -39,12 +43,12 @@ class KnowledgeUpdateAgent:
     def propose(self, source: UpdateSource, *, created_by: str = "knowledge-update-agent") -> dict:
         candidates = self.identify_affected_functions(source)
         analysis_mode = "MODEL" if self.analyzer else "FALLBACK"
+        if not self.analyzer:
+            logger.info("未配置分析模型，知识更新使用确定性分析")
         try:
             raw = self.analyzer.analyze(source, candidates) if self.analyzer else self._fallback_analysis(source, candidates)
         except Exception as exc:
-            from .langchain_adapter import ModelInvocationError
-            if not isinstance(exc, ModelInvocationError):
-                raise
+            logger.warning("分析模型调用失败（%s：%s），降级为确定性分析", type(exc).__name__, exc)
             raw = self._fallback_analysis(source, candidates)
             analysis_mode = "FALLBACK"
         allowed_evidence = set(source.evidence_ids) | set().union(
@@ -215,15 +219,21 @@ class KnowledgeUpdateAgent:
     def _validate_snapshot_bindings(
         self, snapshot, current, source_ids, claims, *, proposal_items, require_root,
     ) -> None:
+        def root_value(value, key):
+            # Older analyzers and stored snapshots predate first-class tags.
+            # Missing tags therefore mean an unchanged empty tag collection.
+            return value.get(key, []) if key == "tags" else value.get(key)
+
         root_changed = require_root or any(
-            snapshot.get(key) != current.get(key) for key in ("name", "domain", "summary")
+            root_value(snapshot, key) != root_value(current, key)
+            for key in ("name", "domain", "summary", "tags")
         )
         if root_changed:
             cited = set(snapshot.get("evidence_ids", [])) & source_ids
             if not cited:
-                raise ValueError("changed function summary requires source evidence")
+                raise ValueError("changed function summary or tags require source evidence")
             self._validate_claim_binding(
-                {key: snapshot.get(key) for key in ("name", "domain", "summary")}, cited, claims,
+                {key: root_value(snapshot, key) for key in ("name", "domain", "summary", "tags")}, cited, claims,
             )
         for collection in ("scenarios", "rules", "entries", "data_impacts"):
             previous = {
@@ -272,6 +282,7 @@ class KnowledgeUpdateAgent:
             "name": name,
             "domain": current.get("domain", str(source.metadata.get("domain", ""))),
             "summary": current.get("summary", source.content.strip()[:240]),
+            "tags": current.get("tags", source.metadata.get("tags", [])),
             "scenarios": current.get("scenarios", []),
             "rules": current.get("rules", []),
             "entries": current.get("entries", []),

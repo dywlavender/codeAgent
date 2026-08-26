@@ -232,11 +232,20 @@ def _update_analysis_schema():
         description: str = ""
         evidence_ids: list[str] = Field(default_factory=list)
 
+    class KnowledgeTag(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        name: str
+        type: str = "TAG"
+        canonical_key: str = ""
+        alias: str = ""
+        evidence_ids: list[str] = Field(default_factory=list)
+
     class FunctionSnapshotSchema(BaseModel):
         model_config = ConfigDict(extra="forbid")
         name: str
         domain: str = ""
         summary: str
+        tags: list[KnowledgeTag] = Field(default_factory=list)
         evidence_ids: list[str] = Field(default_factory=list)
         scenarios: list[Scenario] = Field(default_factory=list)
         rules: list[Rule] = Field(default_factory=list)
@@ -275,6 +284,8 @@ Return only the requested structured response. Code describes observed implement
 requirements describe intended behavior, and documents or feedback may conflict with both.
 Never present an inference as confirmed. Cite only supplied evidence IDs. Select a target only
 from supplied candidates. Prefer a compact business snapshot: function, scenarios, core rules,
-entries, and business-level data impacts. Do not copy full source text or detailed call graphs.
+entries, knowledge tags, and business-level data impacts. Tags should be compact business
+concepts with a stable canonical_key, not arbitrary keywords. Do not copy full source text or
+detailed call graphs.
 You may propose CREATE, UPDATE, or RETIRE. You cannot approve or publish a proposal.
 """

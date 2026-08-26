@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import json
 import uuid
 from pathlib import Path
@@ -11,6 +13,8 @@ from .analysis_models import UpdateSource, UpdateSourceType
 from .langchain_adapter import LangChainUpdateAnalyzer, model_config_from_environment
 from .repository import KnowledgeGovernanceRepository
 
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeAdminService:
     """Application service shared by the governance API and future CLI adapters.
@@ -50,9 +54,10 @@ class KnowledgeAdminService:
             detail = self.repository.get_function(summary["id"])
             snapshot = detail["snapshot"]
             evidence_ids = set(snapshot.get("evidence_ids", []))
-            for collection in ("scenarios", "rules", "entries", "data_impacts"):
+            for collection in ("tags", "knowledge_tags", "knowledgeTags", "scenarios", "rules", "entries", "data_impacts"):
                 for item in snapshot.get(collection, []):
-                    evidence_ids.update(item.get("evidence_ids", []))
+                    if isinstance(item, dict):
+                        evidence_ids.update(item.get("evidence_ids", item.get("evidenceIds", [])))
             values.append({
                 **detail["function"],
                 **snapshot,
@@ -69,6 +74,8 @@ class KnowledgeAdminService:
         return self._proposal_view(self.repository.get_proposal(proposal_id))
 
     def generate(self, payload: Mapping[str, Any], *, created_by: str = "knowledge-update-agent") -> dict:
+        logger.info("生成知识更新提案：sourceType=%s sourceId=%s createdBy=%s",
+                    payload.get("sourceType"), payload.get("sourceId"), created_by)
         source_type = _source_type(payload.get("sourceType") or payload.get("source_type"))
         source_id = str(payload.get("sourceId") or payload.get("source_id") or "").strip()
         content = str(payload.get("content") or "").strip()
@@ -109,6 +116,98 @@ class KnowledgeAdminService:
         return {**detail, "affectedFunctions": result.get("affectedFunctions", []),
                 "conflicts": result.get("conflicts", []), "unknowns": result.get("unknowns", []),
                 "analysisMode": result.get("analysisMode", "FALLBACK")}
+
+    def generate_from_sources(self, payload: Mapping[str, Any], *, created_by: str = "knowledge-update-agent") -> dict:
+        """Generate one reviewable knowledge proposal from the three user-facing sources.
+
+        The UI should not make administrators understand source types or evidence
+        IDs. This adapter assembles bounded code, requirement, and manual context,
+        then reuses the existing proposal and publication state machine.
+        """
+        repository_ids = _string_list(payload.get("repositoryIds") or payload.get("repository_ids"))
+        repository_id = str(payload.get("repositoryId") or payload.get("repository_id") or "").strip()
+        if repository_id and repository_id not in repository_ids:
+            repository_ids.insert(0, repository_id)
+        requirement_ids = _string_list(payload.get("requirementIds") or payload.get("requirement_ids"))
+        topic = str(payload.get("topic") or "").strip()
+        business_note = str(payload.get("businessNote") or payload.get("business_note") or "").strip()
+        if not repository_ids:
+            repository_ids = [row["id"] for row in self.db.execute("SELECT id FROM repository ORDER BY indexed_at DESC LIMIT 1")]
+        if not repository_ids and not requirement_ids and not business_note:
+            raise ValueError("至少需要当前代码、需求依据或业务补充中的一项")
+
+        parts: list[str] = []
+        evidence_ids: list[str] = []
+        metadata: dict[str, Any] = {
+            "sourceResolution": "KNOWLEDGE_SOURCES",
+            "repositories": repository_ids,
+            "requirementIds": requirement_ids,
+        }
+        if topic:
+            parts.append(f"本次知识主题：{topic}")
+            metadata["topic"] = topic
+        if business_note:
+            parts.append("人工业务补充：\n" + business_note)
+
+        for current_repository_id in repository_ids[:3]:
+            code_content, code_evidence, code_metadata = self._repository_context(current_repository_id, topic or business_note)
+            if code_content:
+                parts.append(code_content)
+                evidence_ids.extend(code_evidence)
+                metadata.setdefault("repositoryContext", {})[current_repository_id] = code_metadata
+
+        for requirement_id in requirement_ids[:5]:
+            requirement_content, requirement_evidence, requirement_metadata = self._requirement_context(requirement_id, "")
+            if requirement_content:
+                parts.append(requirement_content)
+                evidence_ids.extend(requirement_evidence)
+                metadata.setdefault("requirementContext", {})[requirement_id] = requirement_metadata
+
+        if not parts:
+            raise ValueError("没有找到可用于生成知识的代码、需求或业务补充")
+        source_id = f"KNOWLEDGE-{uuid.uuid4().hex[:16]}"
+        if business_note:
+            evidence_ids.append(self._create_source_evidence(UpdateSourceType.MANUAL, source_id, business_note))
+        content = "\n\n".join(parts)
+        if len(content) > 24000:
+            content = content[:24000]
+        return self.generate({
+            "sourceType": "MANUAL",
+            "sourceId": source_id,
+            "content": content,
+            "evidenceIds": list(dict.fromkeys(evidence_ids)),
+            "metadata": metadata,
+        }, created_by=created_by)
+
+    def _repository_context(self, repository_id: str, hint: str = "") -> tuple[str, tuple[str, ...], dict]:
+        repository = self.db.execute("SELECT id,indexed_at FROM repository WHERE id=?", (repository_id,)).fetchone()
+        if not repository:
+            return "", (), {"sourceResolution": "REPOSITORY_NOT_FOUND"}
+        rows = self.db.execute(
+            """SELECT cs.qualified_name,cs.kind,cf.fact_type,cf.subject,cf.target,cf.evidence_id
+                 FROM code_file cfile
+                 JOIN code_symbol cs ON cs.file_id=cfile.id
+                 JOIN code_fact cf ON cf.symbol_id=cs.id
+                WHERE cfile.repository_id=?
+                ORDER BY cs.qualified_name,cf.fact_type LIMIT 80""",
+            (repository_id,),
+        ).fetchall()
+        if not rows:
+            return f"已索引代码仓库：{repository_id}（当前没有可用 Code Fact）", (), {"sourceResolution": "INDEXED_CODE_FACTS", "factCount": 0}
+        lines = [f"已索引代码仓库：{repository_id}", "代码事实："]
+        evidence_ids: list[str] = []
+        for row in rows:
+            line = f"- {row['qualified_name']} | {row['kind']} | {row['fact_type']} | {row['subject']} -> {row['target']} | Evidence: {row['evidence_id']}"
+            if len("\n".join([*lines, line])) > 24000:
+                break
+            lines.append(line)
+            evidence_ids.append(row["evidence_id"])
+        return "\n".join(lines), tuple(dict.fromkeys(evidence_ids)), {
+            "sourceResolution": "INDEXED_CODE_FACTS",
+            "indexedAt": repository["indexed_at"],
+            "factCount": len(evidence_ids),
+            "hint": hint[:120],
+        }
 
     def _assemble_source_context(
         self, source_type: UpdateSourceType, source_id: str, supplied_content: str
@@ -261,9 +360,11 @@ class KnowledgeAdminService:
         if normalized in {"ACCEPT", "APPROVE"}:
             agent.review(proposal_id, "APPROVE", reviewer=reviewer, comment=comment)
             published = agent.publish(proposal_id, published_by=reviewer)
+            logger.info("提案 %s 已接受并发布（reviewer=%s，function=%s）", proposal_id, reviewer, (published or {}).get("id") or (published or {}).get("functionId") or "-")
             return {"proposal": self.get_proposal(proposal_id), "publishedFunction": published}
         if normalized == "REJECT":
             reviewed = agent.review(proposal_id, "REJECT", reviewer=reviewer, comment=comment)
+            logger.info("提案 %s 已驳回（reviewer=%s）", proposal_id, reviewer)
             return {"proposal": self._proposal_view(reviewed)}
         if normalized in {"DEFER", "REQUEST_CHANGES"}:
             decision = "DEFER" if _supports_defer(self.repository) else "REQUEST_CHANGES"
@@ -348,9 +449,10 @@ class KnowledgeAdminService:
             except KeyError:
                 before = None
         snapshot_evidence = list(snapshot.get("evidence_ids", []))
-        for collection in ("scenarios", "rules", "entries", "data_impacts"):
+        for collection in ("tags", "knowledge_tags", "knowledgeTags", "scenarios", "rules", "entries", "data_impacts"):
             for item in snapshot.get(collection, []):
-                snapshot_evidence.extend(item.get("evidence_ids", []))
+                if isinstance(item, dict):
+                    snapshot_evidence.extend(item.get("evidence_ids", item.get("evidenceIds", [])))
         evidence_ids = list(dict.fromkeys([
             *(evidence_id for item in items for evidence_id in item.get("evidence_ids", [])),
             *snapshot_evidence,
@@ -389,6 +491,13 @@ def _source_type(value: Any) -> UpdateSourceType:
         return UpdateSourceType(aliases.get(text, text))
     except ValueError as exc:
         raise ValueError(f"unsupported sourceType: {value}") from exc
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
 
 
 def _supports_defer(repository: KnowledgeGovernanceRepository) -> bool:

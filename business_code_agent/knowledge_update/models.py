@@ -75,6 +75,7 @@ class FunctionSnapshot:
     name: str
     domain: str = ""
     summary: str = ""
+    tags: list[dict[str, Any] | str] = field(default_factory=list)
     scenarios: list[FunctionScenario | dict[str, Any]] = field(default_factory=list)
     rules: list[FunctionRule | dict[str, Any]] = field(default_factory=list)
     entries: list[FunctionEntry | dict[str, Any]] = field(default_factory=list)
