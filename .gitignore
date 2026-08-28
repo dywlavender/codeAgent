@@ -25,3 +25,5 @@ examples/validation-project/
 
 # Local runtime config (copy from project.config.example.json)
 project.config.json
+
+.workbuddy/
