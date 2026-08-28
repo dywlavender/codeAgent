@@ -32,7 +32,7 @@ class RequirementBuilder:
         version: str = "1",
         structurer=None,
     ) -> str:
-        # ``version`` and an injected legacy structurer are intentionally not
+        # ``version`` and an injected compatibility structurer are intentionally not
         # used: the canonical parser owns versioning and evidence boundaries.
         from .requirement.service import RequirementService
 

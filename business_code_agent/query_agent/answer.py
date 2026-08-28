@@ -118,7 +118,7 @@ class AnswerBuilder:
         if _get(value, "candidate", "isCandidate", default=False):
             return None
         if str(_get(value, "status", default="")).upper() in {
-            "SUGGESTED", "REJECTED", "STALE", "CONFLICT", "DRAFT", "PENDING_REVIEW",
+            "SUGGESTED", "STALE", "CONFLICT",
         }:
             return None
         verified = _get(value, "verified", "isVerified", default=True)

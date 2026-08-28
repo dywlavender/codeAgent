@@ -12,6 +12,9 @@
     "port": 8082
   },
   "repositoryRoot": ".data/repositories",
+  "knowledge": {
+    "root": "knowledge/functions"
+  },
   "repositories": [
     {
       "id": "loan-core",

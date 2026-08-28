@@ -3,7 +3,7 @@ export class RequestAborted extends Error {}
 export async function request(path, options = {}, signal) {
   const adminToken = sessionStorage.getItem("knowledgeAdminToken");
   const headers = { ...(options.headers || {}) };
-  if (adminToken && path.startsWith("/api/knowledge-admin/")) headers.Authorization = `Bearer ${adminToken}`;
+  if (adminToken && (path.startsWith("/api/knowledge-admin/") || path.startsWith("/api/knowledge/"))) headers.Authorization = `Bearer ${adminToken}`;
   let response;
   try {
     response = await fetch(path, { ...(options || {}), headers, signal });
@@ -12,7 +12,7 @@ export async function request(path, options = {}, signal) {
     throw error;
   }
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401 && path.startsWith("/api/knowledge-admin/")) {
+  if (response.status === 401 && (path.startsWith("/api/knowledge-admin/") || path.startsWith("/api/knowledge/"))) {
     sessionStorage.removeItem("knowledgeAdminToken");
   }
   if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);

@@ -21,21 +21,8 @@ def load_demo(db_path: str):
     root = Path(__file__).resolve().parent.parent / "examples" / "acceptance"
     JavaIndexer(db).ingest(str(root / "java"), "acceptance-repo")
     RequirementBuilder(db).ingest(str(root / "requirements" / "REQ-2026-001.json"))
-    # Seed only the canonical, reviewable business-function workflow.  The
-    # demo is idempotent so repeatedly starting the workbench does not create
-    # duplicate functions or proposals.
-    function_name = "申请还款方式与提款校验"
-    if not db.execute("SELECT 1 FROM business_function WHERE name=?", (function_name,)).fetchone():
-        from .knowledge_update.service import KnowledgeAdminService
-        content = (root / "business" / "function-source.txt").read_text(encoding="utf-8")
-        admin = KnowledgeAdminService(db)
-        generated = admin.generate({
-            "sourceType": "DOCUMENT",
-            "sourceId": "demo-business-001",
-            "functionName": function_name,
-            "content": content,
-        }, created_by="demo")
-        admin.review(generated["id"], "ACCEPT", reviewer="demo")
+    from .knowledge_update.functional_service import FunctionalKnowledgeService
+    FunctionalKnowledgeService(db, project_config=root / "project.config.json").refresh(analyze=False)
     return db
 
 
@@ -141,7 +128,7 @@ def main() -> None:
     except EnvFileError as exc:
         parser.error(str(exc))
     if args.command == "serve-query":
-        _warn_model_configuration(args.project_config)
+        _warn_model_configuration()
     if args.command == "demo":
         state = Orchestrator(load_demo(args.db)).answer(args.question)
         print(state.answer)
@@ -156,7 +143,7 @@ def main() -> None:
             "repositories": db.execute("SELECT count(*) FROM repository").fetchone()[0],
             "symbols": db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
             "businessKnowledge": db.execute(
-                "SELECT count(*) FROM business_function WHERE status='PUBLISHED'"
+                "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
             ).fetchone()[0],
             "requirements": db.execute("SELECT count(*) FROM requirement").fetchone()[0],
         }
@@ -246,7 +233,7 @@ def _print_analysis(result: dict, as_json: bool) -> None:
     print(f"仓库：{overview['files']} 文件，{overview['symbols']} Symbol，{overview['facts']} Fact，解析错误 {overview['parse_errors']}")
     print("模块：" + "，".join(f"{name}({count})" for name, count in overview["modules"].items()))
     knowledge = overview["knowledge_sources"]
-    print(f"知识源：需求 {knowledge['requirements']}，已发布功能知识 {knowledge['business_functions']}（均为可选增强）")
+    print(f"知识源：需求 {knowledge['requirements']}，功能知识 {knowledge['business_functions']}（均为可选增强）")
     print("字段候选：")
     if not result["candidates"]:
         print("  暂无读写/校验活动；可加 --include-declared 查看纯声明字段")
@@ -279,7 +266,7 @@ def _print_explanation(result: dict, as_json: bool) -> None:
         print(f"缺口：{gap}")
 
 
-def _warn_model_configuration(project_config: str | None) -> None:
+def _warn_model_configuration() -> None:
     """Make an enabled-but-unconfigured model visible at server startup."""
 
     from .knowledge_update.langchain_adapter import model_config_from_environment
@@ -290,23 +277,11 @@ def _warn_model_configuration(project_config: str | None) -> None:
         print(f"[WARN] 模型环境配置无效：{exc}；将使用 FALLBACK。", file=sys.stderr)
         return
 
-    if environment_config is not None:
-        configurations = (environment_config,) if environment_config.get("enabled", True) else ()
-    else:
-        if not project_config:
-            return
-        path = Path(project_config).expanduser()
-        if not path.is_file():
-            return
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return
-        configurations = tuple(
-            value for section in ("model", "queryModel")
-            if isinstance(value := payload.get(section), dict)
-            and value.get("enabled", True)
-        )
+    configurations = (
+        (environment_config,)
+        if environment_config and environment_config.get("enabled", True)
+        else ()
+    )
 
     missing: set[str] = set()
     for value in configurations:
@@ -316,7 +291,7 @@ def _warn_model_configuration(project_config: str | None) -> None:
     for variable in sorted(missing):
         print(
             f"[WARN] 模型已启用，但环境变量 {variable} 未设置；"
-            "Knowledge Update Agent / Query Agent 将使用 FALLBACK。",
+            "功能分析 Agent / 问答 Agent 将使用 FALLBACK。",
             file=sys.stderr,
         )
 

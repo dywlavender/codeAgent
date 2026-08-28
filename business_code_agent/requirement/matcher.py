@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from ..code_matching import CodeKnowledge, CodeMatcher, SearchPlan
 from ..util import stable_id
 from ..tools import EvidenceTools
-from ..knowledge_update.repository import KnowledgeGovernanceRepository
 from .models import RequirementRelationType
 
 
@@ -32,29 +31,34 @@ class RequirementRelationBuilder:
             *digest_value.affected_systems, *[rule.statement for rule in digest_value.business_rules],
         ]))
         results = []
-        repository = KnowledgeGovernanceRepository(self.db)
-        for row in repository.list_functions(status="PUBLISHED", limit=100):
-            snapshot = row.get("snapshot") or {}
+        for row in self.db.execute("SELECT * FROM functional_knowledge WHERE status='ACTIVE' ORDER BY name LIMIT 100"):
+            analysis = self.db.execute(
+                "SELECT flow_json,rules_json FROM functional_analysis WHERE function_id=?", (row["id"],)
+            ).fetchone()
+            flow = json.loads(analysis["flow_json"]) if analysis else []
+            rules = json.loads(analysis["rules_json"]) if analysis else []
             business_terms = _terms(" ".join([
-                snapshot.get("name", ""), snapshot.get("summary", ""),
-                *[item.get("name", "") for item in snapshot.get("scenarios", [])],
-                *[item.get("statement", "") for item in snapshot.get("rules", [])],
+                row["name"], row["summary"], *json.loads(row["aliases_json"]),
+                *json.loads(row["tags_json"]), *json.loads(row["scenarios_json"]),
+                *[item.get("statement", "") for item in flow],
+                *[item.get("statement", "") for item in rules],
             ]))
             overlap = sorted(requirement_terms & business_terms)
             if not overlap:
                 continue
-            statement = "；".join(item.get("statement", "") for item in snapshot.get("rules", []))
+            statement = "；".join(item.get("statement", "") for item in rules)
             explicit = len(overlap) >= 2 or any(statement and (statement in rule.statement or rule.statement in statement) for rule in digest_value.business_rules)
             status = "DERIVED" if explicit else "SUGGESTED"
             evidence_id = self._requirement_evidence_for_terms(version_id, overlap)
-            function_evidence = list(snapshot.get("evidence_ids", []))
-            for collection in ("scenarios", "rules", "entries", "data_impacts"):
-                for item in snapshot.get(collection, []):
-                    function_evidence.extend(item.get("evidence_ids", []))
+            function_evidence = [item[0] for item in self.db.execute(
+                """SELECT evidence_id FROM functional_retrieval_link
+                    WHERE function_id=? AND relation_type='MANUAL_DEFINITION' AND evidence_id IS NOT NULL""",
+                (row["id"],),
+            )]
             relation = self._save(
                 version_id, "DIGEST", version_id,
                 RequirementRelationType.RELATED_BUSINESS_KNOWLEDGE.value,
-                "BUSINESS_FUNCTION", row["id"], "DETERMINISTIC_MATCH",
+                "FUNCTION", row["id"], "DETERMINISTIC_MATCH",
                 min(0.95, 0.45 + 0.1 * len(overlap)),
                 status if evidence_id and function_evidence else "SUGGESTED",
                 f"需求与已发布功能知识共同命中：{', '.join(overlap[:6])}",

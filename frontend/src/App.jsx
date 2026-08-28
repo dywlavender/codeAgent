@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  BookOpen, ChatCircleDots, Lock, Plus, ShieldCheck,
+  BookOpen, ChatCircleDots, Graph, Lock, Plus, ShieldCheck,
 } from "@phosphor-icons/react";
 import {
   Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Typography,
@@ -9,11 +9,12 @@ import { RequestAborted, request } from "./lib/api.js";
 import { buildQueryHistory, formatTime, intentLabel } from "./lib/format.js";
 import { AgentPage } from "./pages/AgentPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
+import { GraphPage } from "./pages/GraphPage.jsx";
 import { KnowledgeAdminPage } from "./pages/KnowledgeAdminPage.jsx";
 
 const { Sider, Content } = Layout;
 
-const PAGE_IDS = ["agent", "library", "admin"];
+const PAGE_IDS = ["agent", "library", "graph", "admin"];
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, "");
@@ -208,11 +209,12 @@ export default function App() {
           items={[
             { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "问答" },
             { key: "library", icon: <BookOpen size={16.5} />, label: "浏览知识库" },
+            { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
             ...(showAdminZone ? [{
               type: "group",
               label: "管理",
               children: [
-                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>知识治理{pendingCount(runs) > 0 ? "" : ""}</span> },
+                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>功能知识维护</span> },
               ],
             }] : []),
           ]}
@@ -267,6 +269,7 @@ export default function App() {
           />
         )}
         {page === "library" && <LibraryPage workspace={workspace} />}
+        {page === "graph" && <GraphPage workspace={workspace} />}
         {page === "admin" && <KnowledgeAdminPage onRequireUnlock={() => setLockOpen(true)} />}
       </Content>
 

@@ -18,7 +18,10 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
                 )
             }
             db.close()
-        self.assertIn("business_function", names)
+        self.assertIn("functional_knowledge", names)
+        self.assertNotIn("business_function", names)
+        self.assertNotIn("business_function_version", names)
+        self.assertNotIn("knowledge_update_proposal", names)
         self.assertNotIn("business_knowledge", names)
         self.assertNotIn("knowledge_relation", names)
         self.assertNotIn("knowledge_change", names)
@@ -38,6 +41,22 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
             db = connect(path)
             self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='business_knowledge'").fetchone())
             self.assertIsNone(db.execute("SELECT 1 FROM evidence WHERE id='OLD-EV'").fetchone())
+            db.close()
+
+    def test_existing_proposal_schema_is_removed_on_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "knowledge.db")
+            db = connect(path)
+            db.execute("CREATE TABLE business_function (id TEXT PRIMARY KEY)")
+            db.execute("CREATE TABLE business_function_version (id TEXT PRIMARY KEY)")
+            db.execute("CREATE TABLE knowledge_update_proposal (id TEXT PRIMARY KEY)")
+            db.commit()
+            db.close()
+            db = connect(path)
+            names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("business_function", names)
+            self.assertNotIn("business_function_version", names)
+            self.assertNotIn("knowledge_update_proposal", names)
             db.close()
 
 

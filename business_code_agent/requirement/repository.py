@@ -86,7 +86,7 @@ class RequirementRepository:
             "INSERT INTO requirement_fts (requirement_id,requirement_version_id,title,digest,rules,tags) VALUES (?, ?, ?, ?, ?, ?)",
             (requirement_id, version_id, _fts_text(digest_value.title), _fts_text(dumps(digest_value.to_dict())), _fts_text(rules), _fts_text(" ".join(tags))),
         )
-        # Legacy current-version views remain available to the existing M4 code.
+        # Current-version views remain available to the query layer.
         self.db.execute("INSERT OR REPLACE INTO requirement_digest VALUES (?, ?)", (requirement_id, dumps(digest_value.to_dict())))
         self.db.execute("DELETE FROM requirement_chunk WHERE requirement_id=?", (requirement_id,))
         for chunk in chunks:

@@ -34,7 +34,7 @@ class RepositoryAnalyzer:
         knowledge = {
             "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
             "business_functions": self.db.execute(
-                "SELECT count(*) FROM business_function WHERE status='PUBLISHED'"
+                "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
             ).fetchone()[0],
         }
         return {
@@ -141,5 +141,5 @@ class RepositoryAnalyzer:
         if not candidate["requirements"]:
             gaps.append("未导入或未命中需求依据（可选增强）")
         if not candidate["business_functions"]:
-            gaps.append("未导入或未命中业务解释（可选增强）")
+            gaps.append("未命中功能知识文档（可选增强）")
         return gaps

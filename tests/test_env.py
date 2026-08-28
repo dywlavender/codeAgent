@@ -66,7 +66,7 @@ TEST_CODE_ATLAS_EXISTING=from-file
             "maxRetries": 4,
         }, config)
 
-    def test_model_environment_can_disable_legacy_json_configuration(self):
+    def test_model_environment_can_disable_model_calls(self):
         config = model_config_from_environment({"BUSINESS_CODE_MODEL_ENABLED": "false"})
         self.assertEqual(False, config["enabled"])
 

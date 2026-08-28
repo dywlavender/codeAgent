@@ -17,16 +17,9 @@ const TYPE_CONFIG = {
   功能知识: {
     endpoint: "/api/functions?q=",
     placeholder: "搜索功能名称或业务域",
-    empty: "还没有已发布的功能知识。审核通过首个提案后会出现在这里。",
+    empty: "还没有功能知识。请在管理页面更新知识库。",
     countKey: "businessKnowledge",
     noun: "Functions",
-  },
-  需求: {
-    endpoint: "/api/requirements?q=",
-    placeholder: "搜索需求编号或标题",
-    empty: "没有匹配的需求。可通过 CLI 导入 .docx / .md / .txt。",
-    countKey: "requirements",
-    noun: "Requirements",
   },
 };
 
@@ -164,13 +157,12 @@ function rowSubtitle(item, type) {
   if (type === "功能知识") {
     return `${item.statement || ""}`;
   }
-  return `${item.status || ""}${item.current_version ? ` · V${item.current_version}` : ""}`;
+  return `${item.status || ""}`;
 }
 
 function statusColor(status) {
   const value = String(status || "").toUpperCase();
-  if (["PUBLISHED", "ACTIVE"].includes(value)) return "green";
-  if (value === "DRAFT") return "gold";
+  if (["CONFIRMED", "ACTIVE", "READY"].includes(value)) return "green";
   return "default";
 }
 
@@ -184,7 +176,7 @@ function ResultRow({ item, type, active, onSelect }) {
         <b>{rowTitle(item, type)}</b>
         <small>{rowSubtitle(item, type)}</small>
       </span>
-      {item.status && <Tag color={statusColor(item.status)} style={{ fontSize: 10.5 }}>{item.status === "PUBLISHED" ? "已发布" : item.status}</Tag>}
+      {item.status && <Tag color={statusColor(item.status)} style={{ fontSize: 10.5 }}>{item.status === "CONFIRMED" ? "已确认" : item.status}</Tag>}
     </button>
   );
 }

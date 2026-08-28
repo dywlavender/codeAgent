@@ -57,7 +57,7 @@ class BusinessCodeQueryAgent:
 
         @tool
         def search_business_functions(query: str) -> list[dict]:
-            """Search published or legacy confirmed business summaries."""
+            """Search active function documents and retrieval navigation."""
             return self.retriever.tools.business.search_business_knowledge(query)[:8]
 
         @tool

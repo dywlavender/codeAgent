@@ -27,7 +27,7 @@ def make_server(db_path: str, host: str = "127.0.0.1", port: int = 8081) -> Thre
 
         def do_POST(self):
             self._json(410, {
-                "error": "legacy requirement write API is disabled; use administrator CLI import and knowledge governance",
+                "error": "requirement write API is disabled; use the administrator CLI import command",
             })
 
         def do_GET(self):

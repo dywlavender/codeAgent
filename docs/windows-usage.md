@@ -83,7 +83,7 @@ Copy-Item .env.example .env
 start-windows.bat -Mode Empty -Database ".data\company.db"
 ```
 
-之后使用 `.venv-windows\Scripts\business-code-agent.exe` 导入资料：
+之后使用 `.venv-windows\Scripts\business-code-agent.exe` 索引本地代码：
 
 ```bat
 .venv-windows\Scripts\business-code-agent.exe ingest-repo ^
@@ -91,13 +91,9 @@ start-windows.bat -Mode Empty -Database ".data\company.db"
   --repository-id loan-system ^
   --db ".data\company.db"
 
-.venv-windows\Scripts\business-code-agent.exe requirement-import ^
-  "D:\documents\REQ-2026-018.docx" ^
-  --id REQ-2026-018 ^
-  --db ".data\company.db"
 ```
 
-导入完成后，在工作台“知识生成”页面选择当前代码和需求依据，再补充一段业务说明。系统会生成待审核草稿；管理员接受后才发布功能知识。
+把功能文档放入 `project.config.json` 中 `knowledge.root` 指定的目录。启动工作台后进入“功能知识”，点击“更新知识库”。
 
 导入后再次运行：
 
@@ -147,22 +143,12 @@ start-windows.bat -HostAddress 0.0.0.0
 
 ### 业务知识闭环
 
-1. 打开“知识生成”，确认当前代码卡片使用的是最近一次同步版本。
-2. 在“需求依据”中勾选已导入的 Requirement，可选补充业务说明和本次主题。
-3. 点击“生成知识草稿”，等待 Knowledge Update Agent 生成结构化草稿。
-4. 在待处理列表中查看知识摘要、场景、规则、代码入口、标签和来源证据。
-5. 管理员接受、驳回或暂缓；只有接受后才发布新的功能知识版本。
-6. 打开“知识图谱”按功能、需求、Code Fact、标签或业务补充查询关系。
-7. 用户端 Query Agent 只读取已发布版本。
-
-旧版独立业务知识命令已移除。新的知识写入统一走“知识生成”接口，用户侧只读取已发布功能知识。
-
-### 需求驱动分析
-
-1. 使用 `requirement-import` 导入 `.docx`、`.md` 或 `.txt`。
-2. 使用 `requirement-enrich` 关联代码和业务知识。
-3. Agent 默认使用 Digest；只有需要核实规则时读取命中的原文 Chunk。
-4. 新版本使用相同 Requirement ID 导入，系统保留版本变化，不自动覆盖人工业务事实。
+1. 在 `knowledge.root` 中编写简化功能文档。
+2. 打开“功能知识”，点击“更新知识库”。
+3. 检查工程入口是否已定位，多个候选或未找到时修正文档。
+4. 查看关键表的代码读写位置、业务流程摘要和核心规则摘要。
+5. 打开“知识图谱”查看功能、工程、入口代码、关键表和标签。
+6. Query Agent 使用这些内容制定检索计划，最终仍读取当前代码和业务文档。
 
 ## 停止、重启与升级
 
@@ -195,12 +181,12 @@ start-windows.bat -HostAddress 0.0.0.0
 
 ### 真实项目能索引但业务原因为空
 
-这是证据边界，不是启动故障。代码只能证明当前行为；“为什么”和规则来源通常还需要导入 Requirement，或通过“知识生成”补充业务事实。
+这是证据边界，不是启动故障。请确认问题匹配的功能文档已经登记入口类和关键表，并检查入口定位状态。
 
 ### 知识更新提示缺少模型凭据
 
-检查根目录 `.env` 中的 `BUSINESS_CODE_MODEL_ENABLED` 和 `BUSINESS_CODE_MODEL_API_KEY`。如果暂时不使用模型，将 `BUSINESS_CODE_MODEL_ENABLED` 设为 `false`，系统会生成保守的人工复核提案。旧配置仍支持 `project.config.json` 中的 `model` / `queryModel`，但 `.env` 中只要出现 `BUSINESS_CODE_MODEL_*`，就以 `.env` 为准。
+检查根目录 `.env` 中的 `BUSINESS_CODE_MODEL_ENABLED` 和 `BUSINESS_CODE_MODEL_API_KEY`。如果暂时不使用模型，将 `BUSINESS_CODE_MODEL_ENABLED` 设为 `false`；系统仍会建立入口和关键表索引，但不会生成流程与规则。
 
-### 知识生成要求管理员口令
+### 更新知识库要求管理员口令
 
-检查 `project.config.json` 中的 `admin.apiTokenEnv`，在启动前设置对应环境变量。进入“知识生成”后输入同一口令解锁；口令仅保留在当前浏览器标签会话中。知识图谱查询是只读的，不需要管理员口令。
+检查 `project.config.json` 中的 `admin.apiTokenEnv`，在启动前设置对应环境变量。进入“功能知识”后输入同一口令解锁；口令仅保留在当前浏览器标签会话中。知识图谱查询是只读的，不需要管理员口令。

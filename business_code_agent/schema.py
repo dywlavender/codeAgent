@@ -109,87 +109,6 @@ CREATE TABLE IF NOT EXISTS requirement_chunk (
   id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
   content TEXT NOT NULL, evidence_id TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS business_function (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT NOT NULL DEFAULT '',
-  summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-  current_version_id TEXT, created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS business_function_version (
-  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, version INTEGER NOT NULL,
-  status TEXT NOT NULL, snapshot_json TEXT NOT NULL,
-  source_proposal_id TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
-  UNIQUE(function_id, version),
-  FOREIGN KEY(function_id) REFERENCES business_function(id)
-);
-CREATE TABLE IF NOT EXISTS function_scenario (
-  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
-  name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-  PRIMARY KEY(function_version_id, id),
-  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS function_rule (
-  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
-  statement TEXT NOT NULL, conditions_json TEXT NOT NULL,
-  result TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-  PRIMARY KEY(function_version_id, id),
-  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS function_entry (
-  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
-  entry_type TEXT NOT NULL, label TEXT NOT NULL,
-  target_type TEXT NOT NULL DEFAULT '', target_id TEXT NOT NULL DEFAULT '',
-  locator TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-  PRIMARY KEY(function_version_id, id),
-  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS function_data_impact (
-  id TEXT NOT NULL, function_version_id TEXT NOT NULL,
-  object_type TEXT NOT NULL, object_name TEXT NOT NULL,
-  operation TEXT NOT NULL, before_state TEXT NOT NULL DEFAULT '',
-  after_state TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY(function_version_id, id),
-  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS function_item_evidence (
-  function_version_id TEXT NOT NULL, item_type TEXT NOT NULL,
-  item_id TEXT NOT NULL, evidence_id TEXT NOT NULL,
-  PRIMARY KEY(function_version_id, item_type, item_id, evidence_id),
-  FOREIGN KEY(function_version_id) REFERENCES business_function_version(id) ON DELETE CASCADE,
-  FOREIGN KEY(evidence_id) REFERENCES evidence(id)
-);
-CREATE TABLE IF NOT EXISTS knowledge_update_proposal (
-  id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
-  trigger_type TEXT NOT NULL, trigger_id TEXT NOT NULL,
-  action TEXT NOT NULL, target_function_id TEXT NOT NULL,
-  base_version_id TEXT, proposed_snapshot_json TEXT NOT NULL,
-  status TEXT NOT NULL, created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  reviewed_by TEXT, reviewed_at TEXT, published_by TEXT, published_at TEXT
-);
-CREATE TABLE IF NOT EXISTS knowledge_update_proposal_item (
-  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, sequence INTEGER NOT NULL,
-  item_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT,
-  before_json TEXT, after_json TEXT, rationale TEXT NOT NULL DEFAULT '',
-  confidence REAL NOT NULL DEFAULT 0,
-  FOREIGN KEY(proposal_id) REFERENCES knowledge_update_proposal(id) ON DELETE CASCADE,
-  UNIQUE(proposal_id, sequence)
-);
-CREATE TABLE IF NOT EXISTS proposal_item_evidence (
-  proposal_item_id TEXT NOT NULL, evidence_id TEXT NOT NULL,
-  PRIMARY KEY(proposal_item_id, evidence_id),
-  FOREIGN KEY(proposal_item_id) REFERENCES knowledge_update_proposal_item(id) ON DELETE CASCADE,
-  FOREIGN KEY(evidence_id) REFERENCES evidence(id)
-);
-CREATE TABLE IF NOT EXISTS knowledge_proposal_review (
-  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, decision TEXT NOT NULL,
-  reviewer TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', reviewed_at TEXT NOT NULL,
-  FOREIGN KEY(proposal_id) REFERENCES knowledge_update_proposal(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_business_function_status ON business_function(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_function_version_function ON business_function_version(function_id, version);
-CREATE INDEX IF NOT EXISTS idx_knowledge_proposal_status ON knowledge_update_proposal(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_knowledge_proposal_target ON knowledge_update_proposal(target_function_id, created_at);
 CREATE TABLE IF NOT EXISTS agent_run (
   id TEXT PRIMARY KEY, question TEXT NOT NULL, state_json TEXT NOT NULL,
   evidence_status TEXT NOT NULL, iterations INTEGER NOT NULL, created_at TEXT NOT NULL
@@ -231,6 +150,49 @@ CREATE TABLE IF NOT EXISTS query_feedback (
   comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
   FOREIGN KEY(run_id) REFERENCES query_agent_run(id)
 );
+
+-- Function-centred knowledge V2. Human-authored definitions and generated
+-- analysis are deliberately stored separately so a code refresh can never
+-- rewrite the source document.
+CREATE TABLE IF NOT EXISTS functional_knowledge (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, aliases_json TEXT NOT NULL,
+  tags_json TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+  scenarios_json TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+  source_path TEXT NOT NULL UNIQUE, source_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', refreshed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS functional_entry_anchor (
+  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, project_name TEXT NOT NULL,
+  entry_type TEXT NOT NULL, class_name TEXT NOT NULL,
+  symbol_id TEXT, resolution_status TEXT NOT NULL,
+  candidate_ids_json TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(function_id, project_name, entry_type, class_name),
+  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS functional_key_table (
+  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, table_name TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  UNIQUE(function_id, table_name),
+  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS functional_retrieval_link (
+  id TEXT PRIMARY KEY, function_id TEXT NOT NULL,
+  source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+  evidence_id TEXT, created_at TEXT NOT NULL,
+  UNIQUE(function_id, source_type, source_id, relation_type, target_type, target_id, evidence_id),
+  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS functional_analysis (
+  function_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+  flow_json TEXT NOT NULL DEFAULT '[]', rules_json TEXT NOT NULL DEFAULT '[]',
+  coverage_json TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL,
+  analyzed_at TEXT, message TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_functional_knowledge_status ON functional_knowledge(status, refreshed_at);
+CREATE INDEX IF NOT EXISTS idx_functional_entry_function ON functional_entry_anchor(function_id, resolution_status);
+CREATE INDEX IF NOT EXISTS idx_functional_link_function ON functional_retrieval_link(function_id, relation_type);
 """
 
 
@@ -243,8 +205,9 @@ def connect(path: str) -> sqlite3.Connection:
 
 
 def _migrate(connection: sqlite3.Connection) -> None:
-    """Retire the old business schema and add safe columns to older databases."""
+    """Remove retired schemas and apply additive migrations."""
     _purge_retired_business_schema(connection)
+    _purge_legacy_function_governance(connection)
     additions = {
         "requirement": (
             ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
@@ -257,7 +220,43 @@ def _migrate(connection: sqlite3.Connection) -> None:
         for name, declaration in columns:
             if name not in existing:
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+    entry_columns = {row[1] for row in connection.execute("PRAGMA table_info(functional_entry_anchor)")}
+    if "repository_id" in entry_columns and "project_name" not in entry_columns:
+        connection.execute("ALTER TABLE functional_entry_anchor RENAME COLUMN repository_id TO project_name")
     connection.commit()
+
+
+def _purge_legacy_function_governance(connection: sqlite3.Connection) -> None:
+    """Remove the superseded proposal/version model from existing databases."""
+    tables = (
+        "knowledge_proposal_review",
+        "proposal_item_evidence",
+        "knowledge_update_proposal_item",
+        "function_item_evidence",
+        "function_data_impact",
+        "function_entry",
+        "function_rule",
+        "function_scenario",
+        "business_function_version",
+        "knowledge_update_proposal",
+        "business_function",
+    )
+    existing = {
+        row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if not existing.intersection(tables):
+        return
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in tables:
+            if table in existing:
+                connection.execute(f'DROP TABLE "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
 
 
 def _purge_retired_business_schema(connection: sqlite3.Connection) -> None:

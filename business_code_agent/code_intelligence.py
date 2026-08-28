@@ -38,7 +38,6 @@ class JavaIndexer:
     def __init__(self, db: Connection):
         self.db = db
         self.syntax_backend = self._load_tree_sitter()
-        self._pending_function_revalidations: dict[tuple[str, str, str], dict] = {}
 
     @staticmethod
     def _load_tree_sitter():
@@ -53,7 +52,6 @@ class JavaIndexer:
 
     def ingest(self, root: str, repository_id: str = "repo-main") -> dict[str, int]:
         root_path = Path(root).resolve()
-        self._pending_function_revalidations.clear()
         self.db.execute(
             "INSERT OR REPLACE INTO repository VALUES (?, ?, ?)",
             (repository_id, str(root_path), datetime.now(timezone.utc).isoformat()),
@@ -67,7 +65,6 @@ class JavaIndexer:
             result = self._ingest_mybatis(repository_id, root_path, path)
             counts = {key: counts[key] + result[key] for key in counts}
         self._remove_deleted(repository_id, root_path)
-        self._flush_function_revalidations()
         self.db.commit()
         if counts["files"]:
             counts["symbols"] = self.db.execute(
@@ -387,108 +384,20 @@ class JavaIndexer:
             )
 
     def _mark_file_relations_stale(self, file_id: str, trigger_type: str, path: str) -> None:
-        # Code changes invalidate evidence, not published knowledge directly.
-        # The canonical governance workflow creates one review proposal per
-        # affected function in ``_collect_function_revalidation`` below.
-        self._collect_function_revalidation(file_id, trigger_type, path)
-
-    def _collect_function_revalidation(self, file_id: str, trigger_type: str, path: str) -> None:
-        """Create one review proposal per affected function, never per changed fact."""
-        affected = self.db.execute(
-            """SELECT DISTINCT bf.id function_id, bf.current_version_id, e.id evidence_id
-                 FROM business_function bf
-                 JOIN business_function_version bfv ON bfv.id=bf.current_version_id
-                 JOIN function_item_evidence fie ON fie.function_version_id=bfv.id
-                 JOIN evidence e ON e.id=fie.evidence_id
-                WHERE bf.status='PUBLISHED' AND e.source_type='CODE' AND e.source_id=?""",
-            (file_id,),
-        ).fetchall()
-        grouped: dict[str, dict] = {}
-        for row in affected:
-            item = grouped.setdefault(row["function_id"], {
-                "version_id": row["current_version_id"], "evidence_ids": [],
-            })
-            item["evidence_ids"].append(row["evidence_id"])
-        trigger_id = f"{file_id}:{path}"
-        for function_id, value in grouped.items():
-            key = (function_id, trigger_type, trigger_id)
-            pending = self._pending_function_revalidations.setdefault(key, {
-                "function_id": function_id,
-                "trigger_type": trigger_type,
-                "trigger_id": trigger_id,
-                "path": path,
-                "file_id": file_id,
-                "version_id": value["version_id"],
-                "evidence_ids": [],
-            })
-            pending["evidence_ids"].extend(value["evidence_ids"])
-
-    def _flush_function_revalidations(self) -> None:
-        if not self._pending_function_revalidations:
-            return
-        from .knowledge_update.repository import KnowledgeGovernanceRepository, retain_active_evidence
-
-        repository = KnowledgeGovernanceRepository(self.db)
-        for value in self._pending_function_revalidations.values():
-            function_id = value["function_id"]
-            trigger_type = value["trigger_type"]
-            trigger_id = value["trigger_id"]
-            path = value["path"]
-            new_evidence = [row[0] for row in self.db.execute(
-                """SELECT DISTINCT cf.evidence_id FROM code_fact cf
-                     JOIN code_symbol cs ON cs.id=cf.symbol_id
-                    WHERE cs.file_id=? ORDER BY cf.evidence_id LIMIT 40""",
-                (value["file_id"],),
-            )]
-            existing = self.db.execute(
-                """SELECT id FROM knowledge_update_proposal
-                    WHERE target_function_id=? AND trigger_type=? AND trigger_id=?
-                      AND status IN ('DRAFT','PENDING_REVIEW','DEFERRED','CHANGES_REQUESTED')
-                    LIMIT 1""",
-                (function_id, trigger_type, trigger_id),
-            ).fetchone()
-            if existing:
-                continue
-            current = repository.get_function(function_id)
-            snapshot = retain_active_evidence(self.db, current["snapshot"])
-            matched_evidence: list[str] = []
-            for entry in snapshot.get("entries", []):
-                target_id = str(entry.get("target_id") or "")
-                if not target_id:
-                    continue
-                entry_evidence = [row[0] for row in self.db.execute(
-                    "SELECT evidence_id FROM code_fact WHERE symbol_id=? ORDER BY evidence_id LIMIT 20",
-                    (target_id,),
-                )]
-                if entry_evidence:
-                    entry["evidence_ids"] = entry_evidence
-                    matched_evidence.extend(entry_evidence)
-            snapshot["evidence_ids"] = list(dict.fromkeys([
-                *snapshot.get("evidence_ids", []), *matched_evidence,
-            ]))
-            proposal = repository.create_proposal(
-                f"重新验证功能知识：{current['function']['name']}",
-                trigger_type,
-                trigger_id,
-                snapshot,
-                "code-indexer",
-                target_function_id=function_id,
-                action="UPDATE",
-                summary=f"关联源码 {path} 已变化，需要确认业务语义是否仍然有效",
-                base_version_id=value["version_id"],
-            )
-            proposal_id = proposal["proposal"]["id"]
-            repository.add_proposal_item(
-                proposal_id,
-                "REVALIDATE",
-                "EVIDENCE",
-                before={"status": "ACTIVE", "file": path},
-                after={"status": "REQUIRES_REVIEW", "file": path},
-                rationale="已发布功能引用的代码证据发生变化；仅标记复核，不自动修改业务知识",
-                confidence=1.0,
-                evidence_ids=list(dict.fromkeys([*value["evidence_ids"], *new_evidence])),
-            )
-            repository.submit_proposal(proposal_id)
+        # Generated analysis is disposable. If one of its code sources changes,
+        # mark only the automatic layer stale; the human document stays intact.
+        now = datetime.now(timezone.utc).isoformat()
+        self.db.execute(
+            """UPDATE functional_analysis
+                  SET status='STALE', analyzed_at=?, message=?
+                WHERE function_id IN (
+                  SELECT DISTINCT frl.function_id
+                    FROM functional_retrieval_link frl
+                    JOIN evidence e ON e.id=frl.evidence_id
+                   WHERE e.source_type='CODE' AND e.source_id=?
+                )""",
+            (now, f"关联代码 {path} 已变化，请更新知识库", file_id),
+        )
 
     def _archive_file_evidence(self, file_id: str, trigger_type: str, path: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

@@ -11,7 +11,7 @@ from .langchain_adapter import LangChainQueryAnalyzer, LangChainQueryComposer
 
 
 def _safe_json_loads(text):
-    """Parse stored JSON, returning an empty dict for legacy/corrupt rows."""
+    """Parse stored JSON, returning an empty dict for invalid rows."""
     if not text:
         return {}
     try:
@@ -43,16 +43,8 @@ class QueryService:
         value["evidence"] = self.evidence_for_answer(value["answer"])
         return value
 
-    def _model_stages(self, project_config):
+    def _model_stages(self, _project_config):
         config = model_config_from_environment()
-        if config is None:
-            if not project_config or not Path(project_config).is_file():
-                return None, None
-            try:
-                payload = json.loads(Path(project_config).read_text(encoding="utf-8"))
-                config = payload.get("queryModel") or payload.get("model")
-            except Exception:
-                return None, None
         try:
             if not isinstance(config, dict) or not config.get("enabled", True):
                 return None, None
@@ -91,7 +83,7 @@ class QueryService:
         if not run:
             raise KeyError(run_id)
         value = dict(run)
-        # Legacy or interrupted rows may carry missing/corrupt JSON; degrade
+        # Interrupted writes may carry missing or invalid JSON; degrade
         # gracefully instead of failing the whole replay endpoint.
         value["answer"] = _safe_json_loads(value.pop("answer_json"))
         value["state"] = _safe_json_loads(value.pop("state_json"))
@@ -190,11 +182,11 @@ class QueryService:
                 "symbols": self.db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
                 "facts": self.db.execute("SELECT count(*) FROM code_fact").fetchone()[0],
                 "businessKnowledge": self.db.execute(
-                    "SELECT count(*) FROM business_function WHERE status='PUBLISHED'"
+                    "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
                 ).fetchone()[0],
                 "pendingProposals": self.db.execute(
-                    """SELECT count(*) FROM knowledge_update_proposal
-                         WHERE status IN ('PENDING_REVIEW','DEFERRED','CHANGES_REQUESTED')"""
+                    """SELECT count(*) FROM functional_analysis
+                         WHERE status IN ('NOT_RUN','STALE','FAILED','INSUFFICIENT')"""
                 ).fetchone()[0],
                 "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
                 "runs": self.db.execute("SELECT count(*) FROM query_agent_run").fetchone()[0],

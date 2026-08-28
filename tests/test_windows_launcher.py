@@ -30,7 +30,7 @@ class WindowsLauncherTest(unittest.TestCase):
             self.assertEqual(1, second["repositories"])
             db = connect(str(demo))
             self.assertEqual(1, db.execute("SELECT count(*) FROM requirement").fetchone()[0])
-            self.assertEqual(1, db.execute("SELECT count(*) FROM business_function WHERE status='PUBLISHED'").fetchone()[0])
+            self.assertEqual(1, db.execute("SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'").fetchone()[0])
             db.close()
 
     def test_windows_entrypoints_have_safe_defaults_and_no_destructive_commands(self):

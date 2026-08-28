@@ -4,9 +4,6 @@ import json
 from collections import defaultdict
 from typing import Any
 
-from .knowledge_update.repository import KnowledgeGovernanceRepository
-
-
 class KnowledgeGraphService:
     """Read-only graph projection built from published knowledge and Evidence.
 
@@ -15,11 +12,10 @@ class KnowledgeGraphService:
     symbol, or Evidence record that created the relation.
     """
 
-    NODE_TYPES = {"FUNCTION", "REQUIREMENT", "CODE", "TAG", "BUSINESS"}
+    NODE_TYPES = {"FUNCTION", "PROJECT", "CODE", "TABLE", "TAG"}
 
     def __init__(self, db):
         self.db = db
-        self.repository = KnowledgeGovernanceRepository(db)
 
     def search(self, query: str = "", node_type: str = "", limit: int = 120) -> dict[str, Any]:
         query = str(query or "").strip().casefold()
@@ -65,124 +61,78 @@ class KnowledgeGraphService:
             else:
                 item["evidenceIds"] = list(dict.fromkeys([*item["evidenceIds"], *(str(value) for value in evidence_ids if value)]))
 
-        # Published function snapshots are the central business nodes.
-        for summary in self.repository.list_functions(status="PUBLISHED", limit=100):
-            function_id = str(summary["id"])
-            detail = self.repository.get_function(function_id)
-            snapshot = detail["snapshot"]
-            evidence_ids = _snapshot_evidence(snapshot)
+        # Human function definitions are the centre; every other node is a
+        # navigation projection that points back to current code evidence.
+        for row in self.db.execute("SELECT * FROM functional_knowledge WHERE status='ACTIVE' ORDER BY name"):
+            function_id = str(row["id"])
+            tags = _as_list(json.loads(row["tags_json"]))
+            evidence_count = self.db.execute(
+                "SELECT count(DISTINCT evidence_id) FROM functional_retrieval_link WHERE function_id=? AND evidence_id IS NOT NULL",
+                (function_id,),
+            ).fetchone()[0]
             function_node_id = add_node(
                 f"FUNCTION:{function_id}",
                 "FUNCTION",
-                str(snapshot.get("name") or function_id),
-                subtitle=str(snapshot.get("domain") or "业务功能"),
-                description=str(snapshot.get("summary") or ""),
-                status="PUBLISHED",
-                statusLabel="已发布",
-                version=detail["version"].get("version"),
-                evidenceCount=len(evidence_ids),
+                str(row["name"]),
+                subtitle="业务功能",
+                description=str(row["summary"]),
+                status="ACTIVE",
+                statusLabel="功能文档",
+                evidenceCount=evidence_count,
                 sourceId=function_id,
-                tags=_normalise_tags(snapshot.get("tags") or snapshot.get("knowledge_tags") or snapshot.get("knowledgeTags")),
+                tags=[{"name": tag, "key": tag} for tag in tags],
             )
-
-            for tag in _normalise_tags(snapshot.get("tags") or snapshot.get("knowledge_tags") or snapshot.get("knowledgeTags")):
-                tag_key = str(tag.get("key") or tag.get("canonicalKey") or tag.get("name") or "").strip()
-                if not tag_key:
-                    continue
+            for tag_key in tags:
                 tag_node_id = add_node(
                     f"TAG:{tag_key.casefold()}",
                     "TAG",
-                    str(tag.get("name") or tag_key),
-                    subtitle=str(tag.get("typeLabel") or tag.get("type") or "知识标签"),
-                    description=str(tag.get("alias") or ""),
-                    statusLabel="已归一化",
+                    tag_key,
+                    subtitle="功能标签",
+                    statusLabel="人工定义",
                     sourceId=tag_key,
-                    evidenceCount=len(_as_list(tag.get("evidence_ids") or tag.get("evidenceIds"))),
                 )
-                add_edge(
-                    function_node_id,
-                    tag_node_id,
-                    "HAS_TAG",
-                    evidence_ids=_as_list(tag.get("evidence_ids") or tag.get("evidenceIds")),
-                )
+                add_edge(function_node_id, tag_node_id, "HAS_TAG")
 
-            for entry in _as_list(snapshot.get("entries")):
-                target_id = str(entry.get("target_id") or entry.get("targetId") or "").strip()
-                if not target_id:
+            for entry in self.db.execute("SELECT * FROM functional_entry_anchor WHERE function_id=?", (function_id,)):
+                project_node_id = add_node(
+                    f"PROJECT:{entry['project_name']}", "PROJECT", entry["project_name"],
+                    subtitle="工程或模块", statusLabel="人工登记", sourceId=entry["project_name"],
+                )
+                add_edge(function_node_id, project_node_id, "INVOLVES_PROJECT")
+                if not entry["symbol_id"]:
                     continue
-                locator = str(entry.get("locator") or entry.get("label") or target_id)
+                symbol = self.db.execute(
+                    "SELECT qualified_name FROM code_symbol WHERE id=?", (entry["symbol_id"],)
+                ).fetchone()
                 code_node_id = add_node(
-                    f"CODE:{target_id}",
+                    f"CODE:{entry['symbol_id']}",
                     "CODE",
-                    locator,
-                    subtitle=str(entry.get("entry_type") or entry.get("entryType") or "代码入口"),
-                    description=str(entry.get("label") or ""),
-                    statusLabel="入口已关联",
-                    sourceId=target_id,
-                    evidenceCount=len(_as_list(entry.get("evidence_ids") or entry.get("evidenceIds"))),
+                    str(symbol["qualified_name"] if symbol else entry["class_name"]),
+                    subtitle=f"{entry['entry_type']}入口",
+                    statusLabel="已定位" if entry["resolution_status"] == "RESOLVED" else entry["resolution_status"],
+                    sourceId=entry["symbol_id"],
                 )
-                add_edge(function_node_id, code_node_id, "IMPLEMENTED_BY", evidence_ids=_as_list(entry.get("evidence_ids") or entry.get("evidenceIds")))
+                add_edge(project_node_id, code_node_id, "HAS_ENTRY")
+                add_edge(function_node_id, code_node_id, "ENTRY_POINT")
 
-            for evidence_id in evidence_ids:
-                self._add_evidence_relation(evidence_id, function_node_id, add_node, add_edge)
-
-        # Requirement relations contain stronger links than lexical co-occurrence.
-        rows = self.db.execute(
-            """SELECT rr.*,rv.requirement_id,rv.version requirement_version,r.title requirement_title
-                 FROM requirement_relation rr
-                 JOIN requirement_version rv ON rv.id=rr.requirement_version_id
-                 JOIN requirement r ON r.id=rv.requirement_id
-                WHERE rv.version=r.current_version"""
-        ).fetchall()
-        for row in rows:
-            requirement_node_id = add_node(
-                f"REQUIREMENT:{row['requirement_id']}",
-                "REQUIREMENT",
-                str(row["requirement_title"] or row["requirement_id"]),
-                subtitle=f"{row['requirement_id']} V{row['requirement_version']}",
-                description=str(row["reason"] or ""),
-                statusLabel="需求依据",
-                version=row["requirement_version"],
-                sourceId=row["requirement_id"],
-                evidenceCount=1 if row["requirement_evidence_id"] else 0,
-            )
-            target_type = str(row["target_type"] or "").upper()
-            target_id = str(row["target_id"] or "")
-            if target_type == "BUSINESS_FUNCTION":
-                target_node_id = f"FUNCTION:{target_id}"
-                if target_node_id not in nodes:
-                    continue
-            elif target_id:
-                target_node_id = add_node(
-                    f"CODE:{target_id}",
-                    "CODE",
-                    _code_label(target_id),
-                    subtitle=target_type or "代码对象",
-                    statusLabel=str(row["status"] or "建议关联"),
-                    sourceId=target_id,
-                    evidenceCount=1 if row["code_evidence_id"] else 0,
+            for table in self.db.execute("SELECT * FROM functional_key_table WHERE function_id=?", (function_id,)):
+                table_node_id = add_node(
+                    f"TABLE:{table['table_name'].casefold()}", "TABLE", table["table_name"],
+                    subtitle="关键表", description=table["purpose"], statusLabel="人工登记",
+                    sourceId=table["table_name"],
                 )
-            else:
-                continue
-            add_edge(
-                requirement_node_id,
-                target_node_id,
-                "REQUIREMENT_LINK",
-                status=str(row["status"] or "SUGGESTED"),
-                evidence_ids=[row["requirement_evidence_id"], row["code_evidence_id"]],
-            )
-
-        # Keep current requirements discoverable even before they are enriched.
-        for row in self.db.execute("SELECT id,title,current_version,status FROM requirement ORDER BY updated_at DESC LIMIT 100"):
-            add_node(
-                f"REQUIREMENT:{row['id']}",
-                "REQUIREMENT",
-                str(row["title"] or row["id"]),
-                subtitle=f"{row['id']} V{row['current_version']}",
-                statusLabel="需求依据",
-                version=row["current_version"],
-                sourceId=row["id"],
-            )
+                add_edge(function_node_id, table_node_id, "KEY_TABLE")
+                for link in self.db.execute(
+                    """SELECT * FROM functional_retrieval_link
+                        WHERE function_id=? AND source_type='TABLE' AND source_id=?""",
+                    (function_id, table["table_name"]),
+                ):
+                    code_id = f"CODE:{link['target_id']}"
+                    symbol = self.db.execute("SELECT qualified_name FROM code_symbol WHERE id=?", (link["target_id"],)).fetchone()
+                    if not symbol:
+                        continue
+                    add_node(code_id, "CODE", symbol["qualified_name"], subtitle="数据访问", statusLabel="代码事实", sourceId=link["target_id"], evidenceCount=1)
+                    add_edge(code_id, table_node_id, link["relation_type"], evidence_ids=[link["evidence_id"]])
 
         # Code facts remain queryable even when an older published snapshot did
         # not yet bind every symbol to a function entry. They are shown in the
@@ -347,27 +297,27 @@ def _as_list(value) -> list:
 def _type_label(value: str) -> str:
     return {
         "FUNCTION": "功能",
-        "REQUIREMENT": "需求",
+        "PROJECT": "工程",
         "CODE": "代码",
+        "TABLE": "数据表",
         "TAG": "知识标签",
-        "BUSINESS": "业务补充",
-        "MANUAL": "业务补充",
-        "DOCUMENT": "文档",
-        "USER_FEEDBACK": "用户反馈",
     }.get(str(value).upper(), str(value))
 
 
 def _relation_label(value: str) -> str:
     return {
         "HAS_TAG": "包含标签",
-        "IMPLEMENTED_BY": "代码实现",
-        "SUPPORTED_BY": "证据支持",
-        "REQUIREMENT_LINK": "需求关联",
+        "INVOLVES_PROJECT": "涉及工程",
+        "HAS_ENTRY": "包含入口",
+        "ENTRY_POINT": "功能入口",
+        "KEY_TABLE": "关键数据",
+        "READ_TABLE": "读取",
+        "WRITE_TABLE": "写入",
     }.get(value, value)
 
 
 def _count_key(value: str) -> str:
-    return {"FUNCTION": "functions", "REQUIREMENT": "requirements", "CODE": "code", "TAG": "tags", "BUSINESS": "business"}.get(value, value.casefold())
+    return {"FUNCTION": "functions", "PROJECT": "projects", "CODE": "code", "TABLE": "tables", "TAG": "tags"}.get(value, value.casefold())
 
 
 def _code_label(target_id: str) -> str:

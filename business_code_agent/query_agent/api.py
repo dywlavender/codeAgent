@@ -67,34 +67,21 @@ def make_server(
             service = None
             try:
                 path = urlparse(self.path).path
-                if path == "/api/knowledge-admin/proposals/generate":
+                if path == "/api/knowledge/refresh":
                     if not self._require_admin():
                         return
-                    from ..knowledge_update.service import KnowledgeAdminService
-                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
+                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
+                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
                     body = self._body()
-                    self._json(201, service.generate(body, created_by=admin_access["name"]))
+                    self._json(200, service.refresh(analyze=bool(body.get("analyze", True))))
                     return
-                if path == "/api/knowledge-admin/generate":
+                analyze_match = re.fullmatch(r"/api/knowledge/functions/([^/]+)/analyze", path)
+                if analyze_match:
                     if not self._require_admin():
                         return
-                    from ..knowledge_update.service import KnowledgeAdminService
-                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
-                    body = self._body()
-                    self._json(201, service.generate_from_sources(body, created_by=admin_access["name"]))
-                    return
-                review_match = re.fullmatch(r"/api/knowledge-admin/proposals/([^/]+)/review", path)
-                if review_match:
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.service import KnowledgeAdminService
-                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
-                    body = self._body()
-                    self._json(200, service.review(
-                        review_match.group(1), str(body.get("action") or ""),
-                        reviewer=admin_access["name"],
-                        comment=str(body.get("comment") or ""),
-                    ))
+                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
+                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
+                    self._json(200, service.analyze(analyze_match.group(1)))
                     return
                 feedback_match = re.fullmatch(r"/api/query/([^/]+)/feedback", path)
                 if feedback_match:
@@ -160,31 +147,17 @@ def make_server(
                     node_type = params.get("type", [""])[0]
                     self._json(200, KnowledgeGraphService(service.db).search(query, node_type))
                     return
-                if parsed.path in {
-                    "/api/knowledge-admin/pending",
-                    "/api/knowledge-admin/functions",
-                    "/api/knowledge-admin/proposals",
-                }:
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.service import KnowledgeAdminService
-                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
+                if parsed.path == "/api/knowledge/functions":
+                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
+                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
                     query = parse_qs(parsed.query).get("q", [""])[0]
-                    if parsed.path.endswith("/pending"):
-                        items = service.list_pending(query)
-                    elif parsed.path.endswith("/functions"):
-                        items = service.list_functions(query)
-                    else:
-                        items = service.list_proposals(query)
-                    self._json(200, {"items": items})
+                    self._json(200, {"items": service.list_functions(query)})
                     return
-                proposal_match = re.fullmatch(r"/api/knowledge-admin/proposals/([^/]+)", parsed.path)
-                if proposal_match:
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.service import KnowledgeAdminService
-                    service = KnowledgeAdminService(connect(db_path), project_config=project_config)
-                    self._json(200, service.get_proposal(proposal_match.group(1)))
+                function_match = re.fullmatch(r"/api/knowledge/functions/([^/]+)", parsed.path)
+                if function_match:
+                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
+                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
+                    self._json(200, service.get_function(function_match.group(1)))
                     return
                 match = re.fullmatch(r"/api/query/([^/]+)", parsed.path)
                 if match:

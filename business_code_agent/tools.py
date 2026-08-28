@@ -258,7 +258,7 @@ class EvidenceTools:
         from .business_tools import BusinessTools
 
         tools = BusinessTools(self.db)
-        for row in tools._search_published_functions(""):
+        for row in tools.search_business_knowledge(""):
             try:
                 detail = tools.get_business_knowledge(row["id"])
             except KeyError:
