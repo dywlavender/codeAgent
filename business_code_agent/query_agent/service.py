@@ -182,11 +182,11 @@ class QueryService:
                 "symbols": self.db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
                 "facts": self.db.execute("SELECT count(*) FROM code_fact").fetchone()[0],
                 "businessKnowledge": self.db.execute(
-                    "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
+                    "SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'"
                 ).fetchone()[0],
                 "pendingProposals": self.db.execute(
-                    """SELECT count(*) FROM functional_analysis
-                         WHERE status IN ('NOT_RUN','STALE','FAILED','INSUFFICIENT')"""
+                    """SELECT count(*) FROM business_code_mapping
+                         WHERE status IN ('CANDIDATE','UNRESOLVED','CONFLICTED')"""
                 ).fetchone()[0],
                 "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
                 "runs": self.db.execute("SELECT count(*) FROM query_agent_run").fetchone()[0],

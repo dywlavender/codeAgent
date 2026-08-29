@@ -34,7 +34,7 @@ class RepositoryAnalyzer:
         knowledge = {
             "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
             "business_functions": self.db.execute(
-                "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
+                "SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'"
             ).fetchone()[0],
         }
         return {

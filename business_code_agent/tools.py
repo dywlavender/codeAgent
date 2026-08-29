@@ -204,15 +204,16 @@ class EvidenceTools:
             except (OSError, json.JSONDecodeError):
                 return False, "requirement source unreadable"
             return item["excerpt"] in payload.get("original", ""), row["source_path"]
-        if item["source_type"] == "MANUAL":
+        if item["source_type"] in {"MANUAL", "BUSINESS"}:
             path = Path(item["locator"])
             if not path.is_file():
                 return False, f"business source missing: {path}"
             raw = path.read_text(encoding="utf-8")
-            try:
-                raw = json.loads(raw).get("statement", raw)
-            except json.JSONDecodeError:
-                pass
+            if item["source_type"] == "MANUAL":
+                try:
+                    raw = json.loads(raw).get("statement", raw)
+                except json.JSONDecodeError:
+                    pass
             return item["excerpt"] in raw, str(path)
         return False, f"unsupported source type: {item['source_type']}"
 

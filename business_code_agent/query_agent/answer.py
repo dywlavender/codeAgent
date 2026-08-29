@@ -51,6 +51,8 @@ def source_priority(intent: str, question: str = "") -> dict[str, int]:
     question = (question or "").lower()
     if any(term in question for term in ("是否符合", "一致", "偏差", "compliance")):
         return {"CODE": 100, "REQUIREMENT": 100, "BUSINESS": 70}
+    if any(term in question for term in ("是什么", "什么意思", "业务含义", "怎么理解")):
+        return {"BUSINESS": 100, "CODE": 90, "REQUIREMENT": 80}
     if intent == "RULE_REASON" or any(term in question for term in ("为什么", "规则来源", "为何")):
         return {"REQUIREMENT": 100, "BUSINESS": 95, "CODE": 75}
     if intent == "CROSS_PROCESS" or any(term in question for term in ("跨流程", "什么关系", "之间")):

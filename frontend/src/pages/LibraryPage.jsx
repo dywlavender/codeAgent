@@ -14,12 +14,12 @@ const TYPE_CONFIG = {
     countKey: "symbols",
     noun: "Symbols",
   },
-  功能知识: {
+  业务知识: {
     endpoint: "/api/functions?q=",
-    placeholder: "搜索功能名称或业务域",
-    empty: "还没有功能知识。请在管理页面更新知识库。",
+    placeholder: "搜索业务术语、能力、流程、规则或关系",
+    empty: "还没有业务知识。请在管理页面导入业务基线。",
     countKey: "businessKnowledge",
-    noun: "Functions",
+    noun: "Knowledge",
   },
 };
 
@@ -154,7 +154,7 @@ function rowSubtitle(item, type) {
     const facts = (item.summary || "").split(" ").filter(Boolean).length;
     return `${item.kind || "SYMBOL"} · ${facts} 条事实`;
   }
-  if (type === "功能知识") {
+  if (type === "业务知识") {
     return `${item.statement || ""}`;
   }
   return `${item.status || ""}`;
@@ -169,8 +169,8 @@ function statusColor(status) {
 function ResultRow({ item, type, active, onSelect }) {
   return (
     <button className={`r-row ${active ? "on" : ""}`} onClick={onSelect}>
-      <span className={`r-glyph ${type === "代码" ? "code" : type === "功能知识" ? "biz" : "req"}`}>
-        {type === "代码" ? "{ }" : type === "功能知识" ? "知" : "需"}
+      <span className={`r-glyph ${type === "代码" ? "code" : type === "业务知识" ? "biz" : "req"}`}>
+        {type === "代码" ? "{ }" : type === "业务知识" ? "知" : "需"}
       </span>
       <span className="r-copy">
         <b>{rowTitle(item, type)}</b>

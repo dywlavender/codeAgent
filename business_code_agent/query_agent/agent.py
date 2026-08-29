@@ -56,8 +56,8 @@ class BusinessCodeQueryAgent:
             return self.retriever.tools.code.search_code(query, 8)
 
         @tool
-        def search_business_functions(query: str) -> list[dict]:
-            """Search active function documents and retrieval navigation."""
+        def search_business_knowledge(query: str) -> list[dict]:
+            """Search verified business entities, relations and code mappings."""
             return self.retriever.tools.business.search_business_knowledge(query)[:8]
 
         @tool
@@ -65,7 +65,7 @@ class BusinessCodeQueryAgent:
             """Search requirement digests without loading original chunks."""
             return self.retriever.tools.requirement.search_requirements(query)[:8]
 
-        return [search_code_facts, search_business_functions, search_requirements]
+        return [search_code_facts, search_business_knowledge, search_requirements]
 
     def run(self, question: str, *, history=()) -> dict:
         run_id = stable_id("QRUN", question, datetime.now(timezone.utc).isoformat())
@@ -174,7 +174,7 @@ class BusinessCodeQueryAgent:
 
     @staticmethod
     def _apply_candidates(state, result):
-        state.code_candidates = _merge_candidates(state.code_candidates, result.get("code_candidates", []), "symbol_id", "symbolId", "id", "target_id")
+        state.code_candidates = _merge_candidates(state.code_candidates, result.get("code_candidates", []), "symbol_id", "symbolId", "target_id", "targetId", "id")
         state.business_candidates = _merge_candidates(state.business_candidates, result.get("business_candidates", []), "id", "knowledge_id")
         state.requirement_candidates = _merge_candidates(state.requirement_candidates, result.get("requirement_candidates", []), "id", "requirement_id")
 
@@ -264,9 +264,11 @@ class BusinessCodeQueryAgent:
             field = state.field_hints[0] if state.field_hints else (state.business_objects[0] if state.business_objects else "业务关系")
             strategy = _strategy(statement)
             relation = "DATA_STRATEGY" if strategy in {"SNAPSHOT", "REALTIME"} else "BUSINESS_RULE"
-            evidence_ids = list(dict.fromkeys([
-                ref.evidence_id, *[str(value) for value in item.get("supportingEvidenceIds", []) if value]
-            ]))
+            # The human statement is proven by its own source excerpt. Mapping
+            # evidence remains separately available for code navigation; tying
+            # every mapping candidate to the business fact would incorrectly
+            # make the business fact disappear when one code hint is stale.
+            evidence_ids = [ref.evidence_id]
             return StructuredFact(statement, SourceType.BUSINESS, evidence_ids, EvidenceRole.PROCESS_LINK if len(state.processes) >= 2 else EvidenceRole.RULE, field, relation, strategy if relation == "DATA_STRATEGY" else "", "")
         statement = self._requirement_rule(item, requirement_candidates)
         field = state.field_hints[0] if state.field_hints else (state.business_objects[0] if state.business_objects else "规则")

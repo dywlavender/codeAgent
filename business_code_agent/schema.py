@@ -193,6 +193,52 @@ CREATE TABLE IF NOT EXISTS functional_analysis (
 CREATE INDEX IF NOT EXISTS idx_functional_knowledge_status ON functional_knowledge(status, refreshed_at);
 CREATE INDEX IF NOT EXISTS idx_functional_entry_function ON functional_entry_anchor(function_id, resolution_status);
 CREATE INDEX IF NOT EXISTS idx_functional_link_function ON functional_retrieval_link(function_id, relation_type);
+
+-- MVP business baseline.  Human source, structured business knowledge and
+-- business/code mappings are separate records.  Re-indexing code therefore
+-- never rewrites a human-authored business statement.
+CREATE TABLE IF NOT EXISTS business_baseline_source (
+  id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+  source_revision TEXT NOT NULL, content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS business_entity (
+  id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, name TEXT NOT NULL,
+  aliases_json TEXT NOT NULL DEFAULT '[]', definition TEXT NOT NULL DEFAULT '',
+  attributes_json TEXT NOT NULL DEFAULT '{}', source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL, source_evidence_id TEXT,
+  confidence REAL NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(source_id, entity_type, name),
+  FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
+);
+CREATE TABLE IF NOT EXISTS business_relation_v2 (
+  id TEXT PRIMARY KEY, from_entity_id TEXT, from_label TEXT NOT NULL,
+  relation_type TEXT NOT NULL, to_entity_id TEXT, to_label TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT '', attributes_json TEXT NOT NULL DEFAULT '{}',
+  source_type TEXT NOT NULL, source_id TEXT NOT NULL, evidence_id TEXT,
+  confidence REAL NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(source_id, from_label, relation_type, to_label, scope),
+  FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
+);
+CREATE TABLE IF NOT EXISTS business_code_mapping (
+  id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL, code_symbol_id TEXT,
+  code_reference TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  confidence REAL NOT NULL, evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+  search_terms_json TEXT NOT NULL DEFAULT '[]', message TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(business_type, business_id, relation_type, code_reference)
+);
+CREATE INDEX IF NOT EXISTS idx_business_entity_type_status
+  ON business_entity(entity_type, status, name);
+CREATE INDEX IF NOT EXISTS idx_business_entity_source
+  ON business_entity(source_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_relation_source
+  ON business_relation_v2(source_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_mapping_target
+  ON business_code_mapping(business_type, business_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_mapping_symbol
+  ON business_code_mapping(code_symbol_id);
 """
 
 

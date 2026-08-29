@@ -43,6 +43,36 @@ tags:
 
 
 class KnowledgeAdminApiTest(unittest.TestCase):
+    def test_natural_baseline_refresh_and_entity_read_http_flow(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db_path = root / "baseline.db"
+            knowledge = root / "baseline"
+            knowledge.mkdir()
+            (knowledge / "business.md").write_text(
+                "# 业务基线\n\n## 极优\n\n极优是再担保类型产品，代码中一般用 JY 表示。\n",
+                encoding="utf-8",
+            )
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            connect(str(db_path)).close()
+            server = make_server(str(db_path), port=0, project_config=str(config))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            try:
+                refreshed = _json_request(
+                    base + "/api/knowledge/baselines/refresh",
+                    {"mapCode": True, "useModel": False},
+                )
+                self.assertEqual(1, refreshed["sourceCount"])
+                payload = json.loads(urlopen(base + "/api/knowledge/entities").read())
+                self.assertEqual("极优", payload["items"][0]["name"])
+                self.assertEqual("BUSINESS_TERM", payload["items"][0]["type"])
+                self.assertEqual("UNRESOLVED", payload["items"][0]["mappings"][0]["status"])
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=2)
+
     def test_refresh_and_read_function_http_flow(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

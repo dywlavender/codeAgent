@@ -112,11 +112,11 @@ class EvidenceAssembler:
     def _load_code(self, candidates: list[dict], targets: set[str]) -> list[dict]:
         selected = _select(
             candidates, targets,
-            "symbolId", "symbol_id", "id", "targetId", "target_id", "qualified_name", "qualifiedName", "label",
+            "symbolId", "symbol_id", "targetId", "target_id", "id", "qualified_name", "qualifiedName", "label",
         )
         results = []
         for candidate in selected:
-            symbol_id = _get(candidate, "symbolId", "symbol_id", "id", "targetId", "target_id")
+            symbol_id = _get(candidate, "symbolId", "symbol_id", "targetId", "target_id", "id")
             if not symbol_id:
                 continue
             try:

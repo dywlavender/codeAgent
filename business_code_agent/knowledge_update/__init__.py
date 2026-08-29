@@ -9,3 +9,6 @@ __all__ = [
     "model_config_from_environment",
     "parse_function_document",
 ]
+from .baseline_service import BaselineKnowledgeService
+
+__all__ = ["BaselineKnowledgeService"]

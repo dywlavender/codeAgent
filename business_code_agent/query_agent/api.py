@@ -67,6 +67,24 @@ def make_server(
             service = None
             try:
                 path = urlparse(self.path).path
+                if path == "/api/knowledge/baselines/refresh":
+                    if not self._require_admin():
+                        return
+                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
+                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    body = self._body()
+                    self._json(200, service.refresh(
+                        map_code=bool(body.get("mapCode", True)),
+                        use_model=bool(body.get("useModel", True)),
+                    ))
+                    return
+                if path == "/api/knowledge/mappings/rebuild":
+                    if not self._require_admin():
+                        return
+                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
+                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    self._json(200, {"mappingCounts": service.rebuild_mappings()})
+                    return
                 if path == "/api/knowledge/refresh":
                     if not self._require_admin():
                         return
@@ -147,6 +165,29 @@ def make_server(
                     node_type = params.get("type", [""])[0]
                     self._json(200, KnowledgeGraphService(service.db).search(query, node_type))
                     return
+                if parsed.path == "/api/knowledge/entities":
+                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
+                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    params = parse_qs(parsed.query)
+                    query = params.get("q", [""])[0]
+                    entity_type = params.get("type", [""])[0]
+                    self._json(200, {
+                        "items": service.list_entities(query, entity_type),
+                        "relations": service.list_relations(query),
+                    })
+                    return
+                entity_match = re.fullmatch(r"/api/knowledge/entities/([^/]+)", parsed.path)
+                if entity_match:
+                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
+                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    self._json(200, service.get_entity(entity_match.group(1)))
+                    return
+                relation_match = re.fullmatch(r"/api/knowledge/relations/([^/]+)", parsed.path)
+                if relation_match:
+                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
+                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    self._json(200, service.get_relation(relation_match.group(1)))
+                    return
                 if parsed.path == "/api/knowledge/functions":
                     from ..knowledge_update.functional_service import FunctionalKnowledgeService
                     service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
@@ -184,6 +225,8 @@ def make_server(
                 self._json(404, {"error": "not found"})
             except KeyError as exc:
                 self._json(404, {"error": str(exc)})
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._json(400, {"error": str(exc)})
             finally:
                 if service:
                     service.db.close()

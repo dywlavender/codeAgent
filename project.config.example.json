@@ -3,17 +3,13 @@
     "id": "loan-system",
     "name": "贷款核心系统"
   },
-  "admin": {
-    "name": "knowledge-admin",
-    "apiTokenEnv": "BUSINESS_CODE_ADMIN_TOKEN"
-  },
   "startup": {
     "database": ".data/knowledge.db",
     "port": 8082
   },
   "repositoryRoot": ".data/repositories",
   "knowledge": {
-    "root": "knowledge/functions"
+    "baselineRoot": "knowledge/baseline"
   },
   "repositories": [
     {

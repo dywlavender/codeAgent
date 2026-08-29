@@ -1,6 +1,28 @@
 # Business Code Agent
 
-面向 Java / MyBatis 老项目的 Agent 问答工作台。代码仓库通过 Git 地址配置并自动同步；人工只编写简短的功能知识文档；系统定位入口类和关键表，生成轻量检索索引及带代码证据的流程、规则摘要。Query Agent 最终回到当前代码和业务文档回答问题。
+面向 Java / MyBatis 老项目的 Agent 知识工作台。MVP 用少量自然语言业务基线告诉系统“业务是什么、什么和什么有关”，再把这些知识定向映射到当前代码；问答 Agent 先用业务知识缩小调查范围，最后回到代码和原文证据回答。
+
+## MVP 已实现的主链路
+
+```text
+自然语言业务基线
+  ↓  模型结构化（未配置模型时使用保守解析）
+System / BusinessTerm / Capability / Flow / Relation / Rule
+  ↓
+定向搜索当前代码
+  ↓
+独立 Business-Code Mapping
+  ↓
+Query Agent 检索业务知识、映射和代码证据
+```
+
+三类数据始终分开保存：
+
+- Business Knowledge：业务是什么、为什么、有哪些关系；
+- Code Knowledge：类、方法、字段、API、任务、表和调用事实；
+- Mapping：某条业务知识在代码中对应哪里。
+
+重新索引代码只重建 Mapping，不会改写人工业务基线。
 
 ## 一键启动
 
@@ -11,23 +33,15 @@ chmod +x start-mac.sh
 ./start-mac.sh
 ```
 
-根目录存在 `project.config.json` 时会自动使用，不需要再传 `--project-config`。当前默认配置使用内置验证项目、`.data/validation-project.db` 和 8083 端口。
-
 ### Windows
 
-双击：
-
-```text
-start-windows.bat
-```
-
-也可以在 PowerShell 中执行：
+双击 `start-windows.bat`，或者在 PowerShell 中执行：
 
 ```powershell
 .\scripts\start-windows.ps1
 ```
 
-启动脚本会创建 Python 环境、安装依赖、同步并索引仓库、构建前端，然后启动服务。目标端口已有本项目旧进程时会先停止旧进程。
+根目录存在 `project.config.json` 时会自动使用，不需要额外传 `--project-config`。启动器会准备 Python 环境、同步 Git 仓库、增量索引代码、构建前端并启动工作台。
 
 ## 项目配置
 
@@ -37,7 +51,7 @@ start-windows.bat
 cp project.config.example.json project.config.json
 ```
 
-主要配置：
+核心配置：
 
 ```json
 {
@@ -51,7 +65,7 @@ cp project.config.example.json project.config.json
   },
   "repositoryRoot": ".data/repositories",
   "knowledge": {
-    "root": "knowledge/functions"
+    "baselineRoot": "knowledge/baseline"
   },
   "repositories": [
     {
@@ -63,19 +77,11 @@ cp project.config.example.json project.config.json
 }
 ```
 
-仓库已是最新版本时不会重复拉取。私有仓库使用本机已有的 SSH Key 或 Git 凭据管理器，配置文件不保存账号密码。
-
-`knowledge.root` 可以使用相对路径；相对路径以 `project.config.json` 所在目录为基准。
+私有仓库使用本机已有的 SSH Key 或 Git 凭据管理器，配置文件不保存账号密码。
 
 ## 模型配置
 
-复制环境变量示例：
-
-```bash
-cp .env.example .env
-```
-
-模型参数全部放在 `.env` 中，并且 `.env` 的值优先：
+复制 `.env.example` 为 `.env`：
 
 ```dotenv
 BUSINESS_CODE_MODEL_ENABLED=true
@@ -87,113 +93,109 @@ BUSINESS_CODE_MODEL_TIMEOUT=60
 BUSINESS_CODE_MODEL_MAX_RETRIES=2
 ```
 
-未配置模型时，代码同步、入口定位、关键表关联和普通确定性检索仍可工作；功能分析显示“索引完成”，不会伪造流程或规则。
+模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文；没有原文依据的内容会被拒绝。
 
-管理员口令可配置为：
+未配置模型时仍然可以：
 
-```dotenv
-BUSINESS_CODE_ADMIN_TOKEN=your-local-admin-token
-```
+- 同步和索引代码；
+- 从明确的 Markdown 标题和原句安全提取知识；
+- 搜索代码候选并建立 Mapping；
+- 使用确定性 Query Agent 回答有证据的问题。
 
-它用于保护“更新知识库”和“重新分析”等管理写操作，不是大模型密钥。
+保守解析不会猜测业务规则或代码类名。
 
-## 编写功能知识
+## 编写业务基线
 
-在 `knowledge/functions` 中新增一个 Markdown 文件：
+在 `knowledge.baselineRoot` 下放 Markdown。业务人员可以正常写自然语言，不需要填写 JSON、YAML、类路径或数据库字段。
 
 ```markdown
----
-id: customer-status-change
-name: 客户状态变更
-aliases:
-  - 客户状态修改
-tags:
-  - 客户管理
----
+# 提款业务基线
 
-# 功能说明
+## 极优
 
-用于维护客户当前业务状态。
+极优是再担保类型产品，代码中一般用 JY 表示。
 
-## 业务场景
+## 担保处理
 
-- 内管人员修改客户状态
-- 批任务刷新客户状态
+极优提款成功后，需要进行担保后处理。
 
-## 工程与入口
+## 提款主流程
 
-| 工程 | 类型 | 入口类 |
-|---|---|---|
-| customer-admin | 内管 | CustomerStatusController |
-| customer-service | 服务 | CustomerStatusServiceImpl |
-| customer-batch | 批任务 | CustomerStatusRefreshJob |
-
-## 关键表
-
-| 表名 | 数据作用 |
-|---|---|
-| customer_info | 保存客户当前状态 |
-| customer_status_log | 保存状态变更记录 |
+渠道提交提款申请，中台完成业务编排，核心完成放款，中台同步最终提款结果。
 ```
 
-“工程”既可以是独立仓库 ID，也可以是单仓库中的模块目录。入口类只写类名。完整约束见 [功能知识文档模板](docs/functional-knowledge-template.md)。
+人工只补充无法稳定从代码判断的内容：
+
+- 项目特有术语和别名；
+- 系统职责边界；
+- 核心业务能力；
+- 粗粒度业务流程；
+- 业务关系和规则。
+
+不要求人工填写调用链、入口类、SQL、表字段或完整技术流程。
+
+完整说明见 [业务基线使用指南](docs/business-baseline-guide.md)。
 
 ## 使用流程
 
-1. 在 `project.config.json` 配置代码仓库和功能知识目录。
-2. 启动系统，等待仓库同步和代码索引完成。
-3. 将人工功能文档放入 `knowledge.root`。
-4. 进入“功能知识”，点击“更新知识库”。
-5. 检查每个入口是否已定位，查看关键表关联和分析覆盖情况。
-6. 模型已配置时，查看带代码证据的业务流程与核心规则。
-7. 在问答页面提问；Query Agent 会先使用功能索引制定检索计划，再读取当前代码和业务文档形成答案。
+1. 配置 Git 仓库和 `knowledge.baselineRoot`。
+2. 启动工作台，等待代码同步和索引完成。
+3. 把一份或多份自然语言 Markdown 放入基线目录。
+4. 进入“业务知识维护”，点击“导入业务基线”。
+5. 查看六类知识、原文来源和代码映射。
+6. 对未定位或候选 Mapping 补充更明确的业务别名后重新导入。
+7. 在问答页面提问；Agent 会先命中业务知识，再沿 Mapping 调查代码。
 
-## 知识结构
+命令行也可以执行：
 
-```text
-人工功能定义
-  ├─ 名称、场景、工程、入口类、关键表
-  ↓
-代码检索索引
-  ├─ 入口准确位置
-  ├─ 直接调用提示
-  └─ 关键表读写位置
-  ↓
-Agent 功能分析
-  ├─ 业务流程摘要
-  └─ 核心业务规则摘要
-  ↓
-Query Agent 回到当前代码和业务文档核实后回答
+```bash
+python3 -m business_code_agent.cli baseline-refresh \
+  --config project.config.json \
+  --db .data/knowledge.db
 ```
 
-人工定义、检索索引和 Agent 分析分开保存。代码重新索引不会改写人工文档，自动摘要也不会代替最终代码证据。
+不调用模型：
 
-详细说明见 [当前架构](docs/architecture.md)。
+```bash
+python3 -m business_code_agent.cli baseline-refresh \
+  --config project.config.json \
+  --db .data/knowledge.db \
+  --no-model
+```
+
+## Mapping 状态
+
+- `VERIFIED`：代码证据明确且候选唯一；
+- `CANDIDATE`：存在合理候选，但不能唯一确定；
+- `UNRESOLVED`：当前代码索引中没有找到；
+- `CONFLICTED`：不同来源或证据存在冲突；
+- `DEPRECATED`：来源已经移除或知识不再有效。
+
+未定位不是失败。问答 Agent 会明确说明当前没有找到对应实现，不会生成不存在的类或方法。
 
 ## 管理接口
 
-- `POST /api/knowledge/refresh`
-- `GET /api/knowledge/functions`
-- `GET /api/knowledge/functions/{id}`
-- `POST /api/knowledge/functions/{id}/analyze`
-- `GET /api/knowledge-graph`
-- `POST /api/query`
+- `POST /api/knowledge/baselines/refresh`：导入自然语言基线并建立 Mapping；
+- `POST /api/knowledge/mappings/rebuild`：不改业务知识，只重建代码 Mapping；
+- `GET /api/knowledge/entities`：查询 System、Term、Capability、Flow 和 Rule；
+- `GET /api/knowledge/entities/{id}`：查看知识、来源、关系和 Mapping；
+- `GET /api/knowledge/relations/{id}`：查看业务关系；
+- `GET /api/knowledge-graph`：查看业务知识、关系和代码映射投影；
+- `POST /api/query`：执行问答。
 
-旧的来源类型、知识提案、审核接口及其后端状态机已经移除；已有数据库在启动迁移时会删除对应旧表。
+管理员写操作可通过 `admin.apiTokenEnv` 配置的口令保护；读取接口保持只读。
 
 ## 验证
-
-后端：
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
-
-前端：
 
 ```bash
 cd frontend
 npm run build
 ```
 
-内置 `examples/validation-project` 包含申请服务、提款服务、结算批任务和 MyBatis 表访问，用于验证单仓多工程入口定位和跨工程检索。
+内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线、独立 Mapping 和问答检索链路。
+
+详细技术结构见 [当前架构](docs/architecture.md)。

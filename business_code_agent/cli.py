@@ -54,6 +54,11 @@ def main() -> None:
     sync = sub.add_parser("sync-project", help="按项目配置同步 Git 仓库并增量索引")
     sync.add_argument("--config", required=True)
     sync.add_argument("--db", required=True)
+    baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线并建立代码映射")
+    baseline.add_argument("--config", required=True)
+    baseline.add_argument("--db", required=True)
+    baseline.add_argument("--no-model", action="store_true", help="仅使用安全的确定性解析")
+    baseline.add_argument("--no-map", action="store_true", help="暂不建立业务到代码的映射")
     req = sub.add_parser("ingest-requirement")
     req.add_argument("path")
     req.add_argument("--db", required=True)
@@ -154,6 +159,12 @@ def main() -> None:
     elif args.command == "sync-project":
         from .project_sync import sync_project
         print(json.dumps(sync_project(args.config, args.db), ensure_ascii=False, indent=2))
+    elif args.command == "baseline-refresh":
+        from .knowledge_update.baseline_service import BaselineKnowledgeService
+        service = BaselineKnowledgeService(connect(args.db), project_config=args.config)
+        print(json.dumps(service.refresh(
+            map_code=not args.no_map, use_model=not args.no_model,
+        ), ensure_ascii=False, indent=2))
     elif args.command == "ingest-requirement":
         builder = RequirementBuilder(connect(args.db))
         if Path(args.path).suffix.lower() == ".json":
@@ -291,7 +302,7 @@ def _warn_model_configuration() -> None:
     for variable in sorted(missing):
         print(
             f"[WARN] 模型已启用，但环境变量 {variable} 未设置；"
-            "功能分析 Agent / 问答 Agent 将使用 FALLBACK。",
+            "业务基线结构化 / 问答 Agent 将使用安全回退模式。",
             file=sys.stderr,
         )
 

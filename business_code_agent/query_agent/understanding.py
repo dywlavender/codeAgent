@@ -97,6 +97,16 @@ def _question_terms(text: str) -> list[str]:
     """Conservative fallback: terms are copied from the question itself."""
     preferred = ("申请", "提款", "还款", "校验", "拒绝", "规则", "需求", "流程", "阶段", "关系")
     values = [item for item in preferred if item in text]
+    for clause in re.findall(r"[\u4e00-\u9fff]{2,32}", text):
+        cleaned = clause
+        for phrase in (
+            "请问", "是什么", "什么意思", "怎么理解", "有没有", "是否", "如何", "哪里",
+            "由什么代码实现", "什么代码实现", "代码实现", "对应代码", "在哪", "为什么",
+        ):
+            cleaned = cleaned.replace(phrase, "")
+        cleaned = cleaned.strip()
+        if 2 <= len(cleaned) <= 16:
+            values.append(cleaned)
     values.extend(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", text))
     return _unique(values)
 

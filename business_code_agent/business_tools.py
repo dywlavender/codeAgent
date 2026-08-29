@@ -11,6 +11,8 @@ class BusinessTools:
         self.db = db
 
     def search_business_knowledge(self, query: str) -> list[dict]:
+        if self.db.execute("SELECT 1 FROM business_entity WHERE status!='DEPRECATED' LIMIT 1").fetchone():
+            return self._search_baseline(query)
         needle = query.strip().casefold()
         terms = _search_terms(query)
         values = []
@@ -54,6 +56,10 @@ class BusinessTools:
         return values
 
     def get_business_knowledge(self, knowledge_id: str) -> dict:
+        if self.db.execute("SELECT 1 FROM business_entity WHERE id=?", (knowledge_id,)).fetchone():
+            return self._get_baseline_entity(knowledge_id)
+        if self.db.execute("SELECT 1 FROM business_relation_v2 WHERE id=?", (knowledge_id,)).fetchone():
+            return self._get_baseline_relation(knowledge_id)
         row = self.db.execute("SELECT * FROM functional_knowledge WHERE id=? AND status='ACTIVE'", (knowledge_id,)).fetchone()
         if not row:
             raise KeyError(knowledge_id)
@@ -98,6 +104,116 @@ class BusinessTools:
     def get_business_evidence(self, knowledge_id: str) -> list[dict]:
         return self.get_business_knowledge(knowledge_id)["evidence"]
 
+    def _search_baseline(self, query: str) -> list[dict]:
+        needle = query.strip().casefold()
+        terms = _search_terms(query)
+        values: list[dict] = []
+        for row in self.db.execute(
+            "SELECT * FROM business_entity WHERE status!='DEPRECATED' ORDER BY entity_type,name"
+        ):
+            content = json.dumps({
+                "name": row["name"], "aliases": json.loads(row["aliases_json"]),
+                "definition": row["definition"], "attributes": json.loads(row["attributes_json"]),
+            }, ensure_ascii=False)
+            haystack = content.casefold()
+            if needle and needle not in haystack and not any(term in haystack for term in terms):
+                continue
+            values.append({
+                "id": row["id"], "title": row["name"],
+                "statement": _entity_statement(row),
+                "status": "CONFIRMED" if row["status"] == "VERIFIED" else row["status"],
+                "knowledge_type": row["entity_type"], "version": 1,
+                "evidence_id": row["source_evidence_id"],
+            })
+        for row in self.db.execute(
+            "SELECT * FROM business_relation_v2 WHERE status!='DEPRECATED' ORDER BY from_label,to_label"
+        ):
+            statement = _relation_statement(row)
+            haystack = statement.casefold()
+            if needle and needle not in haystack and not any(term in haystack for term in terms):
+                continue
+            values.append({
+                "id": row["id"], "title": f"{row['from_label']} → {row['to_label']}",
+                "statement": statement,
+                "status": "CONFIRMED" if row["status"] == "VERIFIED" else row["status"],
+                "knowledge_type": "RELATION", "version": 1, "evidence_id": row["evidence_id"],
+            })
+        return values[:20]
+
+    def _get_baseline_entity(self, knowledge_id: str) -> dict:
+        row = self.db.execute("SELECT * FROM business_entity WHERE id=?", (knowledge_id,)).fetchone()
+        mappings = self._baseline_mappings("ENTITY", knowledge_id)
+        business_relations = [dict(item) for item in self.db.execute(
+            """SELECT * FROM business_relation_v2
+                WHERE status!='DEPRECATED' AND (from_entity_id=? OR to_entity_id=?)""",
+            (knowledge_id, knowledge_id),
+        )]
+        relation_values = [
+            {
+                "id": item["id"], "source_type": "BUSINESS", "source_id": knowledge_id,
+                "relation_type": item["relation_type"], "target_type": "BUSINESS",
+                "target_id": item["to_entity_id"] if item["from_entity_id"] == knowledge_id else item["from_entity_id"],
+                "status": "CONFIRMED" if item["status"] == "VERIFIED" else item["status"],
+                "confidence": item["confidence"], "evidence_ids": [item["evidence_id"]] if item["evidence_id"] else [],
+            }
+            for item in business_relations
+        ]
+        evidence_ids = [row["source_evidence_id"], *[value for item in mappings for value in item["evidence_ids"]]]
+        evidence = self._load_evidence(evidence_ids)
+        return {
+            "knowledge": {
+                "id": knowledge_id, "title": row["name"], "statement": _entity_statement(row),
+                "status": "CONFIRMED" if row["status"] == "VERIFIED" else row["status"],
+                "knowledge_type": row["entity_type"], "version": 1,
+                "evidence_id": row["source_evidence_id"],
+            },
+            "relations": [*mappings, *relation_values], "evidence": evidence, "reviews": [],
+        }
+
+    def _get_baseline_relation(self, knowledge_id: str) -> dict:
+        row = self.db.execute("SELECT * FROM business_relation_v2 WHERE id=?", (knowledge_id,)).fetchone()
+        mappings = self._baseline_mappings("RELATION", knowledge_id)
+        evidence_ids = [row["evidence_id"], *[value for item in mappings for value in item["evidence_ids"]]]
+        return {
+            "knowledge": {
+                "id": knowledge_id, "title": f"{row['from_label']} → {row['to_label']}",
+                "statement": _relation_statement(row),
+                "status": "CONFIRMED" if row["status"] == "VERIFIED" else row["status"],
+                "knowledge_type": "RELATION", "version": 1, "evidence_id": row["evidence_id"],
+            },
+            "relations": mappings, "evidence": self._load_evidence(evidence_ids), "reviews": [],
+        }
+
+    def _baseline_mappings(self, business_type: str, business_id: str) -> list[dict]:
+        values = []
+        for item in self.db.execute(
+            """SELECT * FROM business_code_mapping
+                WHERE business_type=? AND business_id=? AND status IN ('VERIFIED','CANDIDATE')
+                ORDER BY confidence DESC""",
+            (business_type, business_id),
+        ):
+            evidence_ids = json.loads(item["evidence_ids_json"])
+            values.append({
+                "id": item["id"], "source_type": "BUSINESS", "source_id": business_id,
+                "relation_type": item["relation_type"], "target_type": "CODE_SYMBOL",
+                "target_id": item["code_symbol_id"],
+                "qualified_name": item["code_reference"],
+                "status": "DERIVED" if item["status"] == "VERIFIED" else "CANDIDATE",
+                "confidence": item["confidence"],
+                "evidence_id": evidence_ids[0] if evidence_ids else None,
+                "evidence_ids": evidence_ids,
+            })
+        return values
+
+    def _load_evidence(self, evidence_ids) -> list[dict]:
+        values = list(dict.fromkeys(value for value in evidence_ids if value))
+        if not values:
+            return []
+        marks = ",".join("?" for _ in values)
+        return [dict(item) for item in self.db.execute(
+            f"SELECT * FROM evidence WHERE id IN ({marks})", tuple(values)
+        )]
+
 
 def _statement(document: dict, flow: list[dict], rules: list[dict]) -> str:
     parts = [document["summary"]]
@@ -110,6 +226,24 @@ def _statement(document: dict, flow: list[dict], rules: list[dict]) -> str:
     if rules:
         parts.append("待代码核实规则：" + "；".join(item["statement"] for item in rules))
     return "\n".join(parts)
+
+
+def _entity_statement(row) -> str:
+    parts = [row["definition"]]
+    aliases = json.loads(row["aliases_json"])
+    attributes = json.loads(row["attributes_json"])
+    if aliases:
+        parts.append("别名：" + "、".join(aliases))
+    if attributes:
+        parts.append("结构化信息：" + json.dumps(attributes, ensure_ascii=False))
+    return "\n".join(part for part in parts if part)
+
+
+def _relation_statement(row) -> str:
+    statement = f"{row['from_label']} {row['relation_type']} {row['to_label']}"
+    if row["scope"]:
+        statement += f"（范围：{row['scope']}）"
+    return statement
 
 
 def _search_terms(value: str) -> set[str]:

@@ -214,7 +214,7 @@ export default function App() {
               type: "group",
               label: "管理",
               children: [
-                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>功能知识维护</span> },
+                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>业务知识维护</span> },
               ],
             }] : []),
           ]}

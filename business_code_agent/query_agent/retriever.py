@@ -148,7 +148,10 @@ class QueryRetriever:
             card = detail.get("knowledge", {})
             candidates["business"].append(_business_summary(card))
             for relation in detail.get("relations", []):
-                if relation.get("status") in {"CONFIRMED", "DERIVED"}:
+                # A candidate mapping is a valid navigation hint, but remains
+                # labelled CANDIDATE so downstream evidence rules cannot turn
+                # it into a confirmed answer fact by itself.
+                if relation.get("target_type") == "CODE_SYMBOL" and relation.get("status") in {"CONFIRMED", "DERIVED", "CANDIDATE"}:
                     candidates["code"].append(_strip_one(relation))
             calls.append(_call("get_business_knowledge", {"knowledgeId": knowledge_id}, detail.get("relations", []), "BUSINESS"))
             plan.append({"priority": 3, "strategy": "BUSINESS_RELATION", "target": knowledge_id})

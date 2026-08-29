@@ -12,14 +12,20 @@ const TYPE_STYLE = {
   TABLE: { glyph: "表", color: "#9a6700", soft: "#fcf3e3" },
   TAG: { glyph: "#", color: "#8d8d88", soft: "#f4f4f2" },
   BUSINESS: { glyph: "业", color: "#0b6a63", soft: "#e6f2f1" },
+  SYSTEM: { glyph: "系", color: "#0b6a63", soft: "#e6f2f1" },
+  BUSINESS_TERM: { glyph: "词", color: "#7c4d9b", soft: "#f3ebf7" },
+  CAPABILITY: { glyph: "能", color: "#1a7f4e", soft: "#e7f4ee" },
+  FLOW: { glyph: "流", color: "#0969da", soft: "#eaf2fb" },
+  RULE: { glyph: "规", color: "#9a6700", soft: "#fcf3e3" },
 };
 const TYPE_OPTIONS = [
   { label: "全部", value: "" },
-  { label: "功能", value: "FUNCTION", countKey: "functions" },
-  { label: "工程", value: "PROJECT", countKey: "projects" },
+  { label: "系统", value: "SYSTEM", countKey: "systems" },
+  { label: "术语", value: "BUSINESS_TERM", countKey: "terms" },
+  { label: "能力", value: "CAPABILITY", countKey: "capabilities" },
+  { label: "流程", value: "FLOW", countKey: "flows" },
+  { label: "规则", value: "RULE", countKey: "rules" },
   { label: "代码", value: "CODE", countKey: "code" },
-  { label: "数据表", value: "TABLE", countKey: "tables" },
-  { label: "标签", value: "TAG", countKey: "tags" },
 ];
 
 export function GraphPage({ workspace }) {
@@ -84,7 +90,7 @@ export function GraphPage({ workspace }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onPressEnter={() => load()}
-            placeholder="搜索功能、需求、代码符号或标签…"
+            placeholder="搜索业务术语、关系或代码符号…"
             prefix={<MagnifyingGlass size={15} style={{ color: "#a3a29c" }} />}
             style={{ width: 300 }}
             allowClear
@@ -106,7 +112,7 @@ export function GraphPage({ workspace }) {
           <Splitter.Panel defaultSize="24%" min="16%" max="36%">
             <div className="result-list">
               {nodes.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>更新功能知识库后，工程、入口和关键表关系会出现在这里。</span>} style={{ marginTop: 90 }} />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>导入业务基线并建立代码映射后，关系会出现在这里。</span>} style={{ marginTop: 90 }} />
               ) : nodes.map((node) => (
                 <GraphRow key={node.id} node={node} active={node.id === selectedId} onSelect={() => setSelectedId(node.id)} />
               ))}

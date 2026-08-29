@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Atlas · Atelier 配色方案</title>
+<style>
+/* ---------- Atelier 色板：与 frontend/src/theme.js 保持一致 ---------- */
+:root {
+  color-scheme: light;
+
+  --canvas:  #F4F2ED;
+  --sidebar: #EBE7E0;
+  --surface: #FCFBF9;
+  --raised:  #FFFFFF;
+  --muted:   #EDEAE4;
+  --well:    #F7F5F1;
+
+  --text:          #211E1A;
+  --text-secondary:#7E786E;
+  --text-faint:    #A8A297;
+  --border:        #E0DCD5;
+  --border-strong: #C9C4BA;
+
+  --brand:      #1B6B65;
+  --brand-strong:#104440;
+  --brand-soft:  #E6EFEC;
+
+  --code:        #2F6382;
+  --code-soft:   #E9F0F5;
+  --business:    #1B6B65;
+  --business-soft:#E6EFEC;
+  --requirement: #8A5F28;
+  --requirement-soft:#F6EEE0;
+  --danger:      #A53831;
+  --danger-soft: #F8E9E7;
+  --tag:         #7E786E;
+  --tag-soft:    #EDEAE4;
+
+  --shadow-1: 0 1px 2px rgba(33,30,26,.05), 0 0 0 1px rgba(33,30,26,.045);
+  --shadow-2: 0 2px 4px rgba(33,30,26,.04), 0 10px 28px rgba(33,30,26,.09);
+  --focus: 0 0 0 3px rgba(27,107,101,.16);
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas:  #14120F;
+  --sidebar: #100E0C;
+  --surface: #1A1714;
+  --raised:  #201D18;
+  --muted:   #2A2621;
+  --well:    #171512;
+
+  --text:          #F2EFEA;
+  --text-secondary:#A9A399;
+  --text-faint:    #7A7469;
+  --border:        #2E2923;
+  --border-strong: #3D372F;
+
+  --brand:      #6FBFAE;
+  --brand-strong:#9AD8CB;
+  --brand-soft:  #162B27;
+
+  --code:        #8FBEDB;
+  --code-soft:   #18262E;
+  --business:    #6FBFAE;
+  --business-soft:#162B27;
+  --requirement: #D0A76A;
+  --requirement-soft:#2E2517;
+  --danger:      #DE918A;
+  --danger-soft: #2F1D1B;
+  --tag:         #A9A399;
+  --tag-soft:    #262219;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.04);
+  --shadow-2: 0 2px 4px rgba(0,0,0,.32), 0 10px 28px rgba(0,0,0,.48);
+  --focus: 0 0 0 3px rgba(111,191,174,.22);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--canvas); color: var(--text);
+  font: 400 14px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: "SFMono-Regular", "JetBrains Mono", Consolas, monospace; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+
+/* ---------- 页头 ---------- */
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 52px; flex-wrap: wrap; }
+.head h1 { margin: 0 0 6px; font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+.head p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
+
+.toggle {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--muted); border-radius: var(--r-pill); border: 0;
+}
+.toggle button {
+  border: 0; background: transparent; color: var(--text-secondary);
+  padding: 6px 16px; border-radius: var(--r-pill); cursor: pointer;
+  font-size: 12.5px; font-weight: 550; font-family: inherit;
+  transition: background .15s ease, color .15s ease;
+}
+.toggle button.on { background: var(--raised); color: var(--text); box-shadow: var(--shadow-1); }
+
+/* ---------- 区块 ---------- */
+section { margin-bottom: 52px; }
+h2 { font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
+     color: var(--text-faint); margin: 0 0 18px; }
+
+/* ---------- 色卡 ---------- */
+.ramp { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 10px; }
+.chip { border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-1); background: var(--raised); }
+.chip .sw { height: 74px; }
+.chip .meta { padding: 9px 11px 11px; border-top: 1px solid var(--border); }
+.chip .meta b { display: block; font: 550 12px/1.4 var(--mono, monospace); }
+.chip .meta small { color: var(--text-faint); font-size: 10.5px; font-family: monospace; }
+
+.semantic { display: grid; grid-template-columns: repeat(auto-fit, minmax(212px, 1fr)); gap: 12px; }
+.sem {
+  padding: 16px 18px; border-radius: var(--r-md);
+  background: var(--soft); border: 1px solid var(--border);
+}
+.sem b { display: block; font-size: 13.5px; margin-bottom: 3px; color: var(--accent); }
+.sem small { color: var(--text-secondary); font-size: 11.5px; line-height: 1.5; display: block; }
+.sem code { font-family: monospace; font-size: 11px; color: var(--text-faint); }
+
+/* ---------- 界面预览 ---------- */
+.app {
+  display: grid; grid-template-columns: 218px 1fr;
+  height: 424px; border-radius: var(--r-lg); overflow: hidden;
+  border: 1px solid var(--border); box-shadow: var(--shadow-2);
+}
+.rail { background: var(--sidebar); border-right: 1px solid var(--border); padding: 18px 10px; display: flex; flex-direction: column; gap: 3px; }
+.brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 16px; }
+.brand .mark {
+  width: 26px; height: 26px; border-radius: 7px; background: var(--text); color: var(--canvas);
+  display: grid; place-items: center; font: 700 11px monospace;
+}
+.brand b { font-size: 13px; font-weight: 600; }
+.brand small { display: block; color: var(--text-faint); font-size: 10px; }
+
+.nav-item { padding: 7px 10px; border-radius: var(--r-md); font-size: 12.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 9px; }
+.nav-item.on { background: var(--raised); color: var(--text); font-weight: 550; box-shadow: var(--shadow-1); }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .55; }
+
+.rail-label { font-size: 10.5px; font-weight: 600; color: var(--text-faint); padding: 16px 10px 5px; }
+.recent { padding: 7px 10px; border-radius: var(--r-md); font-size: 11.5px; color: var(--text-secondary); line-height: 1.45; }
+.recent:hover { background: var(--muted); }
+.recent small { display: block; color: var(--text-faint); font-size: 10px; margin-top: 2px; }
+
+.main { background: var(--canvas); padding: 22px 26px; overflow: hidden; display: flex; flex-direction: column; gap: 14px; }
+.card {
+  background: var(--raised); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1); padding: 16px 18px;
+}
+.q { font: 500 14px/1.6 inherit; margin: 0 0 12px; }
+.fact { display: flex; gap: 11px; padding: 9px 0; border-bottom: 1px dashed var(--border); }
+.fact:last-child { border-bottom: 0; padding-bottom: 0; }
+.fact .bullet { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
+.fact p { margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--text-secondary); }
+.fact p b { color: var(--text); font-weight: 550; }
+
+.badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge {
+  font: 550 11px/1 monospace; padding: 5px 10px; border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+}
+.badge.code { background: var(--code-soft); color: var(--code); border-color: transparent; }
+.badge.biz  { background: var(--business-soft); color: var(--business); border-color: transparent; }
+.badge.req  { background: var(--requirement-soft); color: var(--requirement); border-color: transparent; }
+.badge.tag  { background: var(--tag-soft); color: var(--tag); border-color: transparent; }
+.badge.ghost { background: transparent; color: var(--text-faint); }
+
+pre.ev {
+  margin: 0; padding: 13px 15px; background: var(--well);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  font: 400 11.5px/1.8 monospace; color: var(--code);
+  white-space: pre-wrap;
+}
+
+.composer {
+  margin-top: auto; background: var(--raised); border: 1px solid var(--border-strong);
+  border-radius: 20px; padding: 11px 16px; box-shadow: var(--shadow-1);
+  display: flex; align-items: center; gap: 10px;
+}
+.composer span { color: var(--text-faint); font-size: 13px; }
+.composer .send {
+  margin-left: auto; width: 27px; height: 27px; border-radius: 8px;
+  background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 13px;
+}
+
+/* ---------- 组件 ---------- */
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 14px; }
+.panel { background: var(--raised); border-radius: var(--r-md); box-shadow: var(--shadow-1); padding: 18px; }
+.panel h3 { margin: 0 0 14px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.rowb { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+
+.btn {
+  border: 1px solid var(--border); background: var(--raised); color: var(--text);
+  padding: 0 15px; height: 34px; border-radius: var(--r-md); cursor: pointer;
+  font: 550 13px/1 inherit; display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.btn:hover { border-color: var(--border-strong); }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary:hover { background: var(--brand-strong); border-color: var(--brand-strong); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--text-secondary); }
+.btn.ghost:hover { background: var(--muted); }
+.btn.danger { color: var(--danger); }
+
+.input {
+  height: 34px; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--raised); padding: 0 12px; font: 400 13px inherit; color: var(--text);
+  width: 100%; outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.input:focus { border-color: var(--brand); box-shadow: var(--focus); }
+.input::placeholder { color: var(--text-faint); }
+
+.diff { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.diff > div {
+  background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 13px 15px; box-shadow: var(--shadow-1);
+}
+.diff .before { border-top: 3px solid var(--danger); }
+.diff .after { border-top: 3px solid var(--business); }
+.diff small { font-size: 10.5px; font-weight: 650; letter-spacing: .04em; color: var(--text-faint); display: block; margin-bottom: 7px; }
+.diff p { margin: 0; font: 400 11.5px/1.75 monospace; white-space: pre-wrap; }
+
+/* ---------- 图谱节点 ---------- */
+.nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; }
+.node {
+  display: flex; align-items: center; gap: 11px;
+  padding: 13px 14px; border-radius: var(--r-md);
+  background: var(--soft); border: 1px solid var(--border);
+}
+.node i {
+  width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center;
+  font: 700 10px monospace; background: var(--accent); color: var(--raised); font-style: normal;
+  flex-shrink: 0;
+}
+.node b { font-size: 12.5px; font-weight: 550; display: block; }
+.node small { color: var(--text-secondary); font-size: 10.5px; }
+
+.note {
+  margin-top: 40px; padding: 18px 20px; border-radius: var(--r-md);
+  background: var(--well); border: 1px solid var(--border);
+  font-size: 12.5px; line-height: 1.75; color: var(--text-secondary);
+}
+.note b { color: var(--text); }
+.note code { font-family: monospace; font-size: 11.5px; background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  .rail { display: none; }
+  .diff { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div>
+      <h1>Atelier 配色方案</h1>
+      <p>暖中性单一色相 · 骨白画布 · 青瓷强调 · 明暗双主题</p>
+    </div>
+    <div class="toggle" id="toggle">
+      <button class="on" data-mode="light">浅色</button>
+      <button data-mode="dark">深色</button>
+    </div>
+  </div>
+
+  <section>
+    <h2>中性阶梯</h2>
+    <div class="ramp">
+      <div class="chip"><div class="sw" style="background:#FFFFFF"></div><div class="meta"><b>raised</b><small>#FFFFFF</small></div></div>
+      <div class="chip"><div class="sw" style="background:#FCFBF9"></div><div class="meta"><b>surface</b><small>#FCFBF9</small></div></div>
+      <div class="chip"><div class="sw" style="background:#F7F5F1"></div><div class="meta"><b>well</b><small>#F7F5F1</small></div></div>
+      <div class="chip"><div class="sw" style="background:#F4F2ED"></div><div class="meta"><b>canvas</b><small>#F4F2ED</small></div></div>
+      <div class="chip"><div class="sw" style="background:#EDEAE4"></div><div class="meta"><b>muted</b><small>#EDEAE4</small></div></div>
+      <div class="chip"><div class="sw" style="background:#EBE7E0"></div><div class="meta"><b>sidebar</b><small>#EBE7E0</small></div></div>
+      <div class="chip"><div class="sw" style="background:#E0DCD5"></div><div class="meta"><b>border</b><small>#E0DCD5</small></div></div>
+      <div class="chip"><div class="sw" style="background:#C9C4BA"></div><div class="meta"><b>border-strong</b><small>#C9C4BA</small></div></div>
+      <div class="chip"><div class="sw" style="background:#A8A297"></div><div class="meta"><b>text-faint</b><small>#A8A297</small></div></div>
+      <div class="chip"><div class="sw" style="background:#7E786E"></div><div class="meta"><b>text-secondary</b><small>#7E786E</small></div></div>
+      <div class="chip"><div class="sw" style="background:#403B33"></div><div class="meta"><b>n-700</b><small>#403B33</small></div></div>
+      <div class="chip"><div class="sw" style="background:#211E1A"></div><div class="meta"><b>text</b><small>#211E1A</small></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>强调色与证据源语义色</h2>
+    <div class="semantic">
+      <div class="sem" style="--soft:var(--brand-soft); --accent:var(--brand)">
+        <b>brand 青瓷</b><code>#1B6B65</code>
+        <small>主操作、选中态、聚焦环。脱胎于原方案的绿，色相移到 176°、饱和度压到 42%。</small>
+      </div>
+      <div class="sem" style="--soft:var(--code-soft); --accent:var(--code)">
+        <b>code 石板蓝</b><code>#2F6382</code>
+        <small>代码证据。低饱和冷色，和暖中性底形成温度对比但不刺眼。</small>
+      </div>
+      <div class="sem" style="--soft:var(--requirement-soft); --accent:var(--requirement)">
+        <b>requirement 赭</b><code>#8A5F28</code>
+        <small>需求文档证据。用赭石替掉原来的琥珀黄，避免廉价的高亮感。</small>
+      </div>
+      <div class="sem" style="--soft:var(--danger-soft); --accent:var(--danger)">
+        <b>danger 砖红</b><code>#A53831</code>
+        <small>错误与冲突。砖红比纯红沉，小面积使用仍有足够警示度。</small>
+      </div>
+      <div class="sem" style="--soft:var(--tag-soft); --accent:var(--tag)">
+        <b>tag 中性</b><code>#7E786E</code>
+        <small>标签与元信息。刻意不给色相，把彩色的语义留给真正的证据源。</small>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>界面预览 · 问答页</h2>
+    <div class="app">
+      <aside class="rail">
+        <div class="brand">
+          <div class="mark">{}</div>
+          <div><b>Code Atlas</b><small>证据优先的业务知识库</small></div>
+        </div>
+        <div class="nav-item on"><span class="dot"></span>问答</div>
+        <div class="nav-item"><span class="dot"></span>浏览知识库</div>
+        <div class="nav-item"><span class="dot"></span>知识图谱</div>
+        <div class="rail-label">最近分析</div>
+        <div class="recent">为什么提款时要校验 repayType？<small>流程追踪 · 14 分钟前</small></div>
+        <div class="recent">结算批任务会写哪些表？<small>数据影响 · 1 小时前</small></div>
+      </aside>
+
+      <main class="main">
+        <div class="card">
+          <p class="q">为什么提款时要校验 repayType，这个值从哪里来？</p>
+          <div class="fact">
+            <span class="bullet" style="background:var(--business)"></span>
+            <p><b>WithdrawalService.validateRepayType</b> 在提款前校验还款类型，值来自 <b>LoanApplication.repayType</b> 字段。</p>
+          </div>
+          <div class="fact">
+            <span class="bullet" style="background:var(--code)"></span>
+            <p><b>WithdrawalMapper.findApplication</b> 按申请号读取整条申请记录，校验失败即中断。</p>
+          </div>
+          <div class="fact">
+            <span class="bullet" style="background:var(--requirement)"></span>
+            <p>需求 REQ-2026-001 约定 A/B 两类还款类型，其余取值拒绝提款。</p>
+          </div>
+          <div class="badges" style="margin-top:13px">
+            <span class="badge biz">业务</span>
+            <span class="badge code">代码</span>
+            <span class="badge req">需求</span>
+            <span class="badge tag">#提款</span>
+            <span class="badge ghost">3 条证据</span>
+          </div>
+        </div>
+
+        <pre class="ev">WithdrawalService.java:42  validateRepayType(application)
+  → "A".equals(application.getRepayType())  等额本息
+  → "B".equals(application.getRepayType())  先息后本</pre>
+
+        <div class="composer">
+          <span>继续追问这个功能…</span>
+          <div class="send">↑</div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <section>
+    <h2>组件</h2>
+    <div class="grid3">
+      <div class="panel">
+        <h3>按钮</h3>
+        <div class="rowb">
+          <button class="btn primary">开始新分析</button>
+          <button class="btn">重新分析</button>
+          <button class="btn ghost">取消</button>
+          <button class="btn ghost danger">删除</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>输入与标签</h3>
+        <input class="input" placeholder="搜索功能、代码符号或表…">
+        <div class="badges" style="margin-top:13px">
+          <span class="badge biz">已定位</span>
+          <span class="badge req">多个候选</span>
+          <span class="badge" style="background:var(--danger-soft);color:var(--danger);border-color:transparent">未定位</span>
+          <span class="badge ghost">等待定位</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>知识差异卡</h3>
+        <div class="diff">
+          <div class="before">
+            <small>变更前</small>
+            <p>repayType 允许
+A / B / C</p>
+          </div>
+          <div class="after">
+            <small>变更后</small>
+            <p>repayType 仅允许
+A / B</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>图谱节点</h2>
+    <div class="nodes">
+      <div class="node" style="--soft:var(--business-soft); --accent:var(--business)"><i>功</i><div><b>功能</b><small>贷款申请与提款</small></div></div>
+      <div class="node" style="--soft:var(--brand-soft); --accent:var(--brand)"><i>工</i><div><b>工程</b><small>withdrawal-service</small></div></div>
+      <div class="node" style="--soft:var(--code-soft); --accent:var(--code)"><i>{}</i><div><b>代码</b><small>WithdrawalController</small></div></div>
+      <div class="node" style="--soft:var(--requirement-soft); --accent:var(--requirement)"><i>表</i><div><b>关键表</b><small>loan_application</small></div></div>
+      <div class="node" style="--soft:var(--tag-soft); --accent:var(--tag)"><i>#</i><div><b>标签</b><small>提款</small></div></div>
+    </div>
+  </section>
+
+  <div class="note">
+    <b>三个决定配色成败的点：</b><br>
+    1. <code>canvas #F4F2ED</code> 比卡片白 <code>#FFFFFF</code> 暗约 6%，配一层极淡阴影，面板才"浮"得起来——原方案三级之间只差 2–3%，所以显得平。<br>
+    2. 中性色全程锁在同一个暖灰色相（约 35°）上，饱和度不超过 9%。原方案的绿灰一旦大面积铺开就会发脏，换掉之后整片底色干净了。<br>
+    3. 强调色只出现在需要表达语义的地方（主操作、选中态、证据源徽章），其余一律走中性。彩色一多，高级感就没了。
+  </div>
+
+</div>
+
+<script>
+const toggle = document.getElementById("toggle");
+toggle.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  document.documentElement.dataset.theme = button.dataset.mode;
+  toggle.querySelectorAll("button").forEach((item) => item.classList.toggle("on", item === button));
+});
+</script>
+</body>
+</html>

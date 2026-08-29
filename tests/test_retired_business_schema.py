@@ -8,7 +8,7 @@ from business_code_agent.schema import connect
 
 
 class RetiredBusinessSchemaTest(unittest.TestCase):
-    def test_new_database_has_only_canonical_function_tables(self):
+    def test_new_database_has_canonical_baseline_and_mapping_tables(self):
         with tempfile.TemporaryDirectory() as folder:
             path = str(Path(folder) / "knowledge.db")
             db = connect(path)
@@ -18,7 +18,10 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
                 )
             }
             db.close()
-        self.assertIn("functional_knowledge", names)
+        self.assertIn("business_baseline_source", names)
+        self.assertIn("business_entity", names)
+        self.assertIn("business_relation_v2", names)
+        self.assertIn("business_code_mapping", names)
         self.assertNotIn("business_function", names)
         self.assertNotIn("business_function_version", names)
         self.assertNotIn("knowledge_update_proposal", names)
