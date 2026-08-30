@@ -207,13 +207,13 @@ class QueryLangChainAdapterTest(unittest.TestCase):
                              facts=[{"statement": "repayType 在校验", "evidenceIds": ["EV-1"]}],
                              unknowns=[], conflicts=[])
 
-    def test_composer_rejects_semantic_polarity_reversal(self):
+    def test_composer_rejects_free_text_claim_without_fact_indices(self):
         class Structured:
             def model_dump(self, mode="python"):
                 return {
-                    "conclusion": "提款阶段允许重新生成 repayType",
+                    "conclusion_fact_indices": [0],
                     "claims": [{
-                        "statement": "提款阶段允许重新生成 repayType",
+                        "statement": "WithdrawService 校验 repayType 后会发送担保文件",
                         "evidence_ids": ["EV-1"],
                     }],
                 }
@@ -225,21 +225,54 @@ class QueryLangChainAdapterTest(unittest.TestCase):
         composer = LangChainQueryComposer(object(), agent_factory=lambda **kwargs: Runnable())
         with self.assertRaises(QueryModelInvocationError):
             composer.compose(
-                "提款阶段是否允许重新生成 repayType？",
+                "WithdrawService 如何校验 repayType？",
                 evidence_status="SUFFICIENT",
                 facts=[{
-                    "statement": "提款阶段不允许重新生成 repayType",
+                    "statement": "WithdrawService 校验 repayType",
                     "evidenceIds": ["EV-1"],
                 }],
                 unknowns=[], conflicts=[],
             )
 
+    def test_composer_ignores_free_text_and_rebuilds_conclusion_from_fact_indices(self):
+        class Structured:
+            def model_dump(self, mode="python"):
+                # A real Pydantic response rejects these extra free-text
+                # fields.  The validator also ignores them so a custom model
+                # adapter cannot bypass the Fact-Index boundary.
+                return {
+                    "conclusion": "提款阶段允许重新生成 repayType",
+                    "conclusion_fact_indices": [0],
+                    "claims": [{
+                        "fact_indices": [0],
+                        "statement": "提款阶段允许重新生成 repayType",
+                        "evidence_ids": ["EV-X"],
+                    }],
+                }
+
+        class Runnable:
+            def invoke(self, value):
+                return {"structured_response": Structured()}
+
+        composer = LangChainQueryComposer(object(), agent_factory=lambda **kwargs: Runnable())
+        result = composer.compose(
+            "提款阶段是否允许重新生成 repayType？",
+            evidence_status="SUFFICIENT",
+            facts=[{
+                "statement": "提款阶段不允许重新生成 repayType",
+                "evidenceIds": ["EV-1"],
+            }],
+            unknowns=[], conflicts=[],
+        )
+        self.assertEqual("提款阶段不允许重新生成 repayType。", result["conclusion"])
+        self.assertEqual(["EV-1"], result["claims"][0]["evidenceIds"])
+
     def test_composer_reconstructs_claim_from_selected_fact_indices(self):
         class Structured:
             def model_dump(self, mode="python"):
                 return {
-                    "conclusion": "提款阶段不允许重新生成 repayType",
                     "claims": [{"fact_indices": [0]}],
+                    "conclusion_fact_indices": [0],
                 }
 
         class Runnable:
@@ -258,6 +291,7 @@ class QueryLangChainAdapterTest(unittest.TestCase):
         )
         self.assertEqual("提款阶段不允许重新生成 repayType", result["claims"][0]["statement"])
         self.assertEqual(["EV-1"], result["claims"][0]["evidenceIds"])
+        self.assertEqual("提款阶段不允许重新生成 repayType。", result["conclusion"])
 
 
 if __name__ == "__main__":

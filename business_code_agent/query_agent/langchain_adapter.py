@@ -75,10 +75,10 @@ class LangChainQueryComposer:
             raise QueryModelInvocationError("answer synthesis requires conflict-free sufficient evidence")
         schema = _answer_schema()
         analyzer = LangChainQueryAnalyzer(self.model, agent_factory=self._agent_factory)
-        agent = analyzer._build(schema, """你是业务代码问答 Agent 的回答整理节点。
-只能根据输入的 verified_facts 组织回答。每条 claim 优先只填写 verified_facts 中对应事实的
-fact_indices；不要改写或扩展事实。若填写 statement 或 evidence_ids，它们也必须完全受所选事实支持。
-conclusion 只能组合 claims 中已有事实，不能改变肯定/否定、允许/禁止、成功/失败等语义。
+        agent = analyzer._build(schema, """你是业务代码问答 Agent 的回答编排节点。
+你只能选择和排序输入的 verified_facts，不能撰写事实文本。
+每条 claim 必须填写至少一个 fact_indices；conclusion_fact_indices 必须从 claims 已选事实中取值，
+并按希望展示的顺序排列。不要返回 statement、evidence_ids 或自由文本 conclusion。
 不能新增业务事实、代码行为、需求结论或未提供的证据。""")
         catalog = [{"index": index, **fact} for index, fact in enumerate(facts)]
         try:
@@ -118,14 +118,12 @@ def _answer_schema():
 
     class Claim(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        statement: str = ""
-        evidence_ids: list[str] = Field(default_factory=list)
-        fact_indices: list[int] = Field(default_factory=list)
+        fact_indices: list[int] = Field(min_length=1)
 
     class Answer(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        conclusion: str
-        claims: list[Claim] = Field(default_factory=list)
+        claims: list[Claim] = Field(min_length=1)
+        conclusion_fact_indices: list[int] = Field(min_length=1)
         suggested_follow_ups: list[str] = Field(default_factory=list)
 
     return Answer
@@ -145,70 +143,45 @@ def _understanding_from_payload(payload: Any, question: str) -> QuestionUndersta
 
 
 def _validate_composed(payload: Any, facts: list[dict]) -> dict:
-    if not isinstance(payload, Mapping) or not str(payload.get("conclusion", "")).strip():
+    if not isinstance(payload, Mapping):
         raise ValueError("query synthesis response is invalid")
-    evidence_to_statements: dict[str, list[str]] = {}
-    for fact in facts:
-        for evidence_id in fact.get("evidenceIds", []):
-            evidence_to_statements.setdefault(evidence_id, []).append(str(fact.get("statement", "")))
     claims = []
+    selected_indices: set[int] = set()
     for raw in payload.get("claims", []):
         if not isinstance(raw, Mapping):
             raise ValueError("query claim is invalid")
-        indices = _fact_indices(raw)
-        if indices:
-            if any(index < 0 or index >= len(facts) for index in indices):
-                raise ValueError("query claim has an invalid fact index")
-            selected = [facts[index] for index in indices]
-            statement = "；".join(str(item.get("statement", "")).strip() for item in selected if str(item.get("statement", "")).strip())
-            evidence_ids = list(dict.fromkeys(
-                str(evidence_id)
-                for item in selected
-                for evidence_id in item.get("evidenceIds", [])
-                if str(evidence_id).strip()
-            ))
-            if not statement or not evidence_ids:
-                raise ValueError("query claim selected an empty fact")
-            # A model may still return a prose statement alongside indices.
-            # Treat it as an assertion to validate, never as the source of the
-            # durable claim text.  The persisted claim is reconstructed from
-            # the selected verified facts above.
-            supplied_statement = str(raw.get("statement", "")).strip()
-            if supplied_statement and not all(
-                _supported_by_fact(supplied_statement, str(item.get("statement", "")))
-                for item in selected
-            ):
-                raise ValueError("query claim is not supported by its selected facts")
-            supplied_ids = _evidence_ids(raw)
-            if supplied_ids and not set(supplied_ids).issubset(set(evidence_ids)):
-                raise ValueError("query claim references evidence outside its selected facts")
-            claims.append({"statement": statement, "evidenceIds": evidence_ids, "factIndices": indices})
-            continue
-
-        statement = str(raw.get("statement", "")).strip()
-        evidence_ids = _evidence_ids(raw)
-        if not statement or not evidence_ids or any(item not in evidence_to_statements for item in evidence_ids):
-            raise ValueError("query claim has an invalid evidence reference")
-        for evidence_id in evidence_ids:
-            if not any(_supported_by_fact(statement, fact_statement) for fact_statement in evidence_to_statements[evidence_id]):
-                raise ValueError("query claim is not supported by its evidence")
-        claims.append({"statement": statement, "evidenceIds": evidence_ids})
+        indices = _fact_indices(raw, required=True)
+        selected = [_fact_at(facts, index) for index in indices]
+        claims.append({
+            "statement": "；".join(item["statement"] for item in selected),
+            "evidenceIds": list(dict.fromkeys(
+                evidence_id for item in selected for evidence_id in item["evidenceIds"]
+            )),
+            "factIndices": indices,
+        })
+        selected_indices.update(indices)
     if not claims:
         raise ValueError("query synthesis must return claims")
-    conclusion = str(payload["conclusion"]).strip()
-    if not any(_supported_by_fact(conclusion, item["statement"]) for item in claims):
-        raise ValueError("query conclusion is not supported by its claims")
+    conclusion_indices = _fact_indices({
+        "fact_indices": payload.get("conclusion_fact_indices", payload.get("conclusionFactIndices")),
+    }, required=True)
+    if any(index not in selected_indices for index in conclusion_indices):
+        raise ValueError("query conclusion references a fact outside its claims")
+    conclusion = "；".join(_fact_at(facts, index)["statement"] for index in conclusion_indices)
+    if not conclusion.endswith(("。", "！", "？", ".", "!", "?")):
+        conclusion += "。"
     return {
         "conclusion": conclusion,
         "claims": claims,
+        "conclusionFactIndices": conclusion_indices,
         "suggestedFollowUps": list(dict.fromkeys(str(item).strip() for item in payload.get("suggested_follow_ups", payload.get("suggestedFollowUps", [])) if str(item).strip()))[:4],
     }
 
 
-def _fact_indices(value: Mapping[str, Any]) -> list[int]:
+def _fact_indices(value: Mapping[str, Any], *, required: bool = False) -> list[int]:
     raw = value.get("fact_indices", value.get("factIndexes", value.get("factIndices", [])))
     if raw is None:
-        return []
+        raw = []
     if isinstance(raw, (str, bytes)):
         raw = [raw]
     result = []
@@ -217,74 +190,20 @@ def _fact_indices(value: Mapping[str, Any]) -> list[int]:
             result.append(int(item))
         except (TypeError, ValueError):
             raise ValueError("query claim fact_indices must be integers")
-    return list(dict.fromkeys(result))
+    result = list(dict.fromkeys(result))
+    if required and not result:
+        raise ValueError("query synthesis requires fact_indices")
+    return result
 
 
-def _evidence_ids(value: Mapping[str, Any]) -> list[str]:
-    raw = value.get("evidence_ids", value.get("evidenceIds", [])) or []
-    if isinstance(raw, (str, bytes)):
-        raw = [raw]
-    return list(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
-
-
-def _supported_by_fact(statement: str, fact: str) -> bool:
-    """Check lexical support while explicitly rejecting polarity reversals."""
-    statement = str(statement or "").strip()
-    fact = str(fact or "").strip()
-    if not statement or not fact:
-        return False
-    statement_terms = _terms(statement)
-    fact_terms = _terms(fact)
-    common = statement_terms.intersection(fact_terms)
-    if not common:
-        return False
-    statement_polarity = _polarity(statement)
-    fact_polarity = _polarity(fact)
-    if statement_polarity and fact_polarity and statement_polarity != fact_polarity:
-        return False
-    # An identifier is a strong anchor.  For natural-language Chinese facts,
-    # require at least two shared bigrams/terms so a generic verb cannot carry
-    # an unrelated claim by itself.
-    if set(_identifiers(statement)).intersection(_identifiers(fact)):
-        return True
-    return len(common) >= 2 or _compact(statement) in _compact(fact) or _compact(fact) in _compact(statement)
-
-
-_NEGATIVE_CUES = (
-    "不允许", "不可以", "不可", "不能", "不得", "禁止", "不应", "无需", "不需", "不会",
-    "不再", "没有", "不存在", "不是", "未", "非", "无", "拒绝", "失败", "not", "never", "without", "no",
-)
-_POSITIVE_CUES = ("允许", "可以", "能", "应当", "需要", "必须", "会", "是", "成功", "通过")
-
-
-def _polarity(value: str) -> int:
-    lowered = str(value or "").casefold()
-    negative = any(cue.casefold() in lowered for cue in _NEGATIVE_CUES)
-    # Remove negative phrases before checking positive cues: ``不允许`` must
-    # remain negative rather than matching the substring ``允许``.
-    for cue in _NEGATIVE_CUES:
-        lowered = lowered.replace(cue.casefold(), "")
-    positive = any(cue.casefold() in lowered for cue in _POSITIVE_CUES)
-    if negative and not positive:
-        return -1
-    if positive and not negative:
-        return 1
-    return 0
-
-
-def _identifiers(value: str) -> set[str]:
-    import re
-    return {item.casefold() for item in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", value or "")}
-
-
-def _compact(value: str) -> str:
-    import re
-    return re.sub(r"\s+", "", str(value or "").casefold())
-
-
-def _terms(value: str) -> set[str]:
-    import re
-    terms = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}|[\u4e00-\u9fff]{2,}", value.casefold()))
-    for run in re.findall(r"[\u4e00-\u9fff]+", value):
-        terms.update(run[index:index + 2] for index in range(len(run) - 1))
-    return terms
+def _fact_at(facts: list[dict], index: int) -> dict[str, Any]:
+    if index < 0 or index >= len(facts):
+        raise ValueError("query claim has an invalid fact index")
+    fact = facts[index]
+    statement = str(fact.get("statement", "")).strip()
+    evidence_ids = list(dict.fromkeys(
+        str(item).strip() for item in fact.get("evidenceIds", []) if str(item).strip()
+    ))
+    if not statement or not evidence_ids:
+        raise ValueError("query claim selected an empty fact")
+    return {"statement": statement, "evidenceIds": evidence_ids}

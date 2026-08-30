@@ -18,6 +18,13 @@ ENTITY_TYPES = {
 }
 ALL_KNOWLEDGE_TYPES = {*ENTITY_TYPES, "RELATION"}
 PROMOTION_STATUSES = {"CANDIDATE", "VERIFIED", "CONFLICTED", "DEPRECATED", "UNRESOLVED"}
+RELATION_PATTERNS = {
+    "TRIGGERS": re.compile(r"触发|导致|引发|后(?=[，,]|会|需要|将|触发|执行)"),
+    "BELONGS_TO": re.compile(r"属于|归属|隶属|(?:是|为).{0,12}(?:类型|分类)"),
+    "DEPENDS_ON": re.compile(r"依赖|基于|取决于"),
+    "PRODUCES": re.compile(r"产生|生成|产出|创建"),
+    "HANDLED_BY": re.compile(r"由.{0,40}(?:处理|负责|承办)"),
+}
 logger = logging.getLogger(__name__)
 
 
@@ -464,6 +471,7 @@ def _baseline_schema():
 _BASELINE_PROMPT = """你负责把人工业务基线转换为严格的内部知识结构。
 只允许实体类型 SYSTEM、BUSINESS_TERM、CAPABILITY、FLOW、RULE；业务关系放在 relations。
 不要补充原文没有表达的业务事实。每个实体和关系必须提供 sourceQuote，且必须逐字出现在原文。
+实体的名称、别名和属性必须出现在 sourceQuote 所在的 Markdown 小节中；关系的 from、to 和关系语义必须同时出现在 sourceQuote 中。
 FLOW 的业务步骤放 attributes.steps；RULE 的 condition、behavior、scope 放 attributes；
 SYSTEM 的 responsibilities、nonResponsibilities 放 attributes。英文缩写或代码名称放 aliases 或 attributes.codeHints。
 关系使用简短稳定的英文谓词，例如 TRIGGERS、PRODUCES、BELONGS_TO、DEPENDS_ON、HANDLED_BY。
@@ -482,10 +490,13 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         if kind not in ENTITY_TYPES or not name or not definition:
             continue
         quote = _grounded_quote(text, quote, name, definition)
+        grounding_scope = _section_containing_quote(text, quote, name)
         # A model may use a valid quote as cover for a second, invented
         # business object.  The object name itself must be present in the
-        # authored baseline before it can be persisted.
-        if not _literal_in_source(text, name):
+        # section containing the quote before it can be persisted.  Checking
+        # the whole document would allow an alias from product A to leak into
+        # product B when both are described in one domain baseline.
+        if not _literal_in_source(grounding_scope, name):
             logger.warning("忽略缺少原文依据的业务实体: %s", name)
             continue
         entities.append({
@@ -494,9 +505,9 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
             # fields: they directly influence code search.  Keep only literal
             # values from the human source so a model cannot invent a class
             # name and then use that name to prove its own mapping.
-            "aliases": _grounded_strings(raw.get("aliases"), text),
-            "definition": _grounded_definition(definition, text, quote, name),
-            "attributes": _grounded_attributes(raw.get("attributes"), text),
+            "aliases": _grounded_strings(raw.get("aliases"), grounding_scope),
+            "definition": _grounded_definition(definition, grounding_scope, quote, name),
+            "attributes": _grounded_attributes(raw.get("attributes"), grounding_scope),
             "sourceQuote": quote,
         })
     relations: list[dict[str, Any]] = []
@@ -510,13 +521,20 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         if not source or not relation or not target:
             continue
         quote = _grounded_quote(text, quote, source, target)
-        if not _literal_in_source(text, source) or not _literal_in_source(text, target):
+        # Relations are stricter than entities: both endpoints and the
+        # linguistic expression of the normalized predicate must be present
+        # in the same quoted passage.  Merely appearing elsewhere in the same
+        # Markdown document is not evidence of a relationship.
+        if not _literal_in_source(quote, source) or not _literal_in_source(quote, target):
             logger.warning("忽略缺少原文依据的业务关系: %s %s %s", source, relation, target)
+            continue
+        if not _relation_expressed(relation, quote):
+            logger.warning("忽略原文未明确表达谓词的业务关系: %s %s %s", source, relation, target)
             continue
         relations.append({
             "from": source, "relation": relation, "to": target,
-            "scope": _grounded_scalar(raw.get("scope"), text) or "",
-            "attributes": _grounded_attributes(raw.get("attributes"), text), "sourceQuote": quote,
+            "scope": _grounded_scalar(raw.get("scope"), quote) or "",
+            "attributes": _grounded_attributes(raw.get("attributes"), quote), "sourceQuote": quote,
         })
     return entities, relations
 
@@ -531,6 +549,43 @@ def _grounded_quote(text: str, quote: str, *fallbacks: str) -> str:
             line = next((line.strip() for line in text.splitlines() if value in line), value)
             return line
     raise ValueError("结构化知识缺少可回溯的原文片段")
+
+
+def _section_containing_quote(text: str, quote: str, anchor: str = "") -> str:
+    """Return the narrowest Markdown section containing a quoted passage.
+
+    The heading is included because an entity name is often authored there
+    while its definition is in the following paragraph.  When identical
+    quotes occur more than once, prefer the section containing the entity
+    name instead of silently selecting the first document-wide occurrence.
+    """
+    offsets = [match.start() for match in re.finditer(re.escape(quote), text)]
+    if not offsets:
+        return quote
+    headings = list(re.finditer(r"^(#{1,6})\s+.+?\s*$", text, re.MULTILINE))
+    scopes: list[str] = []
+    for offset in offsets:
+        preceding = [item for item in headings if item.start() <= offset]
+        if not preceding:
+            scopes.append(quote)
+            continue
+        heading = preceding[-1]
+        level = len(heading.group(1))
+        end = next(
+            (item.start() for item in headings if item.start() > heading.start() and len(item.group(1)) <= level),
+            len(text),
+        )
+        scopes.append(text[heading.start():end].strip())
+    if anchor:
+        anchored = next((scope for scope in scopes if _literal_in_source(scope, anchor)), None)
+        if anchored is not None:
+            return anchored
+    return scopes[0]
+
+
+def _relation_expressed(relation: str, quote: str) -> bool:
+    pattern = RELATION_PATTERNS.get(str(relation or "").upper())
+    return bool(pattern and pattern.search(str(quote or "")))
 
 
 def _literal_in_source(text: str, value: Any) -> bool:

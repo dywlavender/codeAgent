@@ -25,7 +25,7 @@ BASELINE = """# 提款业务基线
 
 ## 担保处理
 
-极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。
+极优提款成功后，会触发担保处理，代码入口通常包含 GuaranteeFileTask。
 """
 
 
@@ -41,14 +41,14 @@ class _Extractor:
                 {
                     "type": "CAPABILITY", "name": "担保处理", "aliases": [],
                     "definition": "提款成功后执行担保后处理", "attributes": {"codeHints": ["GuaranteeFileTask"]},
-                    "sourceQuote": "极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。",
+                    "sourceQuote": "极优提款成功后，会触发担保处理，代码入口通常包含 GuaranteeFileTask。",
                 },
             ],
             "relations": [
                 {
                     "from": "极优提款成功", "relation": "TRIGGERS", "to": "担保处理",
-                    "scope": "极优产品", "attributes": {},
-                    "sourceQuote": "极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。",
+                    "scope": "", "attributes": {},
+                    "sourceQuote": "极优提款成功后，会触发担保处理，代码入口通常包含 GuaranteeFileTask。",
                 }
             ],
         }
@@ -171,6 +171,65 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             self.assertEqual([], json.loads(entity["aliases_json"]))
             self.assertEqual({}, json.loads(entity["attributes_json"]))
             self.assertIn("极优提款成功后", entity["definition"])
+            db.close()
+
+    def test_entity_grounding_does_not_leak_aliases_across_markdown_sections(self):
+        class CrossSectionAlias:
+            def extract(self, **_kwargs):
+                return {"entities": [{
+                    "type": "BUSINESS_TERM", "name": "产品B",
+                    "aliases": ["JY"],
+                    "definition": "产品B提款成功后需要担保处理。",
+                    "attributes": {"codeHints": ["ProductAJob"]},
+                    "sourceQuote": "产品B提款成功后需要担保处理。",
+                }], "relations": []}
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline_root = root / "baseline"; baseline_root.mkdir()
+            source = """# 业务域
+
+## 产品A
+
+产品A代码标识是 JY，入口是 ProductAJob。
+
+## 产品B
+
+产品B提款成功后需要担保处理。
+"""
+            (baseline_root / "baseline.md").write_text(source, encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            db = connect(str(root / "knowledge.db"))
+            BaselineKnowledgeService(db, project_config=config, extractor=CrossSectionAlias()).refresh(map_code=False)
+            entity = db.execute("SELECT aliases_json,attributes_json FROM business_entity WHERE name='产品B'").fetchone()
+            self.assertEqual([], json.loads(entity["aliases_json"]))
+            self.assertEqual({}, json.loads(entity["attributes_json"]))
+            db.close()
+
+    def test_relation_requires_both_endpoints_and_predicate_in_the_same_quote(self):
+        class UnsupportedRelation:
+            def extract(self, **_kwargs):
+                return {"entities": [], "relations": [{
+                    "from": "产品A", "relation": "TRIGGERS", "to": "产品B",
+                    "scope": "", "attributes": {},
+                    "sourceQuote": "产品A和产品B都是担保产品。",
+                }]}
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline_root = root / "baseline"; baseline_root.mkdir()
+            (baseline_root / "baseline.md").write_text(
+                "# 业务域\n\n产品A和产品B都是担保产品。\n", encoding="utf-8",
+            )
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            db = connect(str(root / "knowledge.db"))
+            result = BaselineKnowledgeService(
+                db, project_config=config, extractor=UnsupportedRelation()
+            ).refresh(map_code=False)
+            self.assertEqual(0, result["entityCounts"]["RELATION"])
+            self.assertEqual(0, db.execute("SELECT count(*) FROM business_relation_v2").fetchone()[0])
             db.close()
 
 

@@ -257,8 +257,16 @@ class QueryRetriever:
     def _worker_bundle(self):
         resource = self.connection_factory()
         if hasattr(resource, "__enter__") and hasattr(resource, "__exit__"):
-            with resource as db:
-                yield _ToolBundle(EvidenceTools(db), BusinessTools(db), RequirementTools(db))
+            try:
+                with resource as db:
+                    yield _ToolBundle(EvidenceTools(db), BusinessTools(db), RequirementTools(db))
+            finally:
+                # sqlite3.Connection.__exit__ commits or rolls back but does
+                # not close the connection.  Worker-owned resources must not
+                # survive the retrieval task.
+                close = getattr(resource, "close", None)
+                if close:
+                    close()
             return
         try:
             yield _ToolBundle(EvidenceTools(resource), BusinessTools(resource), RequirementTools(resource))

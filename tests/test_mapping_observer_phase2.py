@@ -27,6 +27,19 @@ class _Extractor:
         }
 
 
+class _OpaqueCodeExtractor:
+    def extract(self, *, source_path: str, text: str):
+        return {
+            "entities": [{
+                "type": "CAPABILITY", "name": "极优担保后处理", "aliases": [],
+                "definition": "极优担保后处理负责放款完成后的收尾动作。",
+                "attributes": {},
+                "sourceQuote": "极优担保后处理负责放款完成后的收尾动作。",
+            }],
+            "relations": [],
+        }
+
+
 class MappingObserverPhase2Test(unittest.TestCase):
     def test_query_creates_candidate_without_changing_baseline(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -200,6 +213,93 @@ class MappingObserverPhase2Test(unittest.TestCase):
             self.assertTrue(items)
             self.assertEqual({"B1"}, {item["businessId"] for item in items})
             db.close()
+
+    def test_accepted_mapping_improves_later_query_against_no_mapping_control(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline = root / "baseline"; baseline.mkdir()
+            (baseline / "business.md").write_text(
+                "# 业务基线\n\n## 极优担保后处理\n\n极优担保后处理负责放款完成后的收尾动作。\n",
+                encoding="utf-8",
+            )
+            repository = root / "repo"; repository.mkdir()
+            (repository / "PostLoanX17Executor.java").write_text(
+                """public class PostLoanX17Executor {
+    public void run() {
+        worker.execute();
+    }
+}
+""",
+                encoding="utf-8",
+            )
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+
+            def prepare_db(name):
+                path = root / name
+                db = connect(str(path))
+                JavaIndexer(db).ingest(str(repository), "opaque-service")
+                BaselineKnowledgeService(
+                    db, project_config=config, extractor=_OpaqueCodeExtractor(),
+                ).refresh()
+                return path, db
+
+            control_path, control_db = prepare_db("control.db")
+            mapped_path, mapped_db = prepare_db("mapped.db")
+            try:
+                # The baseline deliberately contains no code identifier, so
+                # static matching cannot discover the opaque implementation.
+                self.assertEqual(0, control_db.execute(
+                    """SELECT count(*) FROM business_code_mapping
+                         WHERE status IN ('VERIFIED','CANDIDATE') AND code_reference!=''"""
+                ).fetchone()[0])
+
+                entity = mapped_db.execute(
+                    "SELECT id,source_evidence_id FROM business_entity WHERE name='极优担保后处理'"
+                ).fetchone()
+                code = mapped_db.execute(
+                    """SELECT cs.id,cs.qualified_name,cf.evidence_id
+                         FROM code_symbol cs JOIN code_fact cf ON cf.symbol_id=cs.id
+                        WHERE cs.qualified_name LIKE '%PostLoanX17Executor%'
+                        ORDER BY cs.qualified_name LIMIT 1"""
+                ).fetchone()
+                observations = MappingObservationService(mapped_db).observe_query(
+                    "RUN-OPAQUE-DISCOVERY", "调查确认该后处理入口", {
+                        "evidenceStatus": "SUFFICIENT",
+                        "evidence": [
+                            {"evidenceId": entity["source_evidence_id"], "sourceType": "BUSINESS", "sourceId": entity["id"], "content": "极优担保后处理"},
+                            {"evidenceId": code["evidence_id"], "sourceType": "CODE", "sourceId": code["id"], "content": "worker.execute"},
+                        ],
+                        "answer": {"facts": [
+                            {"sourceType": "BUSINESS", "evidenceIds": [entity["source_evidence_id"]]},
+                            {"sourceType": "CODE", "evidenceIds": [code["evidence_id"]]},
+                        ]},
+                    },
+                )
+                self.assertTrue(observations)
+                MappingObservationService(mapped_db).accept(
+                    observations[0]["id"], "确认不透明命名代码入口",
+                )
+
+                question = "极优放款完成后的处理入口在哪里？"
+                without_mapping = QueryService(
+                    control_db, db_path=str(control_path),
+                ).query(question, conversation_id="CONV-CONTROL")
+                with_mapping = QueryService(
+                    mapped_db, db_path=str(mapped_path),
+                ).query(question, conversation_id="CONV-MAPPED")
+
+                self.assertEqual("INSUFFICIENT", without_mapping["evidenceStatus"])
+                self.assertEqual("SUFFICIENT", with_mapping["evidenceStatus"])
+                self.assertLess(with_mapping["iterations"], without_mapping["iterations"])
+                mapped_code = " ".join(
+                    item["statement"] for item in with_mapping["answer"]["facts"]
+                    if item["sourceType"] == "CODE"
+                )
+                self.assertIn("PostLoanX17Executor", mapped_code)
+            finally:
+                control_db.close()
+                mapped_db.close()
 
 
 def _json_post(url: str, body: dict) -> dict:
