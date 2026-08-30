@@ -186,6 +186,7 @@ class BusinessTools:
 
     def _baseline_mappings(self, business_type: str, business_id: str) -> list[dict]:
         values = []
+        known = set()
         for item in self.db.execute(
             """SELECT * FROM business_code_mapping
                 WHERE business_type=? AND business_id=? AND status IN ('VERIFIED','CANDIDATE')
@@ -203,6 +204,29 @@ class BusinessTools:
                 "evidence_id": evidence_ids[0] if evidence_ids else None,
                 "evidence_ids": evidence_ids,
             })
+            known.add((item["code_symbol_id"], item["code_reference"]))
+        # Query observations are navigation hints until an administrator
+        # confirms them.  They are intentionally labelled CANDIDATE so the
+        # query agent cannot turn them into answer facts without evidence.
+        for item in self.db.execute(
+            """SELECT * FROM business_code_mapping_observation
+                WHERE business_type=? AND business_id=? AND status='CANDIDATE'
+                ORDER BY confidence DESC""",
+            (business_type, business_id),
+        ):
+            key = (item["code_symbol_id"], item["code_reference"])
+            if key in known:
+                continue
+            evidence_ids = json.loads(item["evidence_ids_json"] or "[]")
+            values.append({
+                "id": item["id"], "source_type": "BUSINESS", "source_id": business_id,
+                "relation_type": item["relation_type"], "target_type": "CODE_SYMBOL",
+                "target_id": item["code_symbol_id"], "qualified_name": item["code_reference"],
+                "status": "CANDIDATE", "confidence": item["confidence"],
+                "evidence_id": evidence_ids[0] if evidence_ids else None,
+                "evidence_ids": evidence_ids, "observation_id": item["id"],
+            })
+            known.add(key)
         return values
 
     def _load_evidence(self, evidence_ids) -> list[dict]:

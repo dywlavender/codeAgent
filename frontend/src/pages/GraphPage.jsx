@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import {
-  Button, Empty, Flex, Input, Segmented, Skeleton, Splitter, Tag, Typography,
+  Button, Card, Empty, Flex, Input, Segmented, Skeleton, Splitter, Tag, Typography,
 } from "antd";
 import { request } from "../lib/api.js";
 

@@ -120,7 +120,7 @@ pre.ev-pre.drawer { border-top: 0; border: 1px solid var(--border); border-radiu
 .ev-mini-card { border-radius: 12px; }
 
 /* ===== 通用页面骨架 ===== */
-.page-wrap { display: flex; flex-direction: column; height: 100dvh; padding: 24px clamp(16px, 3vw, 40px) 24px; background: var(--canvas); }
+.page-wrap { display: flex; flex-direction: column; height: 100dvh; padding: 24px clamp(16px, 3vw, 40px) 24px; background: var(--canvas); overflow-y: auto; }
 
 .result-list { height: 100%; overflow-y: auto; background: #fff; border: 1px solid var(--border); border-radius: 14px; }
 .detail-scroll { height: 100%; overflow-y: auto; padding-inline-start: 12px; }

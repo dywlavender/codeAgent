@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from ..knowledge_update.langchain_adapter import model_config_from_environment
 from ..schema import connect
 from .agent import BusinessCodeQueryAgent
 from .langchain_adapter import LangChainQueryAnalyzer, LangChainQueryComposer
+
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_json_loads(text):
@@ -41,6 +45,19 @@ class QueryService:
         # The UI renders exact Evidence records, not the broader symbol context
         # temporarily loaded into the agent's bounded reasoning context.
         value["evidence"] = self.evidence_for_answer(value["answer"])
+        # MVP2 observes only the evidence that made it into this answer.  The
+        # observation is a candidate and never changes the authored baseline.
+        from ..knowledge_update.mapping_observer import MappingObservationService
+        try:
+            value["mappingSuggestions"] = MappingObservationService(self.db).observe_query(
+                value["runId"], question, value,
+            )
+        except Exception as exc:
+            # Mapping discovery is an enhancement to answering; it must never
+            # turn a successful, evidence-backed answer into a failed query.
+            self.db.rollback()
+            logger.exception("问答映射观察失败: %s", type(exc).__name__)
+            value["mappingSuggestions"] = []
         return value
 
     def _model_stages(self, _project_config):
@@ -97,6 +114,8 @@ class QueryService:
             "SELECT sequence,node_name,state_json,created_at FROM query_checkpoint WHERE run_id=? ORDER BY sequence", (run_id,)
         )]
         value["evidence"] = self.evidence_for_answer(value["answer"])
+        from ..knowledge_update.mapping_observer import MappingObservationService
+        value["mappingSuggestions"] = MappingObservationService(self.db).list_for_run(run_id)
         message = self.db.execute(
             "SELECT conversation_id FROM query_message WHERE run_id=? ORDER BY created_at LIMIT 1", (run_id,)
         ).fetchone()
@@ -187,6 +206,14 @@ class QueryService:
                 "pendingProposals": self.db.execute(
                     """SELECT count(*) FROM business_code_mapping
                          WHERE status IN ('CANDIDATE','UNRESOLVED','CONFLICTED')"""
+                ).fetchone()[0],
+                "mappingSuggestions": self.db.execute(
+                    """SELECT count(*) FROM business_code_mapping_observation
+                         WHERE status='CANDIDATE'"""
+                ).fetchone()[0],
+                "pendingMappings": self.db.execute(
+                    """SELECT count(*) FROM business_code_mapping_observation
+                         WHERE status='CANDIDATE'"""
                 ).fetchone()[0],
                 "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
                 "runs": self.db.execute("SELECT count(*) FROM query_agent_run").fetchone()[0],

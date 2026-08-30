@@ -59,6 +59,15 @@ def main() -> None:
     baseline.add_argument("--db", required=True)
     baseline.add_argument("--no-model", action="store_true", help="仅使用安全的确定性解析")
     baseline.add_argument("--no-map", action="store_true", help="暂不建立业务到代码的映射")
+    mapping_observations = sub.add_parser("mapping-observations", help="查看问答发现的 Business-Code 映射候选")
+    mapping_observations.add_argument("--db", required=True)
+    mapping_observations.add_argument("--status", default="CANDIDATE")
+    mapping_observations.add_argument("--limit", type=int, default=100)
+    mapping_review = sub.add_parser("mapping-review", help="确认或忽略一条问答映射候选")
+    mapping_review.add_argument("observation_id")
+    mapping_review.add_argument("action", choices=("accept", "reject"))
+    mapping_review.add_argument("--db", required=True)
+    mapping_review.add_argument("--note", default="")
     req = sub.add_parser("ingest-requirement")
     req.add_argument("path")
     req.add_argument("--db", required=True)
@@ -165,6 +174,17 @@ def main() -> None:
         print(json.dumps(service.refresh(
             map_code=not args.no_map, use_model=not args.no_model,
         ), ensure_ascii=False, indent=2))
+    elif args.command == "mapping-observations":
+        from .knowledge_update.mapping_observer import MappingObservationService
+        service = MappingObservationService(connect(args.db))
+        print(json.dumps({"items": service.list_observations(
+            status=args.status, limit=args.limit,
+        )}, ensure_ascii=False, indent=2))
+    elif args.command == "mapping-review":
+        from .knowledge_update.mapping_observer import MappingObservationService
+        service = MappingObservationService(connect(args.db))
+        result = service.accept(args.observation_id, args.note) if args.action == "accept" else service.reject(args.observation_id, args.note)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "ingest-requirement":
         builder = RequirementBuilder(connect(args.db))
         if Path(args.path).suffix.lower() == ".json":

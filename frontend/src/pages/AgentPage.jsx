@@ -290,6 +290,26 @@ function AnswerDocument({ result, detail, submit, viewMode, setDrawerEv }) {
           style={{ marginTop: 4 }}
         />
       )}
+      {Array.isArray(result.mappingSuggestions) && result.mappingSuggestions.length > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          title="本轮发现可补充的业务—代码映射"
+          description={(
+            <Flex gap={6} wrap="wrap" align="center">
+              <Typography.Text type="secondary" style={{ fontSize: 11.5 }}>
+                已保存为候选，不会自动修改人工业务基线；管理员可在“业务知识维护”中确认。
+              </Typography.Text>
+              {result.mappingSuggestions.slice(0, 3).map((item) => (
+                <Tag key={item.id} style={{ marginInlineEnd: 0, fontFamily: "monospace", fontSize: 10.5 }}>
+                  {item.codeReference || "未定位"}
+                </Tag>
+              ))}
+            </Flex>
+          )}
+          style={{ marginTop: 14 }}
+        />
+      )}
       <Divider style={{ margin: "10px 0 12px" }} />
       <Flex gap={6} wrap="wrap" align="center">
         <CopyButton detail={detail} />

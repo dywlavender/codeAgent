@@ -142,6 +142,7 @@ class BusinessCodeQueryAgent:
                 *state.field_hints, *state.table_hints, *state.code_hints,
             ]))[:24]
             state.final_answer = answer
+            reference_state = state.to_reference_dict()
             recorder.step("BUILD_ANSWER", state.iteration, {}, {"facts": len(answer["facts"]), "conflicts": len(answer["conflicts"])}, self._evidence_count(state), 0.0)
             recorder.finish(state.to_reference_dict(), answer, state.evidence_status.value, self.assembler.last_stats["sourceCharacters"])
             return {
@@ -153,6 +154,11 @@ class BusinessCodeQueryAgent:
                 "resolvedQuestion": " ".join(state.search_terms),
                 "answerMode": answer_mode,
                 "entities": answer["entities"],
+                # Structured candidates are returned for MVP2 observation
+                # only.  They contain identifiers and metadata, never raw
+                # source excerpts.
+                "businessCandidates": reference_state.get("business_candidates", []),
+                "codeCandidates": reference_state.get("code_candidates", []),
             }
         except Exception as exc:
             recorder.fail(type(exc).__name__, state.to_reference_dict() if state else None)

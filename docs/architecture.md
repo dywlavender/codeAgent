@@ -7,7 +7,7 @@
 - 用户端由 Query Agent 解答问题，只读取业务知识、代码事实、需求证据和 Mapping；
 - 管理端导入人工业务基线、检查结构化知识和代码 Mapping。
 
-当前实现的是第一阶段 MVP：人工业务基线、结构化知识、代码映射和问答使用。自动从问答与代码变化中持续更新业务语义属于后续阶段。
+当前实现覆盖 MVP1 和 MVP2：人工业务基线、结构化知识、代码映射、业务驱动问答，以及从充分问答证据中观察新的 Business-Code Mapping。问答观察不会自动改写人工业务语义。
 
 ## 三层知识
 
@@ -53,6 +53,20 @@ Relation      -- EVIDENCED_BY   --> Code Symbol
 
 Mapping 可以随代码重新计算，业务知识保持不变。候选不唯一或没有找到时分别保存为 `CANDIDATE` 和 `UNRESOLVED`。
 
+### MVP2 Mapping 观察
+
+问答完成后，`MappingObservationService` 只读取该回答实际引用的证据：
+
+```text
+业务实体/关系证据 + 代码 Symbol 证据 + SUFFICIENT
+                    ↓
+business_code_mapping_observation (CANDIDATE)
+                    ↓ 管理员确认
+business_code_mapping (VERIFIED, QUERY_REVIEW)
+```
+
+观察记录保存问题、候选 Business-Code 对、证据编号和可信度。它与 `business_baseline_source`、`business_entity` 分开，因此不会把一次问答的推断写回人工 Markdown。静态映射重建只清理 `source_type=CODE` 的计算结果，保留管理员确认过的 Query Mapping。
+
 ## 导入流程
 
 ```text
@@ -79,6 +93,7 @@ Mapping 可以随代码重新计算，业务知识保持不变。候选不唯一
 映射侧：
 
 - `business_code_mapping`
+- `business_code_mapping_observation`
 
 代码和证据侧复用：
 
@@ -106,6 +121,8 @@ Query Agent 的检索顺序是：
 
 业务知识负责缩小代码调查空间，不能替代代码证据。`CANDIDATE` Mapping 只能作为搜索线索，不能直接成为回答中的已确认事实。
 
+问答输出中若产生候选映射，会附带 `mappingSuggestions`。管理员确认或忽略候选后，后续问题即可复用确认过的 Mapping；拒绝不会改变业务实体和关系。
+
 ## 管理端
 
 “业务知识维护”页面支持：
@@ -115,12 +132,13 @@ Query Agent 的检索顺序是：
 - 查看自然语言来源；
 - 查看业务关系；
 - 查看候选、已验证和未定位 Mapping；
+- 查看问答发现的 Mapping 候选，并确认或忽略；
 - 在不改业务知识的情况下重新映射当前代码。
 
 ## 当前限制
 
 - 代码索引以 Java 和 MyBatis 为主；
 - 无模型时的业务结构化是保守能力，不等价于完整语义理解；
-- 第一阶段不自动把每次问答写回业务知识；
+- MVP2 只把充分证据下的 Business-Code 关联写入候选观察，不自动把每次问答写回业务知识；
 - 第一阶段不根据 Git 变化自动修改业务语义，只允许重建 Mapping；
 - 业务关系的跨文档实体合并将在后续知识更新阶段处理。

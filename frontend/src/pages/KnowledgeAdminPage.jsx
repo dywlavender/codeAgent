@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowClockwise, GitBranch, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, Check, GitBranch, WarningCircle, X } from "@phosphor-icons/react";
 import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tag, Typography } from "antd";
 import { request } from "../lib/api.js";
 
@@ -18,6 +18,8 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
   const [summary, setSummary] = useState(null);
+  const [observations, setObservations] = useState([]);
+  const [reviewing, setReviewing] = useState("");
 
   async function load(nextQuery = query, nextType = type) {
     setLoading(true); setError("");
@@ -25,8 +27,12 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
       const params = new URLSearchParams();
       if (nextQuery.trim()) params.set("q", nextQuery.trim());
       if (nextType) params.set("type", nextType);
-      const data = await request(`/api/knowledge/entities?${params}`);
+      const [data, observationData] = await Promise.all([
+        request(`/api/knowledge/entities?${params}`),
+        request("/api/knowledge/mapping-observations?status=CANDIDATE&limit=30"),
+      ]);
       setItems(data.items || []); setRelations(data.relations || []);
+      setObservations(observationData.items || []);
       if (selected) {
         const found = [...(data.items || []), ...(data.relations || [])].find((item) => item.id === selected.id);
         if (found) setSelected(found);
@@ -58,9 +64,20 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
     finally { setRunning(""); }
   }
 
+  async function reviewObservation(item, action) {
+    setReviewing(`${action}:${item.id}`); setError("");
+    try {
+      await request(`/api/knowledge/mapping-observations/${encodeURIComponent(item.id)}/${action}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+      await load();
+    } catch (reason) { handleAdminError(reason); }
+    finally { setReviewing(""); }
+  }
+
   function handleAdminError(reason) {
     setError(reason.message);
-    if (String(reason.message).includes("凭证") || String(reason.message).includes("credential")) onRequireUnlock?.();
+    if (String(reason.message).includes("凭证") || String(reason.message).includes("credential") || String(reason.message).includes("401")) onRequireUnlock?.();
   }
 
   const list = useMemo(() => [...items, ...relations], [items, relations]);
@@ -78,6 +95,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
       </Flex>
       {error && <Alert type="error" showIcon title="操作未完成" description={error} closable onClose={() => setError("")} style={{ maxWidth: 1180, margin: "0 auto 12px" }} />}
       {summary && <ImportSummary value={summary} />}
+      <ObservationPanel items={observations} reviewing={reviewing} onReview={reviewObservation} />
       <Flex gap={8} style={{ maxWidth: 1180, margin: "0 auto 10px" }}>
         <Input.Search value={query} onChange={(event) => setQuery(event.target.value)} onSearch={() => load()} allowClear placeholder="搜索术语、能力、规则或关系" />
         <Select value={type} style={{ width: 150 }} options={TYPES.map(([value, label]) => ({ value, label }))} onChange={(value) => { setType(value); load(query, value); }} />
@@ -95,6 +113,48 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
         </Splitter.Panel>
       </Splitter>
     </div>
+  );
+}
+
+function ObservationPanel({ items, reviewing, onReview }) {
+  if (!items.length) return (
+    <Alert
+      type="info"
+      showIcon
+      title="暂无待确认的映射候选"
+      description="用户在问答中得到充分证据后，系统会把可能的业务—代码关联放在这里；候选不会自动改写业务基线。"
+      style={{ maxWidth: 1180, margin: "0 auto 12px" }}
+    />
+  );
+  return (
+    <Card size="small" title={<Flex gap={8} align="center"><span>问答发现的映射候选</span><Tag color="blue" style={{ margin: 0 }}>{items.length}</Tag></Flex>} style={{ maxWidth: 1180, margin: "0 auto 12px" }}>
+      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+        {items.map((item) => (
+          <div key={item.id} className="knowledge-line">
+            <Flex justify="space-between" gap={12} align="flex-start" wrap="wrap">
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <Typography.Text strong style={{ fontSize: 12.5 }}>{item.businessName || item.businessId}</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 11.5 }}> → </Typography.Text>
+                <Typography.Text code style={{ fontSize: 11.5 }}>{item.codeReference || "未定位"}</Typography.Text>
+                <div style={{ marginTop: 3 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>{item.question}</Typography.Text>
+                </div>
+                <div style={{ marginTop: 3 }}>
+                  <Tag color="blue" style={{ margin: 0, fontSize: 10.5 }}>{item.relation}</Tag>
+                  <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>可信度 {Math.round((item.confidence || 0) * 100)}%</Typography.Text>
+                  {item.evidenceIds?.length > 0 && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>证据 {item.evidenceIds.slice(0, 4).join("、")}</Typography.Text>}
+                  {item.reason && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>{item.reason}</Typography.Text>}
+                </div>
+              </div>
+              <Flex gap={6}>
+                <Button size="small" type="primary" icon={<Check size={13} />} loading={reviewing === `accept:${item.id}`} onClick={() => onReview(item, "accept")}>确认</Button>
+                <Button size="small" danger icon={<X size={13} />} loading={reviewing === `reject:${item.id}`} onClick={() => onReview(item, "reject")}>忽略</Button>
+              </Flex>
+            </Flex>
+          </div>
+        ))}
+      </Space>
+    </Card>
   );
 }
 
@@ -132,7 +192,7 @@ function Mappings({ items }) {
 
 function Section({ title, children }) { return <><Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: ".06em", display: "block", margin: "18px 0 8px" }}>{title}</Typography.Text>{children}</>; }
 function Lines({ items = [] }) { return items.length ? <Space direction="vertical" size={5} style={{ width: "100%" }}>{items.map((item, index) => <div className="knowledge-line" key={index}>{item}</div>)}</Space> : <Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无。</Typography.Text>; }
-function KnowledgeStatus({ value }) { const [color, label] = ({ VERIFIED: ["green", "已确认"], CANDIDATE: ["blue", "候选"], CONFLICTED: ["red", "存在冲突"], UNRESOLVED: ["orange", "未定位"], DEPRECATED: ["default", "已废弃"] }[value] || ["default", value || "未知"]); return <Tag color={color} style={{ margin: 0 }}>{label}</Tag>; }
-function MappingStatus({ value }) { const [color, label] = ({ VERIFIED: ["green", "已验证"], CANDIDATE: ["blue", "候选"], UNRESOLVED: ["orange", "未定位"], CONFLICTED: ["red", "冲突"] }[value] || ["default", value || "未知"]); return <Tag color={color} icon={value === "CONFLICTED" ? <WarningCircle size={11} /> : undefined} style={{ margin: 0 }}>{label}</Tag>; }
+function KnowledgeStatus({ value }) { const [color, label] = ({ VERIFIED: ["green", "已确认"], CANDIDATE: ["blue", "候选"], CONFLICTED: ["red", "存在冲突"], UNRESOLVED: ["orange", "未定位"], DEPRECATED: ["default", "已废弃"], ACCEPTED: ["green", "已确认"] }[value] || ["default", value || "未知"]); return <Tag color={color} style={{ margin: 0 }}>{label}</Tag>; }
+function MappingStatus({ value }) { const [color, label] = ({ VERIFIED: ["green", "已验证"], CANDIDATE: ["blue", "候选"], UNRESOLVED: ["orange", "未定位"], CONFLICTED: ["red", "冲突"], ACCEPTED: ["green", "已确认"], REJECTED: ["default", "已忽略"] }[value] || ["default", value || "未知"]); return <Tag color={color} icon={value === "CONFLICTED" ? <WarningCircle size={11} /> : undefined} style={{ margin: 0 }}>{label}</Tag>; }
 function typeLabel(value) { return ({ SYSTEM: "系统", BUSINESS_TERM: "业务术语", CAPABILITY: "业务能力", FLOW: "业务流程", RULE: "业务规则", RELATION: "业务关系" }[value] || value); }
 function relationLabel(value) { return ({ TRIGGERS: "触发", PRODUCES: "产生", BELONGS_TO: "属于", DEPENDS_ON: "依赖", HANDLED_BY: "由…处理" }[value] || value); }

@@ -239,6 +239,28 @@ CREATE INDEX IF NOT EXISTS idx_business_mapping_target
   ON business_code_mapping(business_type, business_id, status);
 CREATE INDEX IF NOT EXISTS idx_business_mapping_symbol
   ON business_code_mapping(code_symbol_id);
+
+-- MVP2. A query may reveal a useful business-to-code relationship, but a
+-- query result is not a human business definition.  Keep the observation in
+-- its own table until an administrator confirms it.  This prevents an answer
+-- from silently changing the authored baseline while still making the
+-- discovery reusable by later questions.
+CREATE TABLE IF NOT EXISTS business_code_mapping_observation (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, question TEXT NOT NULL,
+  business_type TEXT NOT NULL, business_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL, code_symbol_id TEXT,
+  code_reference TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'CANDIDATE',
+  confidence REAL NOT NULL, evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+  reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  reviewed_at TEXT, reviewer_note TEXT NOT NULL DEFAULT '',
+  UNIQUE(run_id, business_type, business_id, relation_type, code_reference)
+);
+CREATE INDEX IF NOT EXISTS idx_mapping_observation_status
+  ON business_code_mapping_observation(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_mapping_observation_business
+  ON business_code_mapping_observation(business_type, business_id, status);
+CREATE INDEX IF NOT EXISTS idx_mapping_observation_symbol
+  ON business_code_mapping_observation(code_symbol_id, status);
 """
 
 

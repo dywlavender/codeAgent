@@ -2,7 +2,7 @@
 
 面向 Java / MyBatis 老项目的 Agent 知识工作台。MVP 用少量自然语言业务基线告诉系统“业务是什么、什么和什么有关”，再把这些知识定向映射到当前代码；问答 Agent 先用业务知识缩小调查范围，最后回到代码和原文证据回答。
 
-## MVP 已实现的主链路
+## MVP1 + MVP2 已实现的主链路
 
 ```text
 自然语言业务基线
@@ -14,6 +14,10 @@ System / BusinessTerm / Capability / Flow / Relation / Rule
 独立 Business-Code Mapping
   ↓
 Query Agent 检索业务知识、映射和代码证据
+  ↓
+MVP2 问答观察：从答案中的业务/代码证据生成 Mapping 候选
+  ↓
+管理员确认后写入正式 Mapping
 ```
 
 三类数据始终分开保存：
@@ -22,7 +26,7 @@ Query Agent 检索业务知识、映射和代码证据
 - Code Knowledge：类、方法、字段、API、任务、表和调用事实；
 - Mapping：某条业务知识在代码中对应哪里。
 
-重新索引代码只重建 Mapping，不会改写人工业务基线。
+重新索引代码只重建静态 Mapping，不会改写人工业务基线；问答发现的 Mapping 先进入独立观察记录，确认后才进入正式 Mapping。
 
 ## 一键启动
 
@@ -145,6 +149,7 @@ BUSINESS_CODE_MODEL_MAX_RETRIES=2
 5. 查看六类知识、原文来源和代码映射。
 6. 对未定位或候选 Mapping 补充更明确的业务别名后重新导入。
 7. 在问答页面提问；Agent 会先命中业务知识，再沿 Mapping 调查代码。
+8. 若回答同时有充分的业务和代码证据，进入“业务知识维护”确认问答发现的 Mapping 候选。
 
 命令行也可以执行：
 
@@ -163,6 +168,13 @@ python3 -m business_code_agent.cli baseline-refresh \
   --no-model
 ```
 
+查看和确认问答发现的候选也可以使用命令行：
+
+```bash
+python3 -m business_code_agent.cli mapping-observations --db .data/knowledge.db
+python3 -m business_code_agent.cli mapping-review BMO-xxxxxxxxxxxxxxxx accept --db .data/knowledge.db --note "确认该入口属于此业务"
+```
+
 ## Mapping 状态
 
 - `VERIFIED`：代码证据明确且候选唯一；
@@ -173,6 +185,20 @@ python3 -m business_code_agent.cli baseline-refresh \
 
 未定位不是失败。问答 Agent 会明确说明当前没有找到对应实现，不会生成不存在的类或方法。
 
+## MVP2：问答驱动的 Mapping 观察
+
+第二阶段只做一件事：利用已经完成的问答证据，补充 Business-Code Mapping。它不会自动修改人工 Markdown，也不会把搜索候选直接当成事实。
+
+触发条件是同一回答同时引用了：
+
+- 已发布的业务实体或业务关系证据；
+- 当前代码索引中的直接代码证据；
+- 回答证据状态为“证据充分”。
+
+系统会把候选写入 `business_code_mapping_observation`，状态为 `CANDIDATE`，并保存问题、业务对象、代码 Symbol、证据编号、可信度和生成原因。管理员在页面点击“确认”后，才会写入 `business_code_mapping`，来源标记为 `QUERY_REVIEW`；点击“忽略”只关闭该候选。
+
+这样做的判断边界是：问答可以发现“这两个事实可能有关”，但不能替人确认业务语义。候选越多不代表知识越好，后续仍以确认率和问答准确率衡量效果。
+
 ## 管理接口
 
 - `POST /api/knowledge/baselines/refresh`：导入自然语言基线并建立 Mapping；
@@ -181,6 +207,10 @@ python3 -m business_code_agent.cli baseline-refresh \
 - `GET /api/knowledge/entities/{id}`：查看知识、来源、关系和 Mapping；
 - `GET /api/knowledge/relations/{id}`：查看业务关系；
 - `GET /api/knowledge-graph`：查看业务知识、关系和代码映射投影；
+- `GET /api/knowledge/mapping-observations?status=CANDIDATE`：查看问答发现的 Mapping 候选；
+- `GET /api/knowledge/mapping-observations/{id}`：查看候选及证据；
+- `POST /api/knowledge/mapping-observations/{id}/accept`：管理员确认候选；
+- `POST /api/knowledge/mapping-observations/{id}/reject`：管理员忽略候选；
 - `POST /api/query`：执行问答。
 
 管理员写操作可通过 `admin.apiTokenEnv` 配置的口令保护；读取接口保持只读。

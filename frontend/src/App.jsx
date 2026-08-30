@@ -132,6 +132,7 @@ export default function App() {
         runId: detail.id, status: detail.status, intent: detail.intent,
         evidenceStatus: detail.evidence_status, iterations: detail.iterations,
         answer: detail.answer || null, evidence: evidenceList,
+        mappingSuggestions: detail.mappingSuggestions || [],
         answerMode: detail.answerMode || detail.answer_mode || detail.state?.answerMode || detail.state?.answer_mode,
         resolvedQuestion: detail.resolvedQuestion || detail.resolved_question || detail.state?.resolvedQuestion || detail.state?.resolved_question || detail.state?.search_terms?.join(" "),
         suggestedFollowUps: detail.suggestedFollowUps || detail.suggested_follow_ups || detail.answer?.suggestedFollowUps || [],
