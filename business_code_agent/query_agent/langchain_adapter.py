@@ -76,7 +76,9 @@ class LangChainQueryComposer:
         schema = _answer_schema()
         analyzer = LangChainQueryAnalyzer(self.model, agent_factory=self._agent_factory)
         agent = analyzer._build(schema, """你是业务代码问答 Agent 的回答整理节点。
-只能根据输入的 verified_facts 组织自然语言回答。每个 claim 必须引用输入事实已有的 evidenceIds。
+只能根据输入的 verified_facts 组织回答。每条 claim 优先只填写 verified_facts 中对应事实的
+fact_indices；不要改写或扩展事实。若填写 statement 或 evidence_ids，它们也必须完全受所选事实支持。
+conclusion 只能组合 claims 中已有事实，不能改变肯定/否定、允许/禁止、成功/失败等语义。
 不能新增业务事实、代码行为、需求结论或未提供的证据。""")
         catalog = [{"index": index, **fact} for index, fact in enumerate(facts)]
         try:
@@ -116,8 +118,9 @@ def _answer_schema():
 
     class Claim(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        statement: str
+        statement: str = ""
         evidence_ids: list[str] = Field(default_factory=list)
+        fact_indices: list[int] = Field(default_factory=list)
 
     class Answer(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -152,18 +155,48 @@ def _validate_composed(payload: Any, facts: list[dict]) -> dict:
     for raw in payload.get("claims", []):
         if not isinstance(raw, Mapping):
             raise ValueError("query claim is invalid")
+        indices = _fact_indices(raw)
+        if indices:
+            if any(index < 0 or index >= len(facts) for index in indices):
+                raise ValueError("query claim has an invalid fact index")
+            selected = [facts[index] for index in indices]
+            statement = "；".join(str(item.get("statement", "")).strip() for item in selected if str(item.get("statement", "")).strip())
+            evidence_ids = list(dict.fromkeys(
+                str(evidence_id)
+                for item in selected
+                for evidence_id in item.get("evidenceIds", [])
+                if str(evidence_id).strip()
+            ))
+            if not statement or not evidence_ids:
+                raise ValueError("query claim selected an empty fact")
+            # A model may still return a prose statement alongside indices.
+            # Treat it as an assertion to validate, never as the source of the
+            # durable claim text.  The persisted claim is reconstructed from
+            # the selected verified facts above.
+            supplied_statement = str(raw.get("statement", "")).strip()
+            if supplied_statement and not all(
+                _supported_by_fact(supplied_statement, str(item.get("statement", "")))
+                for item in selected
+            ):
+                raise ValueError("query claim is not supported by its selected facts")
+            supplied_ids = _evidence_ids(raw)
+            if supplied_ids and not set(supplied_ids).issubset(set(evidence_ids)):
+                raise ValueError("query claim references evidence outside its selected facts")
+            claims.append({"statement": statement, "evidenceIds": evidence_ids, "factIndices": indices})
+            continue
+
         statement = str(raw.get("statement", "")).strip()
-        evidence_ids = list(dict.fromkeys(str(item) for item in raw.get("evidence_ids", raw.get("evidenceIds", []))))
+        evidence_ids = _evidence_ids(raw)
         if not statement or not evidence_ids or any(item not in evidence_to_statements for item in evidence_ids):
             raise ValueError("query claim has an invalid evidence reference")
         for evidence_id in evidence_ids:
-            if not _overlaps(statement, evidence_to_statements[evidence_id]):
+            if not any(_supported_by_fact(statement, fact_statement) for fact_statement in evidence_to_statements[evidence_id]):
                 raise ValueError("query claim is not supported by its evidence")
         claims.append({"statement": statement, "evidenceIds": evidence_ids})
     if not claims:
         raise ValueError("query synthesis must return claims")
     conclusion = str(payload["conclusion"]).strip()
-    if not _overlaps(conclusion, [item["statement"] for item in claims]):
+    if not any(_supported_by_fact(conclusion, item["statement"]) for item in claims):
         raise ValueError("query conclusion is not supported by its claims")
     return {
         "conclusion": conclusion,
@@ -172,9 +205,81 @@ def _validate_composed(payload: Any, facts: list[dict]) -> dict:
     }
 
 
-def _overlaps(statement: str, facts: Sequence[str]) -> bool:
+def _fact_indices(value: Mapping[str, Any]) -> list[int]:
+    raw = value.get("fact_indices", value.get("factIndexes", value.get("factIndices", [])))
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    result = []
+    for item in raw:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            raise ValueError("query claim fact_indices must be integers")
+    return list(dict.fromkeys(result))
+
+
+def _evidence_ids(value: Mapping[str, Any]) -> list[str]:
+    raw = value.get("evidence_ids", value.get("evidenceIds", [])) or []
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    return list(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
+
+
+def _supported_by_fact(statement: str, fact: str) -> bool:
+    """Check lexical support while explicitly rejecting polarity reversals."""
+    statement = str(statement or "").strip()
+    fact = str(fact or "").strip()
+    if not statement or not fact:
+        return False
     statement_terms = _terms(statement)
-    return any(statement_terms.intersection(_terms(fact)) for fact in facts)
+    fact_terms = _terms(fact)
+    common = statement_terms.intersection(fact_terms)
+    if not common:
+        return False
+    statement_polarity = _polarity(statement)
+    fact_polarity = _polarity(fact)
+    if statement_polarity and fact_polarity and statement_polarity != fact_polarity:
+        return False
+    # An identifier is a strong anchor.  For natural-language Chinese facts,
+    # require at least two shared bigrams/terms so a generic verb cannot carry
+    # an unrelated claim by itself.
+    if set(_identifiers(statement)).intersection(_identifiers(fact)):
+        return True
+    return len(common) >= 2 or _compact(statement) in _compact(fact) or _compact(fact) in _compact(statement)
+
+
+_NEGATIVE_CUES = (
+    "不允许", "不可以", "不可", "不能", "不得", "禁止", "不应", "无需", "不需", "不会",
+    "不再", "没有", "不存在", "不是", "未", "非", "无", "拒绝", "失败", "not", "never", "without", "no",
+)
+_POSITIVE_CUES = ("允许", "可以", "能", "应当", "需要", "必须", "会", "是", "成功", "通过")
+
+
+def _polarity(value: str) -> int:
+    lowered = str(value or "").casefold()
+    negative = any(cue.casefold() in lowered for cue in _NEGATIVE_CUES)
+    # Remove negative phrases before checking positive cues: ``不允许`` must
+    # remain negative rather than matching the substring ``允许``.
+    for cue in _NEGATIVE_CUES:
+        lowered = lowered.replace(cue.casefold(), "")
+    positive = any(cue.casefold() in lowered for cue in _POSITIVE_CUES)
+    if negative and not positive:
+        return -1
+    if positive and not negative:
+        return 1
+    return 0
+
+
+def _identifiers(value: str) -> set[str]:
+    import re
+    return {item.casefold() for item in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", value or "")}
+
+
+def _compact(value: str) -> str:
+    import re
+    return re.sub(r"\s+", "", str(value or "").casefold())
 
 
 def _terms(value: str) -> set[str]:

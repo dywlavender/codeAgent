@@ -482,10 +482,22 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         if kind not in ENTITY_TYPES or not name or not definition:
             continue
         quote = _grounded_quote(text, quote, name, definition)
+        # A model may use a valid quote as cover for a second, invented
+        # business object.  The object name itself must be present in the
+        # authored baseline before it can be persisted.
+        if not _literal_in_source(text, name):
+            logger.warning("忽略缺少原文依据的业务实体: %s", name)
+            continue
         entities.append({
             "type": kind, "name": name,
-            "aliases": _unique([str(value).strip() for value in _as_list(raw.get("aliases")) if str(value).strip()]),
-            "definition": definition, "attributes": dict(raw.get("attributes") or {}), "sourceQuote": quote,
+            # Aliases and retrieval hints are not harmless presentation
+            # fields: they directly influence code search.  Keep only literal
+            # values from the human source so a model cannot invent a class
+            # name and then use that name to prove its own mapping.
+            "aliases": _grounded_strings(raw.get("aliases"), text),
+            "definition": _grounded_definition(definition, text, quote, name),
+            "attributes": _grounded_attributes(raw.get("attributes"), text),
+            "sourceQuote": quote,
         })
     relations: list[dict[str, Any]] = []
     for raw in _as_list(payload.get("relations")):
@@ -498,10 +510,13 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         if not source or not relation or not target:
             continue
         quote = _grounded_quote(text, quote, source, target)
+        if not _literal_in_source(text, source) or not _literal_in_source(text, target):
+            logger.warning("忽略缺少原文依据的业务关系: %s %s %s", source, relation, target)
+            continue
         relations.append({
             "from": source, "relation": relation, "to": target,
-            "scope": str(raw.get("scope") or "").strip(),
-            "attributes": dict(raw.get("attributes") or {}), "sourceQuote": quote,
+            "scope": _grounded_scalar(raw.get("scope"), text) or "",
+            "attributes": _grounded_attributes(raw.get("attributes"), text), "sourceQuote": quote,
         })
     return entities, relations
 
@@ -516,6 +531,122 @@ def _grounded_quote(text: str, quote: str, *fallbacks: str) -> str:
             line = next((line.strip() for line in text.splitlines() if value in line), value)
             return line
     raise ValueError("结构化知识缺少可回溯的原文片段")
+
+
+def _literal_in_source(text: str, value: Any) -> bool:
+    """Return whether *value* is an authored literal, tolerating whitespace.
+
+    This deliberately does not perform semantic matching.  A semantic
+    paraphrase is acceptable for a display definition only after it is
+    replaced by a grounded source sentence; identifiers and aliases must be
+    literal because they are later used as retrieval hints.
+    """
+    candidate = str(value or "").strip()
+    if not candidate:
+        return False
+    if candidate in text:
+        # Do not let a short generated identifier pass merely because it is a
+        # substring of a longer identifier (for example ``Guarantee`` inside
+        # ``GuaranteeFileTask``). Chinese prose is intentionally left as
+        # substring matching because compound business names are common.
+        if re.fullmatch(r"[A-Za-z0-9_.$-]+", candidate):
+            return bool(re.search(
+                rf"(?<![A-Za-z0-9_.$-]){re.escape(candidate)}(?![A-Za-z0-9_.$-])",
+                text,
+                re.IGNORECASE,
+            ))
+        return True
+    compact_text = re.sub(r"\s+", " ", text).strip().casefold()
+    compact_candidate = re.sub(r"\s+", " ", candidate).strip().casefold()
+    if not compact_candidate or compact_candidate not in compact_text:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9_.$-]+", compact_candidate):
+        return bool(re.search(
+            rf"(?<![A-Za-z0-9_.$-]){re.escape(compact_candidate)}(?![A-Za-z0-9_.$-])",
+            compact_text,
+            re.IGNORECASE,
+        ))
+    return True
+
+
+def _grounded_strings(value: Any, text: str) -> list[str]:
+    result = []
+    for item in _as_list(value):
+        if isinstance(item, (str, int, float)):
+            candidate = str(item).strip()
+            if candidate and _literal_in_source(text, candidate):
+                result.append(candidate)
+    return _unique(result)
+
+
+def _grounded_scalar(value: Any, text: str) -> str:
+    if isinstance(value, (str, int, float)):
+        candidate = str(value).strip()
+        return candidate if candidate and _literal_in_source(text, candidate) else ""
+    return ""
+
+
+def _grounded_attributes(value: Any, text: str) -> dict[str, Any]:
+    """Drop model-created attribute values that have no literal source.
+
+    Attributes are intentionally treated conservatively as a whole tree.  A
+    nested ``codeHints`` or ``steps`` value is still a retrieval input, and a
+    free-form value that is not in the source must not survive into the
+    knowledge database.  Empty containers are omitted instead of being stored
+    as misleading facts.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    for key, raw in value.items():
+        grounded = _grounded_attribute_value(raw, text)
+        if grounded is not _DROPPED:
+            result[str(key)] = grounded
+    return result
+
+
+_DROPPED = object()
+
+
+def _grounded_attribute_value(value: Any, text: str):
+    if isinstance(value, Mapping):
+        nested = _grounded_attributes(value, text)
+        return nested if nested else _DROPPED
+    if isinstance(value, (list, tuple, set)):
+        nested = [item for item in (_grounded_attribute_value(item, text) for item in value) if item is not _DROPPED]
+        return nested if nested else _DROPPED
+    if isinstance(value, bool):
+        # Boolean literals are uncommon in prose; retain them only when the
+        # exact spelling was authored, otherwise discard the model assertion.
+        return value if _literal_in_source(text, str(value).lower()) else _DROPPED
+    if isinstance(value, (str, int, float)):
+        candidate = str(value).strip()
+        return candidate if candidate and _literal_in_source(text, candidate) else _DROPPED
+    return _DROPPED
+
+
+def _grounded_definition(definition: str, text: str, quote: str, name: str) -> str:
+    if _literal_in_source(text, definition):
+        return definition
+    # Model definitions are often concise paraphrases.  Do not persist the
+    # paraphrase as a fact; use the first non-heading sentence from the quoted
+    # source instead.  It remains readable while preserving provenance.
+    source_sentence = _first_sentence(_quote_body(quote))
+    if source_sentence and _literal_in_source(text, source_sentence):
+        return source_sentence
+    return name
+
+
+def _quote_body(quote: str) -> str:
+    lines = []
+    for line in str(quote or "").splitlines():
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        value = re.sub(r"^(?:[-*+]\s+|\d+[.)]\s+)", "", value)
+        if value:
+            lines.append(value)
+    return " ".join(lines)
 
 
 def _deterministic_extract(text: str) -> dict[str, Any]:

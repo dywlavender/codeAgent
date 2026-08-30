@@ -25,7 +25,7 @@ BASELINE = """# 提款业务基线
 
 ## 担保处理
 
-极优提款成功后，需要进行担保后处理。
+极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。
 """
 
 
@@ -41,14 +41,14 @@ class _Extractor:
                 {
                     "type": "CAPABILITY", "name": "担保处理", "aliases": [],
                     "definition": "提款成功后执行担保后处理", "attributes": {"codeHints": ["GuaranteeFileTask"]},
-                    "sourceQuote": "极优提款成功后，需要进行担保后处理。",
+                    "sourceQuote": "极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。",
                 },
             ],
             "relations": [
                 {
                     "from": "极优提款成功", "relation": "TRIGGERS", "to": "担保处理",
                     "scope": "极优产品", "attributes": {},
-                    "sourceQuote": "极优提款成功后，需要进行担保后处理。",
+                    "sourceQuote": "极优提款成功后，需要进行担保后处理，代码入口通常包含 GuaranteeFileTask。",
                 }
             ],
         }
@@ -140,6 +140,37 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             db = connect(str(root / "knowledge.db"))
             with self.assertRaises(ValueError):
                 BaselineKnowledgeService(db, project_config=config, extractor=Ungrounded()).refresh()
+            db.close()
+
+    def test_model_generated_aliases_and_code_hints_without_source_are_dropped(self):
+        class HallucinatedHints:
+            def extract(self, **_kwargs):
+                return {"entities": [{
+                    "type": "CAPABILITY", "name": "担保处理",
+                    "aliases": ["Guarantee", "不存在别名"],
+                    "definition": "模型自行补充的担保处理定义",
+                    "attributes": {
+                        "codeHints": ["GuaranteeFileTask"],
+                        "steps": ["原文没有写过的步骤"],
+                        "systems": ["UnknownSystem"],
+                    },
+                    "sourceQuote": "极优提款成功后，需要进行担保后处理。",
+                }], "relations": []}
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline_root = root / "baseline"; baseline_root.mkdir()
+            source = "# 业务基线\n\n## 担保处理\n\n极优提款成功后，需要进行担保后处理。\n"
+            (baseline_root / "baseline.md").write_text(source, encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            db = connect(str(root / "knowledge.db"))
+            BaselineKnowledgeService(db, project_config=config, extractor=HallucinatedHints()).refresh(map_code=False)
+            entity = db.execute("SELECT aliases_json,attributes_json,definition FROM business_entity").fetchone()
+            self.assertIsNotNone(entity)
+            self.assertEqual([], json.loads(entity["aliases_json"]))
+            self.assertEqual({}, json.loads(entity["attributes_json"]))
+            self.assertIn("极优提款成功后", entity["definition"])
             db.close()
 
 

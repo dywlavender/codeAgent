@@ -226,27 +226,28 @@ class MappingObservationService:
 
     def _business_targets(self, result, evidence, answer) -> list[dict[str, Any]]:
         ids: list[str] = []
-        candidates = [
-            *(_as_list(result.get("businessCandidates"))),
-            *(_as_list(result.get("business_candidates"))),
-            *(_as_list((result.get("state") or {}).get("business_candidates") if isinstance(result.get("state"), Mapping) else [])),
-        ]
-        for item in candidates:
-            if not isinstance(item, Mapping):
-                continue
-            value = _first(item, "id", "knowledgeId", "knowledge_id", "sourceId", "source_id")
-            if value:
-                ids.append(str(value))
-        for item in evidence:
-            if str(item.get("sourceType") or item.get("source_type") or "").upper() == "BUSINESS":
-                value = _first(item, "sourceId", "source_id")
-                if value:
-                    ids.append(str(value))
+        # A search hit is only a navigation hint.  It must not become a
+        # mapping target merely because it was returned in
+        # ``businessCandidates``.  Only business Evidence IDs referenced by a
+        # final answer fact are eligible; this makes the observation boundary
+        # match what the user actually saw and what the answer was based on.
+        evidence_by_id = {
+            str(item.get("evidenceId") or item.get("evidence_id") or item.get("id")): item
+            for item in evidence
+            if item.get("evidenceId") or item.get("evidence_id") or item.get("id")
+        }
         for fact in _as_list(answer.get("facts")):
             if not isinstance(fact, Mapping) or str(fact.get("sourceType") or fact.get("source_type") or "").upper() != "BUSINESS":
                 continue
             for evidence_id in _as_list(fact.get("evidenceIds") or fact.get("evidence_ids")):
-                row = self.db.execute("SELECT source_id FROM evidence WHERE id=?", (evidence_id,)).fetchone()
+                evidence_id = str(evidence_id)
+                item = evidence_by_id.get(evidence_id)
+                if item and str(item.get("sourceType") or item.get("source_type") or "").upper() != "BUSINESS":
+                    continue
+                row = self.db.execute(
+                    "SELECT source_id FROM evidence WHERE id=? AND source_type IN ('BUSINESS','MANUAL')",
+                    (evidence_id,),
+                ).fetchone()
                 if row:
                     ids.append(str(row["source_id"]))
         values: list[dict[str, Any]] = []

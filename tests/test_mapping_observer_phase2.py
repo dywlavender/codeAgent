@@ -75,6 +75,25 @@ class MappingObserverPhase2Test(unittest.TestCase):
             ).fetchone()
             self.assertEqual(("VERIFIED", "QUERY_REVIEW"), (mapping["status"], mapping["source_type"]))
 
+            # The value of MVP2 is not only that a row is persisted.  A later
+            # differently worded question must navigate through that verified
+            # mapping and load the previously discovered code symbol.
+            second = QueryService(db, db_path=str(db_path)).query(
+                "极优的实现入口在哪里？", conversation_id="CONV-MAPPING-REUSE"
+            )
+            self.assertIn("CODE", second["metrics"]["sourceCoverage"])
+            second_code = " ".join(
+                item["statement"] for item in second["answer"]["facts"] if item["sourceType"] == "CODE"
+            )
+            self.assertIn(observation["codeReference"], second_code)
+            checkpoints = db.execute(
+                "SELECT state_json FROM query_checkpoint WHERE run_id=? ORDER BY sequence",
+                (second["runId"],),
+            ).fetchall()
+            self.assertTrue(any(
+                observation["codeReference"] in row["state_json"] for row in checkpoints
+            ))
+
             # A static remap must not erase a mapping that an administrator
             # already confirmed from a query.
             BaselineKnowledgeService(db, project_config=config, extractor=_Extractor()).rebuild_mappings()
@@ -93,6 +112,8 @@ class MappingObserverPhase2Test(unittest.TestCase):
             db.execute("INSERT INTO repository VALUES ('R','/tmp','now')")
             db.execute("INSERT INTO code_file VALUES ('F','R','/tmp/a.java','v')")
             db.execute("INSERT INTO code_symbol VALUES ('C','F','CLASS','BusinessService','BusinessService',1,2)")
+            db.execute("INSERT INTO evidence VALUES ('EB','BUSINESS','B','1','/tmp/a.md',1,1,NULL,'b','业务')")
+            db.execute("INSERT INTO evidence_lifecycle VALUES ('EB','ACTIVE',NULL,NULL,NULL)")
             db.execute("INSERT INTO evidence VALUES ('E','CODE','C','1','/tmp/a.java',1,1,NULL,'v','调用')")
             db.execute("INSERT INTO evidence_lifecycle VALUES ('E','ACTIVE',NULL,NULL,NULL)")
             db.commit()
@@ -104,7 +125,7 @@ class MappingObserverPhase2Test(unittest.TestCase):
                     "codeCandidates": [],
                     "evidence": [{"evidenceId": "E", "sourceType": "CODE", "sourceId": "C", "content": "业务"}],
                     "answer": {"facts": [
-                        {"sourceType": "BUSINESS", "evidenceIds": []},
+                        {"sourceType": "BUSINESS", "evidenceIds": ["EB"]},
                         {"sourceType": "CODE", "evidenceIds": ["E"]},
                     ]},
                 },
@@ -147,6 +168,38 @@ class MappingObserverPhase2Test(unittest.TestCase):
                 self.assertEqual("ACCEPTED", detail["status"])
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+    def test_search_only_business_candidates_are_not_observed(self):
+        with tempfile.NamedTemporaryFile(suffix=".db") as handle:
+            db = connect(handle.name)
+            db.execute("INSERT INTO business_baseline_source VALUES ('S','/tmp/a.md','a','1','a','ACTIVE','now')")
+            db.execute("INSERT INTO business_entity VALUES ('B1','BUSINESS_TERM','业务一','[]','业务一','{}','HUMAN','S',NULL,1,'VERIFIED','now')")
+            db.execute("INSERT INTO business_entity VALUES ('B2','BUSINESS_TERM','业务二','[]','业务二','{}','HUMAN','S',NULL,1,'VERIFIED','now')")
+            db.execute("INSERT INTO repository VALUES ('R','/tmp','now')")
+            db.execute("INSERT INTO code_file VALUES ('F','R','/tmp/a.java','v')")
+            db.execute("INSERT INTO code_symbol VALUES ('C','F','CLASS','BusinessService','BusinessService',1,2)")
+            db.execute("INSERT INTO evidence VALUES ('EB1','BUSINESS','B1','1','/tmp/a.md',1,1,NULL,'b1','业务一')")
+            db.execute("INSERT INTO evidence_lifecycle VALUES ('EB1','ACTIVE',NULL,NULL,NULL)")
+            db.execute("INSERT INTO evidence VALUES ('EC','CODE','C','1','/tmp/a.java',1,1,NULL,'c','业务一')")
+            db.execute("INSERT INTO evidence_lifecycle VALUES ('EC','ACTIVE',NULL,NULL,NULL)")
+            db.commit()
+            items = MappingObservationService(db).observe_query(
+                "RUN-SEARCH-CANDIDATES", "业务一在哪里实现？", {
+                    "evidenceStatus": "SUFFICIENT",
+                    "businessCandidates": [{"id": "B1"}, {"id": "B2"}],
+                    "evidence": [
+                        {"evidenceId": "EB1", "sourceType": "BUSINESS", "sourceId": "B1", "content": "业务一"},
+                        {"evidenceId": "EC", "sourceType": "CODE", "sourceId": "C", "content": "业务一"},
+                    ],
+                    "answer": {"facts": [
+                        {"sourceType": "BUSINESS", "evidenceIds": ["EB1"]},
+                        {"sourceType": "CODE", "evidenceIds": ["EC"]},
+                    ]},
+                },
+            )
+            self.assertTrue(items)
+            self.assertEqual({"B1"}, {item["businessId"] for item in items})
+            db.close()
 
 
 def _json_post(url: str, body: dict) -> dict:

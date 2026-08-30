@@ -97,7 +97,7 @@ BUSINESS_CODE_MODEL_TIMEOUT=60
 BUSINESS_CODE_MODEL_MAX_RETRIES=2
 ```
 
-模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文；没有原文依据的内容会被拒绝。
+模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文。实体名称、别名、`codeHints`、流程步骤和其他属性值还必须能在原文中逐字找到；模型自行补充的检索提示会被过滤，模型定义的语义改写会回退到引用片段中的原句。没有原文依据的内容不会进入 SQLite。
 
 未配置模型时仍然可以：
 
@@ -187,7 +187,7 @@ python3 -m business_code_agent.cli mapping-review BMO-xxxxxxxxxxxxxxxx accept --
 
 ## MVP2：问答驱动的 Mapping 观察
 
-第二阶段只做一件事：利用已经完成的问答证据，补充 Business-Code Mapping。它不会自动修改人工 Markdown，也不会把搜索候选直接当成事实。
+第二阶段只做一件事：利用已经完成的问答证据，补充 Business-Code Mapping。它不会自动修改人工 Markdown，也不会把搜索候选直接当成事实。观察器只读取最终回答 `facts` 实际引用的业务/代码 Evidence ID，不读取未被回答采用的搜索候选。
 
 触发条件是同一回答同时引用了：
 

@@ -207,6 +207,58 @@ class QueryLangChainAdapterTest(unittest.TestCase):
                              facts=[{"statement": "repayType 在校验", "evidenceIds": ["EV-1"]}],
                              unknowns=[], conflicts=[])
 
+    def test_composer_rejects_semantic_polarity_reversal(self):
+        class Structured:
+            def model_dump(self, mode="python"):
+                return {
+                    "conclusion": "提款阶段允许重新生成 repayType",
+                    "claims": [{
+                        "statement": "提款阶段允许重新生成 repayType",
+                        "evidence_ids": ["EV-1"],
+                    }],
+                }
+
+        class Runnable:
+            def invoke(self, value):
+                return {"structured_response": Structured()}
+
+        composer = LangChainQueryComposer(object(), agent_factory=lambda **kwargs: Runnable())
+        with self.assertRaises(QueryModelInvocationError):
+            composer.compose(
+                "提款阶段是否允许重新生成 repayType？",
+                evidence_status="SUFFICIENT",
+                facts=[{
+                    "statement": "提款阶段不允许重新生成 repayType",
+                    "evidenceIds": ["EV-1"],
+                }],
+                unknowns=[], conflicts=[],
+            )
+
+    def test_composer_reconstructs_claim_from_selected_fact_indices(self):
+        class Structured:
+            def model_dump(self, mode="python"):
+                return {
+                    "conclusion": "提款阶段不允许重新生成 repayType",
+                    "claims": [{"fact_indices": [0]}],
+                }
+
+        class Runnable:
+            def invoke(self, value):
+                return {"structured_response": Structured()}
+
+        composer = LangChainQueryComposer(object(), agent_factory=lambda **kwargs: Runnable())
+        result = composer.compose(
+            "提款阶段是否允许重新生成 repayType？",
+            evidence_status="SUFFICIENT",
+            facts=[{
+                "statement": "提款阶段不允许重新生成 repayType",
+                "evidenceIds": ["EV-1"],
+            }],
+            unknowns=[], conflicts=[],
+        )
+        self.assertEqual("提款阶段不允许重新生成 repayType", result["claims"][0]["statement"])
+        self.assertEqual(["EV-1"], result["claims"][0]["evidenceIds"])
+
 
 if __name__ == "__main__":
     unittest.main()

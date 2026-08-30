@@ -32,7 +32,7 @@ Repository / File / Class / Method / API / Job / Table / Field
 - 什么和什么存在业务关系；
 - 哪些独立业务规则成立。
 
-人工来源保存为 `HUMAN`，默认是已确认业务事实。模型只负责结构化，不得覆盖或补造原文没有表达的事实。
+人工来源保存为 `HUMAN`，默认是已确认业务事实。模型只负责结构化，不得覆盖或补造原文没有表达的事实。实体名称、关系端点、别名、`codeHints` 和其他属性值均须有原文逐字依据；无法逐字落地的模型字段会被丢弃，定义则回退为引用片段中的原句。
 
 ### Code Knowledge
 
@@ -55,7 +55,7 @@ Mapping 可以随代码重新计算，业务知识保持不变。候选不唯一
 
 ### MVP2 Mapping 观察
 
-问答完成后，`MappingObservationService` 只读取该回答实际引用的证据：
+问答完成后，`MappingObservationService` 只读取该回答最终 `facts` 实际引用的证据：
 
 ```text
 业务实体/关系证据 + 代码 Symbol 证据 + SUFFICIENT
@@ -65,7 +65,7 @@ business_code_mapping_observation (CANDIDATE)
 business_code_mapping (VERIFIED, QUERY_REVIEW)
 ```
 
-观察记录保存问题、候选 Business-Code 对、证据编号和可信度。它与 `business_baseline_source`、`business_entity` 分开，因此不会把一次问答的推断写回人工 Markdown。静态映射重建只清理 `source_type=CODE` 的计算结果，保留管理员确认过的 Query Mapping。
+观察记录保存问题、候选 Business-Code 对、证据编号和可信度。未被最终回答引用的 `businessCandidates` 只能作为检索导航提示，不能触发观察记录。观察记录与 `business_baseline_source`、`business_entity` 分开，因此不会把一次问答的推断写回人工 Markdown。静态映射重建只清理 `source_type=CODE` 的计算结果，保留管理员确认过的 Query Mapping。
 
 ## 导入流程
 
