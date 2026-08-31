@@ -227,9 +227,9 @@ CREATE INDEX IF NOT EXISTS idx_functional_knowledge_status ON functional_knowled
 CREATE INDEX IF NOT EXISTS idx_functional_entry_function ON functional_entry_anchor(function_id, resolution_status);
 CREATE INDEX IF NOT EXISTS idx_functional_link_function ON functional_retrieval_link(function_id, relation_type);
 
--- MVP business baseline.  Human source, structured business knowledge and
--- business/code mappings are separate records.  Re-indexing code therefore
--- never rewrites a human-authored business statement.
+-- MVP business baseline. Human source, structured business knowledge and
+-- runtime code facts are separate records. Re-indexing code therefore never
+-- rewrites a human-authored business statement.
 CREATE TABLE IF NOT EXISTS business_baseline_source (
   id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
   source_revision TEXT NOT NULL, content TEXT NOT NULL,
@@ -254,10 +254,9 @@ CREATE TABLE IF NOT EXISTS business_relation_v2 (
   FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
 );
 
--- Stable navigation hints maintained with business knowledge. These are not
--- code mappings: they keep only an application and a human-authored entry
--- name. The current symbol, method and source location are resolved at query
--- time from the latest code index.
+-- Stable navigation hints maintained with business knowledge. They keep only
+-- an application and a human-authored entry name. The current symbol, method
+-- and source location are resolved at query time from the latest code index.
 CREATE TABLE IF NOT EXISTS business_entry_anchor (
   id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
   application_id TEXT NOT NULL, entry_type TEXT NOT NULL, entry_name TEXT NOT NULL,
@@ -270,47 +269,12 @@ CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_business
   ON business_entry_anchor(business_type, business_id, status);
 CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_application
   ON business_entry_anchor(application_id, entry_name, status);
-CREATE TABLE IF NOT EXISTS business_code_mapping (
-  id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
-  relation_type TEXT NOT NULL, code_symbol_id TEXT,
-  code_reference TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-  confidence REAL NOT NULL, evidence_ids_json TEXT NOT NULL DEFAULT '[]',
-  search_terms_json TEXT NOT NULL DEFAULT '[]', message TEXT NOT NULL DEFAULT '',
-  source_type TEXT NOT NULL, updated_at TEXT NOT NULL,
-  UNIQUE(business_type, business_id, relation_type, code_reference)
-);
 CREATE INDEX IF NOT EXISTS idx_business_entity_type_status
   ON business_entity(entity_type, status, name);
 CREATE INDEX IF NOT EXISTS idx_business_entity_source
   ON business_entity(source_id, status);
 CREATE INDEX IF NOT EXISTS idx_business_relation_source
   ON business_relation_v2(source_id, status);
-CREATE INDEX IF NOT EXISTS idx_business_mapping_target
-  ON business_code_mapping(business_type, business_id, status);
-CREATE INDEX IF NOT EXISTS idx_business_mapping_symbol
-  ON business_code_mapping(code_symbol_id);
-
--- MVP2. A query may reveal a useful business-to-code relationship, but a
--- query result is not a human business definition.  Keep the observation in
--- its own table until an administrator confirms it.  This prevents an answer
--- from silently changing the authored baseline while still making the
--- discovery reusable by later questions.
-CREATE TABLE IF NOT EXISTS business_code_mapping_observation (
-  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, question TEXT NOT NULL,
-  business_type TEXT NOT NULL, business_id TEXT NOT NULL,
-  relation_type TEXT NOT NULL, code_symbol_id TEXT,
-  code_reference TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'CANDIDATE',
-  confidence REAL NOT NULL, evidence_ids_json TEXT NOT NULL DEFAULT '[]',
-  reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-  reviewed_at TEXT, reviewer_note TEXT NOT NULL DEFAULT '',
-  UNIQUE(run_id, business_type, business_id, relation_type, code_reference)
-);
-CREATE INDEX IF NOT EXISTS idx_mapping_observation_status
-  ON business_code_mapping_observation(status, created_at);
-CREATE INDEX IF NOT EXISTS idx_mapping_observation_business
-  ON business_code_mapping_observation(business_type, business_id, status);
-CREATE INDEX IF NOT EXISTS idx_mapping_observation_symbol
-  ON business_code_mapping_observation(code_symbol_id, status);
 """
 
 
@@ -326,6 +290,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
     """Remove retired schemas and apply additive migrations."""
     _purge_retired_business_schema(connection)
     _purge_legacy_function_governance(connection)
+    _purge_legacy_mapping_schema(connection)
     additions = {
         "requirement": (
             ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
@@ -341,6 +306,26 @@ def _migrate(connection: sqlite3.Connection) -> None:
     entry_columns = {row[1] for row in connection.execute("PRAGMA table_info(functional_entry_anchor)")}
     if "repository_id" in entry_columns and "project_name" not in entry_columns:
         connection.execute("ALTER TABLE functional_entry_anchor RENAME COLUMN repository_id TO project_name")
+    connection.commit()
+
+
+def _purge_legacy_mapping_schema(connection: sqlite3.Connection) -> None:
+    """Drop the retired Business→Code mapping and observation tables.
+
+    The current model keeps business knowledge and code facts independent;
+    ``business_entry_anchor`` is the only durable navigation hint. Existing
+    local databases may still contain the two tables from earlier MVPs, so
+    remove them once on the next database open instead of leaving a second,
+    misleading source of truth behind.
+    """
+    for index in (
+        "idx_business_mapping_target", "idx_business_mapping_symbol",
+        "idx_mapping_observation_status", "idx_mapping_observation_business",
+        "idx_mapping_observation_symbol",
+    ):
+        connection.execute(f'DROP INDEX IF EXISTS "{index}"')
+    for table in ("business_code_mapping_observation", "business_code_mapping"):
+        connection.execute(f'DROP TABLE IF EXISTS "{table}"')
     connection.commit()
 
 

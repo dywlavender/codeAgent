@@ -26,7 +26,7 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
         self.db = connect(str(self.database))
         self.refresh = BaselineKnowledgeService(
             self.db, project_config=FIXTURE / "project.config.json"
-        ).refresh(map_code=False, use_model=False)
+        ).refresh(use_model=False)
         self.flow_id = self.db.execute(
             "SELECT id FROM business_entity WHERE entity_type='FLOW' LIMIT 1"
         ).fetchone()["id"]
@@ -37,15 +37,18 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
 
     def test_refresh_keeps_only_durable_entry_anchors(self):
         self.assertEqual({"ACTIVE": 3, "CANDIDATE": 0, "UNRESOLVED": 0}, self.refresh["anchorCounts"])
-        self.assertEqual(0, self.refresh["mappingCounts"]["VERIFIED"])
-        self.assertFalse(self.refresh["legacyMappingRefresh"])
-        self.assertEqual(0, self.db.execute("SELECT count(*) FROM business_code_mapping").fetchone()[0])
-        self.assertEqual(0, self.db.execute("SELECT count(*) FROM business_code_mapping_observation").fetchone()[0])
+        tables = {
+            row[0] for row in self.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        self.assertNotIn("business_code_mapping", tables)
+        self.assertNotIn("business_code_mapping_observation", tables)
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(business_entry_anchor)")}
         self.assertNotIn("symbol_id", columns)
         self.assertNotIn("file_id", columns)
         detail = BusinessTools(self.db).get_business_knowledge(self.flow_id)
-        self.assertEqual([], detail.get("mappings", []))
+        self.assertNotIn("mappings", detail)
         self.assertEqual(3, len(detail["entryAnchors"]))
         # A topology refresh must not delete anchors through the application
         # foreign key; code syncs happen before every baseline/query cycle.
@@ -100,7 +103,7 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
             db = connect(str(database))
             BaselineKnowledgeService(
                 db, project_config=project / "project.config.json"
-            ).refresh(map_code=False, use_model=False)
+            ).refresh(use_model=False)
             before = db.execute(
                 "SELECT id FROM business_entry_anchor ORDER BY id"
             ).fetchall()
@@ -137,7 +140,6 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
             table: self.db.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in (
                 "business_entity", "business_relation_v2", "business_entry_anchor",
-                "business_code_mapping", "business_code_mapping_observation",
             )
         }
         BusinessCodeQueryAgent(self.db).run("H5 点击提款提交按钮以后，后端经过哪些应用，最终在哪里处理提款？")

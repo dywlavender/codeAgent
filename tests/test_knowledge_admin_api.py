@@ -63,13 +63,13 @@ class KnowledgeAdminApiTest(unittest.TestCase):
             try:
                 refreshed = _json_request(
                     base + "/api/knowledge/baselines/refresh",
-                    {"mapCode": True, "useModel": False},
+                    {"useModel": False},
                 )
                 self.assertEqual(1, refreshed["sourceCount"])
                 payload = json.loads(urlopen(base + "/api/knowledge/entities").read())
                 self.assertEqual("极优", payload["items"][0]["name"])
                 self.assertEqual("BUSINESS_TERM", payload["items"][0]["type"])
-                self.assertEqual("UNRESOLVED", payload["items"][0]["mappings"][0]["status"])
+                self.assertNotIn("mappings", payload["items"][0])
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 

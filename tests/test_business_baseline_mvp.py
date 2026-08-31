@@ -9,8 +9,6 @@ from business_code_agent.business_tools import BusinessTools
 from business_code_agent.code_intelligence import JavaIndexer
 from business_code_agent.knowledge_update.baseline_service import BaselineKnowledgeService
 from business_code_agent.knowledge_graph import KnowledgeGraphService
-from business_code_agent.query_agent.retriever import QueryRetriever
-from business_code_agent.query_agent.agent import BusinessCodeQueryAgent
 from business_code_agent.schema import connect
 
 
@@ -60,14 +58,14 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             db = connect(handle.name)
             result = BaselineKnowledgeService(
                 db, project_config=ROOT / "project.config.example.json"
-            ).refresh(map_code=False, use_model=False)
+            ).refresh(use_model=False)
             self.assertEqual({
                 "BUSINESS_TERM": 1, "CAPABILITY": 1, "FLOW": 1,
                 "RELATION": 1, "RULE": 1, "SYSTEM": 1,
             }, result["entityCounts"])
             db.close()
 
-    def test_natural_baseline_is_structured_persisted_and_mapped(self):
+    def test_natural_baseline_is_structured_without_durable_code_mapping(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             baseline_root = root / "baseline"
@@ -99,7 +97,7 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             items = service.list_entities()
             self.assertEqual({"极优", "担保处理"}, {item["name"] for item in items})
             capability = next(item for item in items if item["name"] == "担保处理")
-            self.assertTrue(any("GuaranteeFileTask" in item["codeReference"] for item in capability["mappings"]))
+            self.assertNotIn("mappings", capability)
             self.assertEqual("VERIFIED", capability["status"])
             self.assertTrue(capability["sourceEvidenceId"])
 
@@ -107,20 +105,10 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             self.assertTrue(any(item["knowledge_type"] == "RELATION" for item in candidates))
             detail = BusinessTools(db).get_business_knowledge(capability["id"])
             self.assertTrue(detail["evidence"])
-            self.assertTrue(any(item["target_type"] == "CODE_SYMBOL" for item in detail["relations"]))
+            self.assertFalse(any(item["target_type"] == "CODE_SYMBOL" for item in detail["relations"]))
             graph = KnowledgeGraphService(db).search("担保处理")
             self.assertTrue(any(node["type"] == "CAPABILITY" for node in graph["nodes"]))
-            self.assertTrue(any(node["type"] == "CODE" for node in graph["nodes"]))
-            initial = QueryRetriever(db).initial_search({"searchTerms": ["极优提款担保"]})
-            self.assertTrue(initial["business_candidates"])
-            expanded = QueryRetriever(db).expand({
-                "question": "极优提款担保", "business_candidates": initial["business_candidates"],
-                "code_candidates": [], "requirement_candidates": [], "evidence_gaps": [],
-            })
-            self.assertTrue(any(item.get("target_id") or item.get("targetId") for item in expanded["code_candidates"]))
-            answer = BusinessCodeQueryAgent(db).run("担保处理是什么，由什么代码实现？")
-            self.assertIn("BUSINESS", {item["sourceType"] for item in answer["answer"]["facts"]})
-            self.assertIn("CODE", {item["sourceType"] for item in answer["answer"]["facts"]})
+            self.assertFalse(any(node["type"] == "CODE" for node in graph["nodes"]))
             db.close()
 
     def test_model_output_without_literal_source_quote_is_rejected(self):
@@ -165,7 +153,7 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             config = root / "project.json"
             config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
             db = connect(str(root / "knowledge.db"))
-            BaselineKnowledgeService(db, project_config=config, extractor=HallucinatedHints()).refresh(map_code=False)
+            BaselineKnowledgeService(db, project_config=config, extractor=HallucinatedHints()).refresh()
             entity = db.execute("SELECT aliases_json,attributes_json,definition FROM business_entity").fetchone()
             self.assertIsNotNone(entity)
             self.assertEqual([], json.loads(entity["aliases_json"]))
@@ -201,7 +189,7 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             config = root / "project.json"
             config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
             db = connect(str(root / "knowledge.db"))
-            BaselineKnowledgeService(db, project_config=config, extractor=CrossSectionAlias()).refresh(map_code=False)
+            BaselineKnowledgeService(db, project_config=config, extractor=CrossSectionAlias()).refresh()
             entity = db.execute("SELECT aliases_json,attributes_json FROM business_entity WHERE name='产品B'").fetchone()
             self.assertEqual([], json.loads(entity["aliases_json"]))
             self.assertEqual({}, json.loads(entity["attributes_json"]))
@@ -227,7 +215,7 @@ class BusinessBaselineMvpTest(unittest.TestCase):
             db = connect(str(root / "knowledge.db"))
             result = BaselineKnowledgeService(
                 db, project_config=config, extractor=UnsupportedRelation()
-            ).refresh(map_code=False)
+            ).refresh()
             self.assertEqual(0, result["entityCounts"]["RELATION"])
             self.assertEqual(0, db.execute("SELECT count(*) FROM business_relation_v2").fetchone()[0])
             db.close()

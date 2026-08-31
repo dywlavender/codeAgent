@@ -24,7 +24,7 @@ Runtime Evidence → Answer
 - Project Context：系统、应用、仓库及代码归属；
 - Entry Anchor：应用 + 页面/类/Job/Consumer 名称，仅作为调查起点。
 
-代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）可以重建；旧 `business_code_mapping*` 表只为兼容历史数据保留，不参与默认基线导入、问答和统计。
+代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）可以重建；业务与代码之间不保存普通映射，Query Agent 只通过入口锚点定位起点，再基于当前索引实时调查。
 
 技术拓扑同样单独保存。`software_system` / `application` 表示部署与代码归属，不会混入人工维护的业务 `SYSTEM` 知识。
 

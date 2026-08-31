@@ -74,35 +74,8 @@ def make_server(
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     body = self._body()
                     self._json(200, service.refresh(
-                        # ``mapCode`` is accepted for old clients but is no
-                        # longer allowed to re-introduce the legacy mapping
-                        # refresh into the baseline main path.
-                        map_code=False,
                         use_model=bool(body.get("useModel", True)),
                     ))
-                    return
-                if path == "/api/knowledge/mappings/rebuild":
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.baseline_service import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
-                    self._json(200, {"mappingCounts": service.rebuild_mappings()})
-                    return
-                observation_match = re.fullmatch(
-                    r"/api/knowledge/(?:mapping-observations|mappings/observations|mapping-suggestions)/([^/]+)/(accept|approve|confirm|reject)", path,
-                )
-                if observation_match:
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.mapping_observer import MappingObservationService
-                    service = MappingObservationService(connect(db_path))
-                    body = self._body()
-                    action = observation_match.group(2)
-                    if action in {"accept", "approve", "confirm"}:
-                        result = service.accept(observation_match.group(1), str(body.get("note") or body.get("reviewerNote") or ""))
-                    else:
-                        result = service.reject(observation_match.group(1), str(body.get("note") or body.get("reviewerNote") or ""))
-                    self._json(200, result)
                     return
                 if path == "/api/knowledge/refresh":
                     if not self._require_admin():
@@ -209,28 +182,6 @@ def make_server(
                     else:
                         items = anchor_service.list_all()
                     self._json(200, {"items": items})
-                    return
-                if parsed.path in {
-                    "/api/knowledge/mapping-observations", "/api/knowledge/mappings/observations",
-                    "/api/knowledge/mapping-suggestions",
-                }:
-                    from ..knowledge_update.mapping_observer import MappingObservationService
-                    service = MappingObservationService(connect(db_path))
-                    params = parse_qs(parsed.query)
-                    self._json(200, {"items": service.list_observations(
-                        status=params.get("status", [""])[0],
-                        business_id=params.get("businessId", params.get("business_id", [""]))[0],
-                        run_id=params.get("runId", params.get("run_id", [""]))[0],
-                        limit=int(params.get("limit", ["100"])[0]),
-                    )})
-                    return
-                observation_match = re.fullmatch(
-                    r"/api/knowledge/(?:mapping-observations|mappings/observations|mapping-suggestions)/([^/]+)", parsed.path,
-                )
-                if observation_match:
-                    from ..knowledge_update.mapping_observer import MappingObservationService
-                    service = MappingObservationService(connect(db_path))
-                    self._json(200, MappingObservationService(service.db).get(observation_match.group(1)))
                     return
                 entity_match = re.fullmatch(r"/api/knowledge/entities/([^/]+)", parsed.path)
                 if entity_match:

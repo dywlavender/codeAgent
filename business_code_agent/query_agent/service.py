@@ -45,10 +45,6 @@ class QueryService:
         # The UI renders exact Evidence records, not the broader symbol context
         # temporarily loaded into the agent's bounded reasoning context.
         value["evidence"] = self.evidence_for_answer(value["answer"])
-        # Code discoveries are runtime-only.  Keep an empty compatibility
-        # field for older clients, but never create or read mapping-observation
-        # rows as a side effect of answering.
-        value["mappingSuggestions"] = []
         return value
 
     def _model_stages(self, _project_config):
@@ -105,9 +101,6 @@ class QueryService:
             "SELECT sequence,node_name,state_json,created_at FROM query_checkpoint WHERE run_id=? ORDER BY sequence", (run_id,)
         )]
         value["evidence"] = self.evidence_for_answer(value["answer"])
-        # Historical clients may still render this field; observations are no
-        # longer part of the query path and are therefore always empty here.
-        value["mappingSuggestions"] = []
         message = self.db.execute(
             "SELECT conversation_id FROM query_message WHERE run_id=? ORDER BY created_at LIMIT 1", (run_id,)
         ).fetchone()

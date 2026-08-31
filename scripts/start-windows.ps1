@@ -18,6 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$PortExplicit = $PSBoundParameters.ContainsKey("Port")
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $DefaultProjectConfig = Join-Path $ProjectRoot "project.config.json"
 Set-Location $ProjectRoot
@@ -86,14 +87,17 @@ function Invoke-Checked {
     }
 }
 
-function Assert-PortAvailable([string]$Address, [int]$TargetPort) {
+function Test-PortOpen([string]$Address, [int]$TargetPort) {
+    $probeAddress = if ($Address -eq "0.0.0.0" -or $Address -eq "::") { "127.0.0.1" } else { $Address }
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $async = $client.BeginConnect($Address, $TargetPort, $null, $null)
+        $async = $client.BeginConnect($probeAddress, $TargetPort, $null, $null)
         if ($async.AsyncWaitHandle.WaitOne(300) -and $client.Connected) {
-            throw "Port $TargetPort is already in use by another process. Close it or pass -Port with another value."
+            return $true
         }
+        return $false
     }
+    catch { return $false }
     finally {
         $client.Dispose()
     }
@@ -104,15 +108,60 @@ function Get-ExistingWorkbenchProcess([string]$DatabasePath, [int]$TargetPort) {
     foreach ($connection in $connections) {
         $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" -ErrorAction SilentlyContinue
         if (-not $process -or [string]::IsNullOrWhiteSpace($process.CommandLine)) { continue }
-        $isWorkbench = $process.CommandLine.IndexOf("business_code_agent.cli serve-query", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        $usesDatabase = $process.CommandLine.IndexOf($DatabasePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        $commandLine = ([string]$process.CommandLine).Replace('"', '')
+        $isWorkbench = $commandLine.IndexOf("business_code_agent.cli serve-query", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        $usesDatabase = $commandLine.IndexOf($DatabasePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
         if ($isWorkbench -and $usesDatabase) { return $process }
     }
     return $null
 }
 
+function Stop-ExistingWorkbenchProcess($Process) {
+    Write-Step "Stopping existing same-project service (PID $($Process.ProcessId))"
+    Stop-Process -Id $Process.ProcessId -Force -ErrorAction SilentlyContinue
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Get-Process -Id $Process.ProcessId -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
+function Get-PortOwnerIds([int]$TargetPort) {
+    try {
+        return @(Get-NetTCPConnection -State Listen -LocalPort $TargetPort -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    }
+    catch { return @() }
+}
+
+function Resolve-ListenPort([string]$Address, [int]$RequestedPort, [bool]$Explicit, [string]$DatabasePath) {
+    $scanLimit = 20
+    for ($offset = 0; $offset -le $scanLimit; $offset++) {
+        $candidate = $RequestedPort + $offset
+        if ($candidate -gt 65535) { break }
+
+        $existing = Get-ExistingWorkbenchProcess $DatabasePath $candidate
+        if ($existing) {
+            Stop-ExistingWorkbenchProcess $existing
+        }
+
+        if (-not (Test-PortOpen $Address $candidate)) {
+            if ($offset -gt 0) {
+                Write-Warning "Port $RequestedPort is busy; using available port $candidate instead."
+            }
+            return $candidate
+        }
+
+        if ($Explicit) {
+            $ownerIds = @(Get-PortOwnerIds $candidate)
+            $ownerText = if ($ownerIds.Count -gt 0) { " (PID: $($ownerIds -join ', '))" } else { "" }
+            throw "Port $candidate is already in use$ownerText. Stop that process or pass -Port with another value."
+        }
+    }
+    throw "Ports $RequestedPort-$([Math]::Min(65535, $RequestedPort + $scanLimit)) are unavailable. Pass -Port with an available value."
+}
+
 Write-Host "Business Code Agent - Windows launcher" -ForegroundColor Green
-Write-Host "Mode: $Mode | Database: $Database | URL: http://$HostAddress`:$Port/"
+Write-Host "Mode: $Mode | Database: $Database"
 
 $launcher = Resolve-PythonLauncher
 $versionCode = "import sys; assert sys.version_info >= (3,11), 'Python 3.11+ required'; print(sys.version.split()[0])"
@@ -197,17 +246,9 @@ else {
     }
 }
 
-$UrlHost = if ($HostAddress -eq "0.0.0.0") { "127.0.0.1" } else { $HostAddress }
+$Port = Resolve-ListenPort $HostAddress $Port $PortExplicit $DatabasePath
+$UrlHost = if ($HostAddress -eq "0.0.0.0" -or $HostAddress -eq "::") { "127.0.0.1" } else { $HostAddress }
 $Url = "http://$UrlHost`:$Port/"
-
-$existingServer = Get-ExistingWorkbenchProcess $DatabasePath $Port
-if ($existingServer) {
-    Write-Step "Stopping existing same-project service (PID $($existingServer.ProcessId))"
-    Stop-Process -Id $existingServer.ProcessId -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 400
-}
-
-Assert-PortAvailable $HostAddress $Port
 
 $LogPath = Join-Path $DataDirectory "server.log"
 $ErrorLogPath = Join-Path $DataDirectory "server-error.log"

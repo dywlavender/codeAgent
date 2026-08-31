@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from ..code_matching import CodeKnowledge, CodeMatcher
 from ..util import digest, stable_id
 from .entry_anchor_service import (
     EntryAnchor,
@@ -54,8 +53,7 @@ class BaselineKnowledgeService:
     """Import business knowledge and durable investigation entry anchors.
 
     Human statements, entry anchors and runtime code facts deliberately remain
-    separate. A refresh never derives ordinary Business→Code mappings; those
-    legacy tables remain available only for explicit compatibility tooling.
+    separate. A refresh never derives Business→Code mappings.
     The model may structure source text, but every accepted business item must
     point back to a literal excerpt in that source.
     """
@@ -66,7 +64,7 @@ class BaselineKnowledgeService:
         self.config = self._load_config()
         self._extractor = extractor
 
-    def refresh(self, *, map_code: bool = False, use_model: bool = True) -> dict[str, Any]:
+    def refresh(self, *, use_model: bool = True) -> dict[str, Any]:
         root = self.knowledge_root()
         if not root.is_dir():
             raise ValueError(f"业务基线目录不存在: {root}")
@@ -114,8 +112,6 @@ class BaselineKnowledgeService:
         return {
             "root": str(root), "sourceCount": len(documents), "entityCounts": counts,
             "anchorCounts": anchor_counts,
-            "mappingCounts": {"VERIFIED": 0, "CANDIDATE": 0, "UNRESOLVED": 0},
-            "legacyMappingRefresh": False,
             "sources": [{"id": item.id, "title": item.title, "path": item.path, "mode": item.mode} for item in documents],
         }
 
@@ -144,9 +140,7 @@ class BaselineKnowledgeService:
         ).fetchall()
         values = []
         for row in rows:
-            item = self._relation_dict(row)
-            item["mappings"] = []
-            values.append(item)
+            values.append(self._relation_dict(row))
         needle = query.strip().casefold()
         return [item for item in values if not needle or needle in json.dumps(item, ensure_ascii=False).casefold()][:100]
 
@@ -174,7 +168,6 @@ class BaselineKnowledgeService:
             "sourceId": row["source_id"], "sourceEvidenceId": row["source_evidence_id"],
             "confidence": row["confidence"], "status": row["status"], "updatedAt": row["updated_at"],
             "source": dict(source) if source else None, "entryAnchors": anchors,
-            "mappings": [],
             "relations": [*outgoing, *incoming],
         }
 
@@ -182,57 +175,7 @@ class BaselineKnowledgeService:
         row = self.db.execute("SELECT * FROM business_relation_v2 WHERE id=?", (relation_id,)).fetchone()
         if not row:
             raise KeyError(relation_id)
-        result = self._relation_dict(row)
-        result["mappings"] = []
-        return result
-
-    def rebuild_mappings(self, *, source_id: str | None = None) -> dict[str, int]:
-        matcher = CodeMatcher(self.db)
-        counts = {"VERIFIED": 0, "CANDIDATE": 0, "UNRESOLVED": 0}
-        entity_rows = self.db.execute(
-            "SELECT * FROM business_entity WHERE status!='DEPRECATED'" + (" AND source_id=?" if source_id else ""),
-            ((source_id,) if source_id else ()),
-        ).fetchall()
-        for row in entity_rows:
-            self.db.execute(
-                "DELETE FROM business_code_mapping WHERE business_type='ENTITY' AND business_id=? AND source_type='CODE'",
-                (row["id"],),
-            )
-            attributes = json.loads(row["attributes_json"])
-            aliases = json.loads(row["aliases_json"])
-            terms = _mapping_terms(row["name"], aliases, attributes)
-            knowledge = CodeKnowledge(
-                title=row["name"], statement=row["definition"],
-                business_objects=[row["name"], *aliases],
-                processes=[str(value) for value in _as_list(attributes.get("businessActions") or attributes.get("steps"))],
-                systems=[str(value) for value in _as_list(attributes.get("systems"))],
-                keywords=terms, code_hints=[str(value) for value in _as_list(attributes.get("codeHints"))],
-            )
-            candidates = matcher.rank(knowledge, matcher.build_search_plan(knowledge), limit=5)
-            statuses = self._save_candidates("ENTITY", row["id"], _mapping_relation(row["entity_type"]), terms, candidates)
-            for status in statuses:
-                counts[status] += 1
-        relation_rows = self.db.execute(
-            "SELECT * FROM business_relation_v2 WHERE status!='DEPRECATED'" + (" AND source_id=?" if source_id else ""),
-            ((source_id,) if source_id else ()),
-        ).fetchall()
-        for row in relation_rows:
-            self.db.execute(
-                "DELETE FROM business_code_mapping WHERE business_type='RELATION' AND business_id=? AND source_type='CODE'",
-                (row["id"],),
-            )
-            terms = _unique([row["from_label"], row["to_label"], row["scope"], *_split_identifier(row["relation_type"])])
-            knowledge = CodeKnowledge(
-                title=f"{row['from_label']} {row['relation_type']} {row['to_label']}",
-                statement=f"{row['from_label']} {row['relation_type']} {row['to_label']}",
-                business_objects=[row["from_label"], row["to_label"]], processes=terms, keywords=terms,
-            )
-            candidates = matcher.rank(knowledge, matcher.build_search_plan(knowledge), limit=5)
-            statuses = self._save_candidates("RELATION", row["id"], "EVIDENCED_BY", terms, candidates)
-            for status in statuses:
-                counts[status] += 1
-        self.db.commit()
-        return counts
+        return self._relation_dict(row)
 
     def knowledge_root(self) -> Path:
         knowledge = self.config.get("knowledge") or {}
@@ -381,83 +324,6 @@ class BaselineKnowledgeService:
         self.db.execute("INSERT OR REPLACE INTO evidence_lifecycle VALUES (?,'ACTIVE',NULL,NULL,NULL)", (evidence_id,))
         return evidence_id
 
-    def _save_candidates(self, business_type, business_id, relation_type, terms, candidates) -> list[str]:
-        if not candidates:
-            self._insert_mapping(business_type, business_id, relation_type, None, "", "UNRESOLVED", 0.0,
-                                 [], terms, "当前代码索引中未找到匹配项")
-            return ["UNRESOLVED"]
-        top = candidates[0]
-        unique_top = len(candidates) == 1 or top.score >= candidates[1].score + 3
-        verified = top.score >= 8 and unique_top and bool(top.evidence_ids)
-        statuses: list[str] = []
-        for index, candidate in enumerate(candidates):
-            status = "VERIFIED" if index == 0 and verified else "CANDIDATE"
-            confidence = min(0.99, max(0.35, candidate.score / 15))
-            self._insert_mapping(
-                business_type, business_id, relation_type, candidate.target_id, candidate.label,
-                status, confidence, candidate.evidence_ids, terms, candidate.reason,
-            )
-            statuses.append(status)
-        return statuses
-
-    def _insert_mapping(self, business_type, business_id, relation_type, symbol_id, reference,
-                        status, confidence, evidence_ids, terms, message):
-        mapping_id = stable_id("BCM", business_type, business_id, relation_type, reference or "UNRESOLVED")
-        self.db.execute(
-            """INSERT INTO business_code_mapping
-               (id,business_type,business_id,relation_type,code_symbol_id,code_reference,status,confidence,
-                evidence_ids_json,search_terms_json,message,source_type,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,'CODE',?)
-               ON CONFLICT(business_type,business_id,relation_type,code_reference)
-               DO UPDATE SET code_symbol_id=COALESCE(excluded.code_symbol_id,business_code_mapping.code_symbol_id),
-                 status=CASE
-                   WHEN business_code_mapping.status='VERIFIED' THEN 'VERIFIED'
-                   WHEN business_code_mapping.source_type IN ('QUERY','QUERY_REVIEW') THEN business_code_mapping.status
-                   ELSE excluded.status END,
-                 confidence=MAX(business_code_mapping.confidence,excluded.confidence),
-                 evidence_ids_json=CASE WHEN business_code_mapping.source_type IN ('QUERY','QUERY_REVIEW')
-                                        THEN business_code_mapping.evidence_ids_json ELSE excluded.evidence_ids_json END,
-                 search_terms_json=CASE WHEN business_code_mapping.source_type IN ('QUERY','QUERY_REVIEW')
-                                        THEN business_code_mapping.search_terms_json ELSE excluded.search_terms_json END,
-                 message=CASE WHEN business_code_mapping.source_type IN ('QUERY','QUERY_REVIEW')
-                              THEN business_code_mapping.message ELSE excluded.message END,
-                 source_type=CASE WHEN business_code_mapping.source_type IN ('QUERY','QUERY_REVIEW')
-                                  THEN business_code_mapping.source_type ELSE 'CODE' END,
-                 updated_at=excluded.updated_at""",
-            (mapping_id, business_type, business_id, relation_type, symbol_id, reference, status, confidence,
-             json.dumps(evidence_ids, ensure_ascii=False), json.dumps(terms, ensure_ascii=False), message[:500], _now()),
-        )
-
-    def _mapping_values(self, business_type: str, business_id: str) -> list[dict[str, Any]]:
-        rows = self.db.execute(
-            """SELECT * FROM business_code_mapping
-                WHERE business_type=? AND business_id=?
-                ORDER BY confidence DESC,code_reference""",
-            (business_type, business_id),
-        ).fetchall()
-        values = [self._mapping_dict(item) for item in rows]
-        known = {(item["codeSymbolId"], item["codeReference"]) for item in values}
-        observations = self.db.execute(
-            """SELECT * FROM business_code_mapping_observation
-                WHERE business_type=? AND business_id=? AND status='CANDIDATE'
-                ORDER BY confidence DESC,code_reference""",
-            (business_type, business_id),
-        ).fetchall()
-        for row in observations:
-            key = (row["code_symbol_id"], row["code_reference"])
-            if key in known:
-                continue
-            values.append({
-                "id": row["id"], "businessType": row["business_type"], "businessId": row["business_id"],
-                "relation": row["relation_type"], "codeSymbolId": row["code_symbol_id"],
-                "codeReference": row["code_reference"], "status": "CANDIDATE",
-                "confidence": row["confidence"], "evidenceIds": json.loads(row["evidence_ids_json"]),
-                "searchTerms": [], "message": row["reason"], "sourceType": "QUERY",
-                "updatedAt": row["created_at"], "observationId": row["id"],
-            })
-            known.add(key)
-        return values
-
     def _configured_extractor(self) -> BaselineExtractor | None:
         config = model_config_from_environment()
         if not config or not config.get("enabled", True):
@@ -482,18 +348,6 @@ class BaselineKnowledgeService:
             "sourceId": row["source_id"], "evidenceId": row["evidence_id"],
             "confidence": row["confidence"], "status": row["status"], "updatedAt": row["updated_at"],
         }
-
-    @staticmethod
-    def _mapping_dict(row) -> dict[str, Any]:
-        return {
-            "id": row["id"], "businessType": row["business_type"], "businessId": row["business_id"],
-            "relation": row["relation_type"], "codeSymbolId": row["code_symbol_id"],
-            "codeReference": row["code_reference"], "status": row["status"],
-            "confidence": row["confidence"], "evidenceIds": json.loads(row["evidence_ids_json"]),
-            "searchTerms": json.loads(row["search_terms_json"]), "message": row["message"],
-            "sourceType": row["source_type"], "updatedAt": row["updated_at"],
-        }
-
 
 class LangChainBaselineExtractor:
     def __init__(self, model, *, agent_factory=None):
@@ -968,28 +822,6 @@ def _document_title(text: str, default: str) -> str:
 def _first_sentence(value: str) -> str:
     compact = re.sub(r"\s+", " ", value).strip()
     return re.split(r"[。！？!?]\s*", compact, maxsplit=1)[0].strip()
-
-
-def _mapping_terms(name: str, aliases: list[str], attributes: Mapping[str, Any]) -> list[str]:
-    values: list[str] = [name, *aliases]
-    for key in ("codeHints", "keywords", "businessActions", "steps", "responsibilities"):
-        for item in _as_list(attributes.get(key)):
-            if isinstance(item, Mapping):
-                values.extend(str(value) for value in item.values() if isinstance(value, (str, int)))
-            else:
-                values.append(str(item))
-    return _unique([value.strip() for value in values if value and value.strip()])[:20]
-
-
-def _mapping_relation(entity_type: str) -> str:
-    return {
-        "SYSTEM": "OWNED_BY", "BUSINESS_TERM": "REPRESENTED_BY", "CAPABILITY": "IMPLEMENTED_BY",
-        "FLOW": "IMPLEMENTED_BY", "RULE": "ENFORCED_BY",
-    }[entity_type]
-
-
-def _split_identifier(value: str) -> list[str]:
-    return [part for part in re.split(r"[_\W]+", value) if len(part) > 1]
 
 
 def _as_list(value: Any) -> list[Any]:

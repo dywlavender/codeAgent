@@ -174,7 +174,7 @@ class BusinessCodeQueryAgent:
                 "entities": answer["entities"],
                 # Structured candidates are navigation references only.  They
                 # contain identifiers and metadata, never raw source excerpts
-                # or durable Business→Code mappings.
+                # or durable business-to-code associations.
                 "businessCandidates": reference_state.get("business_candidates", []),
                 "codeCandidates": reference_state.get("code_candidates", []),
             }
@@ -358,10 +358,9 @@ class BusinessCodeQueryAgent:
             candidate = next((row for row in business_candidates if _candidate_matches(row, item)), {})
             knowledge_type = str(candidate.get("knowledge_type") or "").upper()
             role = EvidenceRole.PROCESS_LINK if knowledge_type in {"FLOW", "RELATION"} or len(state.processes) >= 2 else EvidenceRole.RULE
-            # The human statement is proven by its own source excerpt. Mapping
-            # evidence remains separately available for code navigation; tying
-            # every mapping candidate to the business fact would incorrectly
-            # make the business fact disappear when one code hint is stale.
+            # The human statement is proven by its own source excerpt. Code
+            # navigation evidence is loaded separately at runtime, so a stale
+            # entry hint cannot make the business fact disappear.
             evidence_ids = [ref.evidence_id]
             return StructuredFact(statement, SourceType.BUSINESS, evidence_ids, role, field, relation, strategy if relation == "DATA_STRATEGY" else "", "")
         statement = self._requirement_rule(item, requirement_candidates)

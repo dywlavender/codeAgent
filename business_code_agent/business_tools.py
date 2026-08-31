@@ -191,66 +191,6 @@ class BusinessTools:
             "relations": [], "entryAnchors": [], "evidence": self._load_evidence(evidence_ids), "reviews": [],
         }
 
-    def _baseline_mappings(self, business_type: str, business_id: str) -> list[dict]:
-        values = []
-        known = set()
-        for item in self.db.execute(
-            """SELECT * FROM business_code_mapping
-                WHERE business_type=? AND business_id=? AND status IN ('VERIFIED','CANDIDATE')
-                ORDER BY confidence DESC""",
-            (business_type, business_id),
-        ):
-            evidence_ids = json.loads(item["evidence_ids_json"])
-            code_evidence_id = self._code_evidence_id(evidence_ids)
-            values.append({
-                "id": item["id"], "source_type": "BUSINESS", "source_id": business_id,
-                "relation_type": item["relation_type"], "target_type": "CODE_SYMBOL",
-                "target_id": item["code_symbol_id"],
-                "qualified_name": item["code_reference"],
-                "status": "DERIVED" if item["status"] == "VERIFIED" else "CANDIDATE",
-                "confidence": item["confidence"],
-                "evidence_id": code_evidence_id,
-                "evidence_ids": evidence_ids,
-            })
-            known.add((item["code_symbol_id"], item["code_reference"]))
-        # Query observations are navigation hints until an administrator
-        # confirms them.  They are intentionally labelled CANDIDATE so the
-        # query agent cannot turn them into answer facts without evidence.
-        for item in self.db.execute(
-            """SELECT * FROM business_code_mapping_observation
-                WHERE business_type=? AND business_id=? AND status='CANDIDATE'
-                ORDER BY confidence DESC""",
-            (business_type, business_id),
-        ):
-            key = (item["code_symbol_id"], item["code_reference"])
-            if key in known:
-                continue
-            evidence_ids = json.loads(item["evidence_ids_json"] or "[]")
-            code_evidence_id = self._code_evidence_id(evidence_ids)
-            values.append({
-                "id": item["id"], "source_type": "BUSINESS", "source_id": business_id,
-                "relation_type": item["relation_type"], "target_type": "CODE_SYMBOL",
-                "target_id": item["code_symbol_id"], "qualified_name": item["code_reference"],
-                "status": "CANDIDATE", "confidence": item["confidence"],
-                "evidence_id": code_evidence_id,
-                "evidence_ids": evidence_ids, "observation_id": item["id"],
-            })
-            known.add(key)
-        return values
-
-    def _code_evidence_id(self, evidence_ids) -> str | None:
-        values = list(dict.fromkeys(str(value) for value in evidence_ids if value))
-        if not values:
-            return None
-        marks = ",".join("?" for _ in values)
-        code_ids = {
-            row["id"] for row in self.db.execute(
-                f"SELECT id FROM evidence WHERE id IN ({marks}) AND source_type='CODE'",
-                tuple(values),
-            )
-        }
-        return next((value for value in values if value in code_ids), None)
-
     def _load_evidence(self, evidence_ids) -> list[dict]:
         values = list(dict.fromkeys(value for value in evidence_ids if value))
         if not values:

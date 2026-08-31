@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from business_code_agent.schema import connect
 
 
 class RetiredBusinessSchemaTest(unittest.TestCase):
-    def test_new_database_has_canonical_baseline_and_mapping_tables(self):
+    def test_new_database_has_canonical_baseline_without_retired_mapping_tables(self):
         with tempfile.TemporaryDirectory() as folder:
             path = str(Path(folder) / "knowledge.db")
             db = connect(path)
@@ -21,7 +22,8 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
         self.assertIn("business_baseline_source", names)
         self.assertIn("business_entity", names)
         self.assertIn("business_relation_v2", names)
-        self.assertIn("business_code_mapping", names)
+        self.assertNotIn("business_code_mapping", names)
+        self.assertNotIn("business_code_mapping_observation", names)
         self.assertNotIn("business_function", names)
         self.assertNotIn("business_function_version", names)
         self.assertNotIn("knowledge_update_proposal", names)
@@ -60,6 +62,27 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
             self.assertNotIn("business_function", names)
             self.assertNotIn("business_function_version", names)
             self.assertNotIn("knowledge_update_proposal", names)
+            db.close()
+
+    def test_existing_mapping_schema_is_removed_on_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "knowledge.db")
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE business_code_mapping (id TEXT PRIMARY KEY);
+                CREATE TABLE business_code_mapping_observation (id TEXT PRIMARY KEY);
+                INSERT INTO business_code_mapping VALUES ('OLD-MAPPING');
+                INSERT INTO business_code_mapping_observation VALUES ('OLD-OBSERVATION');
+                """
+            )
+            raw.commit()
+            raw.close()
+
+            db = connect(path)
+            names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("business_code_mapping", names)
+            self.assertNotIn("business_code_mapping_observation", names)
             db.close()
 
 

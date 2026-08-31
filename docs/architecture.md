@@ -64,7 +64,7 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 → 结束
 ```
 
-基线刷新不再调用 `CodeMatcher`，也不生成普通 Business→Code Mapping。旧 `business_code_mapping`、`business_code_mapping_observation` 表暂时保留用于历史兼容，但不参与默认导入、问答、UI 或 workspace 统计；不自动把旧 Mapping 批量转换成 Anchor。
+基线刷新不调用 `CodeMatcher`，也不生成业务—代码持久关联。业务知识只保存入口锚点；入口之后的代码关联全部由 Query Agent 基于当前索引实时调查。
 
 ## Query Agent 检索顺序
 
@@ -85,11 +85,12 @@ Anchor 是优先级提示，不是搜索边界。一个流程可以有多个入�
 
 ## 管理端与用户端
 
-用户端只有 Query Agent：回答问题、展示实时技术链路和 Evidence。管理端负责导入/刷新业务基线、查看业务关系和维护入口锚点。Knowledge 页面不展示普通 Code Mapping、Symbol、Method、Line 或代码 Evidence；这些内容只在问答调查结果中出现。
+用户端只有 Query Agent：回答问题、展示实时技术链路和 Evidence。管理端负责导入/刷新业务基线、查看业务关系和维护入口锚点。Knowledge 页面不展示代码关联、Symbol、Method、Line 或代码 Evidence；这些内容只在问答调查结果中出现。
 
-## 兼容说明
+## 数据库迁移
 
-旧 `functional_*`、`business_code_mapping*` 及其显式管理接口暂时保留，便于已有数据库和客户端平滑迁移。它们不应作为新功能的主链路；后续确认没有历史依赖后再清理。
+打开数据库时会自动删除早期 MVP 遗留的 `business_code_mapping` 和
+`business_code_mapping_observation` 表及其索引。它们不再属于当前数据模型；如需保留历史记录，请在升级前自行导出。
 
 ## 当前限制
 
