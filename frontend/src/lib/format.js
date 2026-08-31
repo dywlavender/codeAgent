@@ -28,6 +28,7 @@ function stateEntities(state = {}) {
 }
 
 export function answerModeLabel(value) {
+  if (!value) return "";
   const labels = {
     MODEL: "模型归纳",
     DIRECT: "直接回答",

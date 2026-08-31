@@ -179,16 +179,17 @@ export default function App() {
     setAdminUnlocked(true);
     setLockOpen(false);
     setLockToken("");
-    setPage((current) => current === "admin" ? current : current);
   }
 
-  const sideBg = "#f1f0eb";
+  const activeTurn = turns.find((turn) => turn.id === activeTurnId);
+  const activeRunId = activeTurn ? (activeTurn.result?.runId || activeTurn.id) : null;
+  const sideBg = "#EBE7E0";
 
   return (
-    <Layout style={{ minHeight: "100dvh", background: "#f7f7f4" }}>
-      <Sider width={248} style={{ background: sideBg, borderRight: "1px solid #e3e2dc", position: "sticky", top: 0, height: "100dvh", overflow: "auto" }}>
+    <Layout style={{ minHeight: "100dvh", background: "#F4F2ED" }}>
+      <Sider width={248} style={{ background: sideBg, borderRight: "1px solid #E0DCD5", position: "sticky", top: 0, height: "100dvh", overflow: "auto" }}>
         <div className="side-brand">
-          <Avatar shape="square" size={30} style={{ background: "#141413", fontWeight: 700, fontFamily: "monospace", fontSize: 12, borderRadius: 8 }}>{"{}"}</Avatar>
+          <Avatar shape="square" size={30} style={{ background: "#211E1A", fontWeight: 700, fontFamily: "monospace", fontSize: 12, borderRadius: 8, color: "#F4F2ED" }}>{"{}"}</Avatar>
           <div>
             <Typography.Text strong style={{ fontSize: 13.5, display: "block", lineHeight: 1.3 }}>Code Atlas</Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 10.5 }}>证据优先的业务知识库</Typography.Text>
@@ -228,7 +229,7 @@ export default function App() {
             </Typography.Text>
           )}
           {runs.slice(0, 12).map((run) => (
-            <button key={run.id} className={`recent-item ${run.question === turns[0]?.question ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
+            <button key={run.id} className={`recent-item ${run.id === activeRunId ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
               <span className={`rstate ${run.evidence_status?.toLowerCase() || ""}`} />
               <span className="rcopy">
                 <span className="rq">{run.question}</span>
@@ -300,8 +301,4 @@ export default function App() {
 
     </Layout>
   );
-}
-
-function pendingCount() {
-  return 0;
 }

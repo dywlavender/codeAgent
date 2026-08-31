@@ -160,6 +160,16 @@ function GraphRow({ node, active, onSelect }) {
 /* ===== 画布：确定性环形布局 + 滚轮缩放 + 拖拽平移 ===== */
 const VB = { w: 1000, h: 720 };
 
+/* 画布上的代码节点用短名（类.方法），全限定名放进悬浮提示，避免标签互相压盖 */
+function canvasLabel(node) {
+  const label = String(node.label || "");
+  if ((node.type === "CODE" || node.type === "MYBATIS_STATEMENT") && label.includes(".")) {
+    const parts = label.split(".");
+    return parts.slice(-2).join(".");
+  }
+  return label;
+}
+
 function GraphCanvas({ nodes, edges, selectedId, onSelect }) {
   const svgRef = useRef(null);
   const [view, setView] = useState({ x: 0, y: 0, w: VB.w, h: VB.h });
@@ -276,7 +286,7 @@ function GraphCanvas({ nodes, edges, selectedId, onSelect }) {
                 onClick={(event) => { event.stopPropagation(); onSelect(isSel ? null : node.id); }}>
                 <circle cx={p.x} cy={p.y} r={r} fill={style.soft} stroke={style.color} strokeWidth={isSel ? 2.4 : 1.4} />
                 <text x={p.x} y={p.y + 3.5} textAnchor="middle" className="g-glyph" fill={style.color}>{style.glyph}</text>
-                <text x={p.x} y={p.y + r + 13} textAnchor="middle" className={isSel ? "g-label sel" : "g-label"}>{node.label}</text>
+                <text x={p.x} y={p.y + r + 13} textAnchor="middle" className={isSel ? "g-label sel" : "g-label"}>{canvasLabel(node)}</text>
                 <title>{`${node.typeLabel} · ${node.label}${node.statusLabel ? `\n${node.statusLabel}` : ""}${node.description ? `\n${String(node.description).slice(0, 160)}` : ""}`}</title>
               </g>
             );

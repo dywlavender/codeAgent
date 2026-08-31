@@ -64,8 +64,8 @@ def load_project_config(config_path: str | Path) -> tuple[dict, list[RepositoryC
     return project, repositories
 
 
-def sync_project(config_path: str | Path, db_path: str | Path) -> dict:
-    if not shutil.which("git"):
+def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool = False) -> dict:
+    if not offline and not shutil.which("git"):
         raise ProjectSyncError("没有找到 Git，请先安装 Git")
 
     project, repositories = load_project_config(config_path)
@@ -74,7 +74,7 @@ def sync_project(config_path: str | Path, db_path: str | Path) -> dict:
     try:
         indexer = JavaIndexer(db)
         for repository in repositories:
-            sync_result = sync_repository(repository)
+            sync_result = sync_repository_offline(repository) if offline else sync_repository(repository)
             indexed = indexer.ingest(str(repository.local_path), repository.repository_id)
             results.append({**sync_result, "indexed": indexed})
     finally:
@@ -84,6 +84,26 @@ def sync_project(config_path: str | Path, db_path: str | Path) -> dict:
         "projectId": project["id"],
         "projectName": project.get("name") or project["id"],
         "repositories": results,
+    }
+
+
+def sync_repository_offline(config: RepositoryConfig) -> dict:
+    """Use a bundled local checkout without invoking Git or any network.
+
+    Offline bundles intentionally omit ``.git`` to reduce size and avoid
+    leaking repository metadata.  The copied source directory is the release
+    snapshot; updating it requires generating a new offline bundle.
+    """
+    target = config.local_path
+    if not target.is_dir():
+        raise ProjectSyncError(
+            f"离线包缺少仓库 {config.repository_id}: {target}，请在联网构建机重新生成离线包"
+        )
+    return {
+        "id": config.repository_id,
+        "path": str(target),
+        "branch": config.branch or "bundled-snapshot",
+        "syncStatus": "OFFLINE_BUNDLED",
     }
 
 

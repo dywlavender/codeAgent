@@ -13,6 +13,7 @@ const TYPE_CONFIG = {
     empty: "换一个 Symbol 或字段名再试。",
     countKey: "symbols",
     noun: "Symbols",
+    initialQuery: "repayType",
   },
   业务知识: {
     endpoint: "/api/functions?q=",
@@ -20,6 +21,7 @@ const TYPE_CONFIG = {
     empty: "还没有业务知识。请在管理页面导入业务基线。",
     countKey: "businessKnowledge",
     noun: "Knowledge",
+    initialQuery: "",
   },
 };
 
@@ -29,18 +31,19 @@ export function LibraryPage({ workspace }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("repayType");
+  const [query, setQuery] = useState(config.initialQuery);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    // 初始与切换类型都按当前查询词搜索，避免首屏永远是空列表
     setLoading(true);
     setError("");
     setSelectedId(null);
     setDetail(null);
-    request(config.endpoint).then((data) => {
+    request(`${config.endpoint}${encodeURIComponent(config.initialQuery)}`).then((data) => {
       if (alive) setItems(data.items || []);
     }).catch((reason) => {
       if (alive) setError(reason.message);
@@ -51,13 +54,12 @@ export function LibraryPage({ workspace }) {
   }, [type]);
 
   async function search(nextQuery = query) {
-    const base = config.endpoint.split("?")[0];
     setLoading(true);
     setError("");
     setSelectedId(null);
     setDetail(null);
     try {
-      setItems((await request(`${base}?q=${encodeURIComponent(nextQuery)}`)).items || []);
+      setItems((await request(`${config.endpoint}${encodeURIComponent(nextQuery)}`)).items || []);
     } catch (reason) {
       setError(reason.message);
     } finally {
@@ -203,7 +205,7 @@ function CodeDetail({ item, detail }) {
       {Object.entries(grouped).map(([factType, rows]) => (
         <div key={factType} style={{ marginTop: 14 }}>
           <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: ".05em", display: "block", marginBottom: 7 }}>
-            {factTypeLabel(factType).toUpperCase()} · {factTypeLabel(factType)} · {rows.length}
+            {factTypeLabel(factType)} · {rows.length}
           </Typography.Text>
           <Flex gap={6} wrap="wrap">
             {rows.map((row, index) => (

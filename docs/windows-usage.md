@@ -1,5 +1,7 @@
 # Windows 使用方案
 
+本页描述可访问 PyPI/npm 的普通启动方式。部署机不能访问公网、但能访问内网 Git 时，请使用 [Windows / Linux 离线部署方案](offline-deployment.md)。
+
 ## 先选一种模式
 
 | 模式 | 适用场景 | 数据库内容 | 启动命令 |

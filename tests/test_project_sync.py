@@ -99,5 +99,32 @@ class ProjectSyncTest(unittest.TestCase):
         )
 
 
+class OfflineProjectSyncTest(unittest.TestCase):
+    def test_bundled_repository_is_indexed_without_git_metadata(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            repository = root / "offline-repositories" / "core"
+            java = repository / "src" / "Entry.java"
+            java.parent.mkdir(parents=True)
+            java.write_text("package demo; public class Entry { public void run() {} }", encoding="utf-8")
+            config = root / "project.config.json"
+            config.write_text(json.dumps({
+                "project": {"id": "offline", "name": "Offline"},
+                "repositoryRoot": "offline-repositories",
+                "repositories": [{
+                    "id": "core",
+                    "gitUrl": "ssh://unreachable.invalid/core.git",
+                    "localPath": "offline-repositories/core",
+                }],
+            }), encoding="utf-8")
+            database = root / "knowledge.db"
+
+            result = sync_project(config, database, offline=True)
+
+            self.assertEqual("OFFLINE_BUNDLED", result["repositories"][0]["syncStatus"])
+            self.assertGreater(result["repositories"][0]["indexed"]["symbols"], 0)
+            self.assertFalse((repository / ".git").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

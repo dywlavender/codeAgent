@@ -54,6 +54,7 @@ def main() -> None:
     sync = sub.add_parser("sync-project", help="按项目配置同步 Git 仓库并增量索引")
     sync.add_argument("--config", required=True)
     sync.add_argument("--db", required=True)
+    sync.add_argument("--offline", action="store_true", help="只索引配置中的包内源码，不调用 Git 或网络")
     baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线并建立代码映射")
     baseline.add_argument("--config", required=True)
     baseline.add_argument("--db", required=True)
@@ -167,7 +168,7 @@ def main() -> None:
         print(JavaIndexer(connect(args.db)).ingest(args.repo, args.repository_id))
     elif args.command == "sync-project":
         from .project_sync import sync_project
-        print(json.dumps(sync_project(args.config, args.db), ensure_ascii=False, indent=2))
+        print(json.dumps(sync_project(args.config, args.db, offline=args.offline), ensure_ascii=False, indent=2))
     elif args.command == "baseline-refresh":
         from .knowledge_update.baseline_service import BaselineKnowledgeService
         service = BaselineKnowledgeService(connect(args.db), project_config=args.config)

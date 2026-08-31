@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowClockwise, Check, GitBranch, WarningCircle, X } from "@phosphor-icons/react";
-import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tag, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tag, Typography } from "antd";
 import { request } from "../lib/api.js";
 
 const TYPES = [
@@ -127,34 +127,53 @@ function ObservationPanel({ items, reviewing, onReview }) {
     />
   );
   return (
-    <Card size="small" title={<Flex gap={8} align="center"><span>问答发现的映射候选</span><Tag color="blue" style={{ margin: 0 }}>{items.length}</Tag></Flex>} style={{ maxWidth: 1180, margin: "0 auto 12px" }}>
-      <Space direction="vertical" size={8} style={{ width: "100%" }}>
-        {items.map((item) => (
-          <div key={item.id} className="knowledge-line">
-            <Flex justify="space-between" gap={12} align="flex-start" wrap="wrap">
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <Typography.Text strong style={{ fontSize: 12.5 }}>{item.businessName || item.businessId}</Typography.Text>
-                <Typography.Text type="secondary" style={{ fontSize: 11.5 }}> → </Typography.Text>
-                <Typography.Text code style={{ fontSize: 11.5 }}>{item.codeReference || "未定位"}</Typography.Text>
-                <div style={{ marginTop: 3 }}>
-                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>{item.question}</Typography.Text>
-                </div>
-                <div style={{ marginTop: 3 }}>
-                  <Tag color="blue" style={{ margin: 0, fontSize: 10.5 }}>{item.relation}</Tag>
-                  <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>可信度 {Math.round((item.confidence || 0) * 100)}%</Typography.Text>
-                  {item.evidenceIds?.length > 0 && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>证据 {item.evidenceIds.slice(0, 4).join("、")}</Typography.Text>}
-                  {item.reason && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>{item.reason}</Typography.Text>}
-                </div>
+    <Collapse
+      defaultActiveKey={items.length <= 3 ? ["observations"] : []}
+      items={[{
+        key: "observations",
+        label: (
+          <Flex gap={8} align="center">
+            <span style={{ fontWeight: 600, fontSize: 13 }}>问答发现的映射候选</span>
+            <Tag color="blue" style={{ margin: 0 }}>{items.length} 条待确认</Tag>
+            <Typography.Text type="secondary" style={{ fontSize: 11.5, fontWeight: 400 }}>
+              确认后写入正式 Mapping，忽略只关闭该候选
+            </Typography.Text>
+          </Flex>
+        ),
+        children: (
+          <Space direction="vertical" size={8} style={{ width: "100%", maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+            {items.map((item) => (
+              <div key={item.id} className="knowledge-line">
+                <Flex justify="space-between" gap={12} align="flex-start" wrap="wrap">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <Typography.Text strong style={{ fontSize: 12.5 }}>{item.businessName || item.businessId}</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 11.5 }}> → </Typography.Text>
+                    <Typography.Text code style={{ fontSize: 11.5 }}>{item.codeReference || "未定位"}</Typography.Text>
+                    <div style={{ marginTop: 3 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>{item.question}</Typography.Text>
+                    </div>
+                    <div style={{ marginTop: 3 }}>
+                      <Tag color="blue" style={{ margin: 0, fontSize: 10.5 }}>{item.relation}</Tag>
+                      <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>可信度 {Math.round((item.confidence || 0) * 100)}%</Typography.Text>
+                      {item.evidenceIds?.length > 0 && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>证据 {item.evidenceIds.slice(0, 4).join("、")}</Typography.Text>}
+                      {item.reason && <Typography.Text type="secondary" style={{ fontSize: 10.5, marginLeft: 7 }}>{item.reason}</Typography.Text>}
+                    </div>
+                  </div>
+                  <Flex gap={6}>
+                    <Button size="small" type="primary" icon={<Check size={13} />} loading={reviewing === `accept:${item.id}`} onClick={() => onReview(item, "accept")}>确认</Button>
+                    <Button size="small" danger icon={<X size={13} />} loading={reviewing === `reject:${item.id}`} onClick={() => onReview(item, "reject")}>忽略</Button>
+                  </Flex>
+                </Flex>
               </div>
-              <Flex gap={6}>
-                <Button size="small" type="primary" icon={<Check size={13} />} loading={reviewing === `accept:${item.id}`} onClick={() => onReview(item, "accept")}>确认</Button>
-                <Button size="small" danger icon={<X size={13} />} loading={reviewing === `reject:${item.id}`} onClick={() => onReview(item, "reject")}>忽略</Button>
-              </Flex>
-            </Flex>
-          </div>
-        ))}
-      </Space>
-    </Card>
+            ))}
+          </Space>
+        ),
+      }]}
+      style={{
+        maxWidth: 1180, margin: "0 auto 12px", background: "#fff",
+        border: "1px solid #E0DCD5", borderRadius: 12, padding: "4px 14px",
+      }}
+    />
   );
 }
 

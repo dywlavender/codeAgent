@@ -47,6 +47,22 @@ chmod +x start-mac.sh
 
 根目录存在 `project.config.json` 时会自动使用，不需要额外传 `--project-config`。启动器会准备 Python 环境、同步 Git 仓库、增量索引代码、构建前端并启动工作台。
 
+### Windows / Linux 离线部署
+
+应用通过压缩包交付、部署机可以访问 Python 包源和内网 Git 时，可生成 Windows/Linux 部署包：
+
+```bash
+# Linux / macOS
+./build-offline.sh
+```
+
+```bat
+rem Windows
+build-offline.bat
+```
+
+一次执行会同时生成 Windows 和 Linux 两个 ZIP，且默认不绑定业务项目。目标机解压后复制 `project.config.example.json` 为 `project.config.json`，填写当前环境的内网 Git 地址，再运行 `start-offline-linux.sh` 或 `start-offline-windows.bat`。完整说明见 [Windows / Linux 离线部署方案](docs/offline-deployment.md)。
+
 ## 项目配置
 
 复制示例：
