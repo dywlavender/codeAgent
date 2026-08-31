@@ -65,7 +65,12 @@ class BusinessCodeQueryAgent:
             """Search requirement digests without loading original chunks."""
             return self.retriever.tools.requirement.search_requirements(query)[:8]
 
-        return [search_code_facts, search_business_knowledge, search_requirements]
+        @tool
+        def follow_integration_edge(symbol_id: str) -> list[dict]:
+            """Follow verified HTTP/RPC edges from one indexed symbol."""
+            return self.retriever.tools.code.follow_integration_flow(symbol_id)[:24]
+
+        return [search_code_facts, search_business_knowledge, search_requirements, follow_integration_edge]
 
     def run(self, question: str, *, history=()) -> dict:
         run_id = stable_id("QRUN", question, datetime.now(timezone.utc).isoformat())
@@ -180,7 +185,11 @@ class BusinessCodeQueryAgent:
 
     @staticmethod
     def _apply_candidates(state, result):
-        state.code_candidates = _merge_candidates(state.code_candidates, result.get("code_candidates", []), "symbol_id", "symbolId", "target_id", "targetId", "id")
+        state.code_candidates = _merge_candidates(
+            state.code_candidates, result.get("code_candidates", []),
+            "evidence_id", "evidenceId", "edge_id", "edgeId",
+            "symbol_id", "symbolId", "target_id", "targetId", "id",
+        )
         state.business_candidates = _merge_candidates(state.business_candidates, result.get("business_candidates", []), "id", "knowledge_id")
         state.requirement_candidates = _merge_candidates(state.requirement_candidates, result.get("requirement_candidates", []), "id", "requirement_id")
 
@@ -217,10 +226,41 @@ class BusinessCodeQueryAgent:
             getattr(state, f"{source.value.lower()}_evidence").append(ref)
             if source is SourceType.BUSINESS:
                 self._append_supporting_evidence(state, item)
-            fact = self._fact(item, ref, state, code_candidates, requirement_candidates)
+            fact = self._fact(
+                item, ref, state, code_candidates, state.business_candidates,
+                requirement_candidates,
+            )
             if fact:
                 facts.append(fact)
+        facts.extend(self._integration_facts(raw, code_candidates))
         state.known_facts = _dedupe_facts(facts)
+
+    @staticmethod
+    def _integration_facts(raw, candidates):
+        loaded_ids = {str(item.get("evidenceId") or "") for item in raw}
+        edges: dict[str, dict] = {}
+        for candidate in candidates:
+            edge_id = str(candidate.get("edge_id") or candidate.get("edgeId") or "")
+            if edge_id and str(candidate.get("status") or "").upper() == "VERIFIED":
+                edges.setdefault(edge_id, candidate)
+        facts = []
+        for candidate in edges.values():
+            evidence_ids = [str(item) for item in candidate.get("required_evidence_ids", []) if item]
+            if not evidence_ids or not set(evidence_ids) <= loaded_ids:
+                continue
+            source_app = str(candidate.get("source_application_name") or candidate.get("source_application_id") or "source")
+            target_app = str(candidate.get("target_application_name") or candidate.get("target_application_id") or "target")
+            source_symbol = str(candidate.get("source_qualified_name") or candidate.get("source_symbol_id") or "")
+            target_symbol = str(candidate.get("target_qualified_name") or candidate.get("target_symbol_id") or "")
+            protocol = str(candidate.get("protocol") or candidate.get("edge_type") or "INTEGRATION")
+            key = str(candidate.get("edge_key") or "")
+            statement = f"{source_app} 的 {source_symbol} 通过 {protocol} {key} 调用 {target_app} 的 {target_symbol}"
+            facts.append(StructuredFact(
+                statement, SourceType.CODE, evidence_ids, EvidenceRole.PROCESS_LINK,
+                source_app, str(candidate.get("edge_type") or protocol), target_app,
+                f"{source_app}→{target_app}", "VERIFIED",
+            ))
+        return facts
 
     @staticmethod
     def _append_supporting_evidence(state, item):
@@ -247,7 +287,7 @@ class BusinessCodeQueryAgent:
             if not any(existing.evidence_id == ref.evidence_id for existing in collection):
                 collection.append(ref)
 
-    def _fact(self, item, ref, state, code_candidates, requirement_candidates):
+    def _fact(self, item, ref, state, code_candidates, business_candidates, requirement_candidates):
         if str(item.get("status", "")).upper() in {"STALE", "CONFLICT", "REJECTED", "SUGGESTED"}:
             return None
         if state.field_hints and ref.source_type is not SourceType.CODE:
@@ -257,25 +297,55 @@ class BusinessCodeQueryAgent:
         if ref.source_type is SourceType.CODE:
             candidate = next((row for row in code_candidates if _candidate_matches(row, item)), {})
             fact_type = str(candidate.get("fact_type") or candidate.get("factType") or item.get("relationType") or "")
+            # Declarations prove local technical edges, but are not useful
+            # standalone answer claims. Rendering every declaration also lets a
+            # search hit masquerade as observed runtime behaviour.
+            if fact_type == "CODE_DECLARATION":
+                return None
             field = str(candidate.get("subject") or (state.field_hints[0] if state.field_hints else "数据"))
             symbol = str(candidate.get("qualified_name") or candidate.get("qualifiedName") or item["sourceId"])
+            application = str(candidate.get("application_name") or candidate.get("applicationName") or "")
+            owner = f"{application} 的 {symbol}" if application else symbol
+            if fact_type == "HTTP_CALL":
+                return StructuredFact(
+                    f"{owner} 发起 HTTP {field}", SourceType.CODE, [ref.evidence_id],
+                    EvidenceRole.BEHAVIOR, application or symbol, fact_type, field, ref.process,
+                )
+            if fact_type == "HTTP_ENDPOINT":
+                return StructuredFact(
+                    f"{owner} 暴露 HTTP {field}", SourceType.CODE, [ref.evidence_id],
+                    EvidenceRole.BEHAVIOR, application or symbol, fact_type, field, ref.process,
+                )
+            if fact_type == "RPC_CALL":
+                return StructuredFact(
+                    f"{owner} 声明 RPC 调用 {field}", SourceType.CODE, [ref.evidence_id],
+                    EvidenceRole.BEHAVIOR, application or symbol, fact_type, field, ref.process,
+                )
+            if fact_type == "UI_EVENT":
+                return StructuredFact(
+                    f"{owner} 通过 {field} 触发交互", SourceType.CODE, [ref.evidence_id],
+                    EvidenceRole.BEHAVIOR, application or symbol, fact_type, field, ref.process,
+                )
             verb = "写入/生成" if "WRITE" in fact_type else "校验" if "CHECK" in fact_type else "读取/使用" if "READ" in fact_type else "执行"
             strategy = _strategy(item.get("content", ""))
             comparable = strategy in {"SNAPSHOT", "REALTIME"}
             relation = "DATA_STRATEGY" if comparable else (fact_type or "CODE_BEHAVIOR")
             fact_role = EvidenceRole.BEHAVIOR if state.intent.value == "RULE_REASON" else ref.role
-            return StructuredFact(f"{symbol} {verb} {field}", SourceType.CODE, [ref.evidence_id], fact_role, field, relation, strategy, ref.process)
+            return StructuredFact(f"{owner} {verb} {field}", SourceType.CODE, [ref.evidence_id], fact_role, field, relation, strategy, ref.process)
         if ref.source_type is SourceType.BUSINESS:
             statement = " ".join(str(item.get("content", "")).split())[:500]
             field = state.field_hints[0] if state.field_hints else (state.business_objects[0] if state.business_objects else "业务关系")
             strategy = _strategy(statement)
             relation = "DATA_STRATEGY" if strategy in {"SNAPSHOT", "REALTIME"} else "BUSINESS_RULE"
+            candidate = next((row for row in business_candidates if _candidate_matches(row, item)), {})
+            knowledge_type = str(candidate.get("knowledge_type") or "").upper()
+            role = EvidenceRole.PROCESS_LINK if knowledge_type in {"FLOW", "RELATION"} or len(state.processes) >= 2 else EvidenceRole.RULE
             # The human statement is proven by its own source excerpt. Mapping
             # evidence remains separately available for code navigation; tying
             # every mapping candidate to the business fact would incorrectly
             # make the business fact disappear when one code hint is stale.
             evidence_ids = [ref.evidence_id]
-            return StructuredFact(statement, SourceType.BUSINESS, evidence_ids, EvidenceRole.PROCESS_LINK if len(state.processes) >= 2 else EvidenceRole.RULE, field, relation, strategy if relation == "DATA_STRATEGY" else "", "")
+            return StructuredFact(statement, SourceType.BUSINESS, evidence_ids, role, field, relation, strategy if relation == "DATA_STRATEGY" else "", "")
         statement = self._requirement_rule(item, requirement_candidates)
         field = state.field_hints[0] if state.field_hints else (state.business_objects[0] if state.business_objects else "规则")
         strategy = _strategy(statement)

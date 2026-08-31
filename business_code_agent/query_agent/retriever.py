@@ -138,6 +138,20 @@ class QueryRetriever:
             candidates["code"].extend({**row, "symbolId": symbol_id} for row in _strip_raw(rows))
             calls.append(_call("get_symbol_relations", {"symbolId": symbol_id}, rows, "CODE"))
             plan.append({"priority": 2, "strategy": "SYMBOL_RELATION", "target": symbol_id})
+            edge_rows = self.tools.code.follow_integration_flow(symbol_id)
+            candidates["code"].extend(_strip_raw(edge_rows))
+            calls.append(_call("follow_integration_flow", {"symbolId": symbol_id}, edge_rows, "CODE"))
+            if edge_rows:
+                plan.append({"priority": 2, "strategy": "FOLLOW_INTEGRATION_EDGE", "target": symbol_id})
+            local_targets = self.tools.code.resolve_local_calls(symbol_id)
+            candidates["code"].extend(_strip_raw(local_targets))
+            calls.append(_call("resolve_local_calls", {"symbolId": symbol_id}, local_targets, "CODE"))
+            for target in local_targets:
+                target_edges = self.tools.code.follow_integration_flow(target["id"])
+                candidates["code"].extend(_strip_raw(target_edges))
+                calls.append(_call("follow_integration_flow", {"symbolId": target["id"]}, target_edges, "CODE"))
+                if target_edges:
+                    plan.append({"priority": 2, "strategy": "FOLLOW_INTEGRATION_EDGE", "target": target["id"]})
 
         # 3. Confirmed/derived Business relations.
         for knowledge_id in sorted(businesses)[: self.candidate_limit]:
@@ -181,7 +195,7 @@ class QueryRetriever:
 
         return {
             "plan": plan,
-            "code_candidates": _dedupe(candidates["code"], "symbolId", "symbol_id", "id", "target_id"),
+            "code_candidates": _dedupe(candidates["code"], "evidence_id", "evidenceId", "symbolId", "symbol_id", "id", "target_id"),
             "business_candidates": _dedupe(candidates["business"], "id", "knowledge_id"),
             "requirement_candidates": _dedupe(candidates["requirement"], "id", "requirement_id"),
             "tool_calls": calls,
@@ -321,10 +335,18 @@ def _dedupe(items: list[dict], *keys: str) -> list[dict]:
     for index, item in enumerate(items):
         identity = next((str(item[key]) for key in keys if item.get(key) is not None), None)
         identity = identity or repr(sorted(item.items()))
-        unique.setdefault(identity, item)
+        if identity not in unique or _item_richness(item) > _item_richness(unique[identity]):
+            unique[identity] = item
         if len(unique) >= 100:
             break
     return list(unique.values())
+
+
+def _item_richness(item: dict) -> int:
+    return sum(
+        2 if isinstance(value, (list, tuple, set, dict)) and value else 1
+        for value in item.values() if value not in (None, "", [], {})
+    )
 
 
 def _get(value: Any, *names: str, default=None):

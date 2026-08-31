@@ -229,6 +229,7 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
   const conflictList = Array.isArray(answer.conflicts) ? answer.conflicts : [];
   const unknownList = Array.isArray(answer.unknowns) ? answer.unknowns : [];
   const flowList = Array.isArray(answer.businessFlow) ? answer.businessFlow : [];
+  const technicalFlowList = Array.isArray(answer.technicalFlow) ? answer.technicalFlow : [];
   const inferenceList = Array.isArray(answer.inferences) ? answer.inferences : [];
   const evidenceById = useMemo(() => {
     const map = {};
@@ -305,6 +306,18 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
           />
         ) : <EmptyText text="现有证据未形成可确认的完整业务链路。" />}
       </DocSection>
+
+      {technicalFlowList.length > 0 && (
+        <DocSection label="技术调用链">
+          <Timeline
+            items={technicalFlowList.map((item, index) => ({
+              color: "blue",
+              children: <span style={{ lineHeight: 1.75 }}>{humanize(item.statement || item.step || String(item))}</span>,
+              key: index,
+            }))}
+          />
+        </DocSection>
+      )}
 
       <DocSection label={`已确认事实${allFacts.length ? ` · ${allFacts.length}` : ""}`}>
         {allFacts.length ? allFacts.map((fact, index) => (
@@ -402,6 +415,7 @@ function CompareView({ result, evidenceById, setDrawerEv, humanize }) {
   const grouped = groupEvidence(result && result.evidence);
   const answer = (result && result.answer) || {};
   const flowList = Array.isArray(answer.businessFlow) ? answer.businessFlow : [];
+  const technicalFlowList = Array.isArray(answer.technicalFlow) ? answer.technicalFlow : [];
   return (
     <Card size="small" styles={{ body: { padding: "14px 18px" } }} title={<Typography.Text strong style={{ fontSize: 13 }}>结论与链路（引用已对齐到证据卡片）</Typography.Text>}>
       <Typography.Paragraph style={{ fontSize: 14, lineHeight: 1.85 }}>{humanize(answer.conclusion)}</Typography.Paragraph>
@@ -409,6 +423,12 @@ function CompareView({ result, evidenceById, setDrawerEv, humanize }) {
         <Timeline
           style={{ marginTop: 8 }}
           items={flowList.map((item, index) => ({ color: "green", children: item.statement || item.step || String(item), key: index }))}
+        />
+      )}
+      {technicalFlowList.length > 0 && (
+        <Timeline
+          style={{ marginTop: 8 }}
+          items={technicalFlowList.map((item, index) => ({ color: "blue", children: humanize(item.statement || item.step || String(item)), key: `technical-${index}` }))}
         />
       )}
       {[["CODE", "代码证据"], ["BUSINESS", "业务知识"], ["REQUIREMENT", "需求依据"]].map(([type, label]) => (

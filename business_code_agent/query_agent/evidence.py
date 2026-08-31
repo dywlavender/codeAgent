@@ -15,7 +15,7 @@ from ..util import digest, stable_id
 class EvidenceBudget:
     """Hard limits for the raw material retained by one query run."""
 
-    max_code_evidence: int = 12
+    max_code_evidence: int = 24
     max_requirement_evidence: int = 6
     max_business_knowledge: int = 10
     max_source_chars: int = 80_000
@@ -293,14 +293,14 @@ def evidence_key(item: dict) -> tuple:
     """Stable M4 deduplication key, including commit/requirement versions."""
     location = item.get("location") or {}
     return (
-        item.get("sourceType"), item.get("sourceId"), item.get("sourceVersion"),
+        item.get("sourceType"), item.get("sourceId"), item.get("sourceVersion"), item.get("evidenceId"),
         json.dumps(location, ensure_ascii=False, sort_keys=True, default=str),
     )
 
 
 def _priority(item: dict) -> int:
     status = str(item.get("status") or "").upper()
-    if status == "CONFIRMED":
+    if status in {"CONFIRMED", "VERIFIED"}:
         return 0
     if item.get("sourceType") in {"CODE", "REQUIREMENT"} and status in {"", "DIRECT", "ACTIVE"}:
         return 1

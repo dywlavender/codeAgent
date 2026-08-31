@@ -175,6 +175,11 @@ class QueryService:
                 "symbol": code_fact["qualified_name"] if code_fact else None,
                 "relationType": code_fact["fact_type"] if code_fact else None,
             })
+        values.sort(key=lambda item: (
+            {"CODE": 0, "BUSINESS": 1, "REQUIREMENT": 2}.get(item["sourceType"], 3),
+            int(item["location"].get("endLine") or 0) - int(item["location"].get("startLine") or 0),
+            item["evidenceId"],
+        ))
         return values
 
     def list_runs(self, limit: int = 30) -> list[dict]:
@@ -194,9 +199,18 @@ class QueryService:
             "id": row["id"], "displayName": Path(row["root_path"]).name,
             "indexedAt": row["indexed_at"], "revision": None,
         } for row in raw_repositories]
+        applications = [dict(row) for row in self.db.execute(
+            """SELECT a.id,a.name,a.repository_id repositoryId,a.source_root sourceRoot,
+                      a.app_type type,a.language,a.framework,a.status,
+                      s.id systemId,s.name systemName
+                 FROM application a
+                 LEFT JOIN software_system s ON s.id=a.system_id
+                ORDER BY s.name,a.name"""
+        )]
         return {
             "project": repositories[0]["id"] if repositories else "未索引项目",
             "repositories": repositories,
+            "applications": applications,
             "counts": {
                 "symbols": self.db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
                 "facts": self.db.execute("SELECT count(*) FROM code_fact").fetchone()[0],
@@ -217,5 +231,9 @@ class QueryService:
                 ).fetchone()[0],
                 "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
                 "runs": self.db.execute("SELECT count(*) FROM query_agent_run").fetchone()[0],
+                "applications": len(applications),
+                "integrationEdges": self.db.execute(
+                    "SELECT count(*) FROM cross_application_edge WHERE status='VERIFIED'"
+                ).fetchone()[0],
             },
         }

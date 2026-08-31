@@ -9,9 +9,25 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS repository (
   id TEXT PRIMARY KEY, root_path TEXT NOT NULL, indexed_at TEXT NOT NULL
 );
+-- Deployment topology is deliberately separate from business_entity(SYSTEM).
+-- It describes where code runs, not what the business means.
+CREATE TABLE IF NOT EXISTS software_system (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE'
+);
+CREATE TABLE IF NOT EXISTS application (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, system_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL, source_root TEXT NOT NULL DEFAULT '.',
+  app_type TEXT NOT NULL, language TEXT NOT NULL DEFAULT '',
+  framework TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ACTIVE',
+  UNIQUE(repository_id, source_root)
+);
 CREATE TABLE IF NOT EXISTS code_file (
   id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, path TEXT NOT NULL,
   content_hash TEXT NOT NULL, UNIQUE(repository_id, path)
+);
+CREATE TABLE IF NOT EXISTS application_code_file (
+  application_id TEXT NOT NULL, file_id TEXT NOT NULL,
+  PRIMARY KEY(application_id, file_id)
 );
 CREATE TABLE IF NOT EXISTS code_symbol (
   id TEXT PRIMARY KEY, file_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -32,6 +48,23 @@ CREATE TABLE IF NOT EXISTS code_fact (
   subject TEXT NOT NULL, target TEXT NOT NULL, evidence_id TEXT NOT NULL,
   UNIQUE(symbol_id, fact_type, subject, target, evidence_id)
 );
+CREATE TABLE IF NOT EXISTS cross_application_edge (
+  id TEXT PRIMARY KEY, source_application_id TEXT NOT NULL,
+  source_symbol_id TEXT NOT NULL, edge_type TEXT NOT NULL,
+  target_application_id TEXT NOT NULL, target_symbol_id TEXT NOT NULL,
+  protocol TEXT NOT NULL, edge_key TEXT NOT NULL,
+  status TEXT NOT NULL, confidence REAL NOT NULL,
+  evidence_ids_json TEXT NOT NULL DEFAULT '[]', resolved_at TEXT NOT NULL,
+  UNIQUE(source_symbol_id, edge_type, target_symbol_id, edge_key)
+);
+CREATE INDEX IF NOT EXISTS idx_application_repository
+  ON application(repository_id, source_root);
+CREATE INDEX IF NOT EXISTS idx_application_file
+  ON application_code_file(file_id, application_id);
+CREATE INDEX IF NOT EXISTS idx_cross_edge_source
+  ON cross_application_edge(source_symbol_id, status);
+CREATE INDEX IF NOT EXISTS idx_cross_edge_target
+  ON cross_application_edge(target_symbol_id, status);
 CREATE TABLE IF NOT EXISTS ingestion_change (
   id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, file_path TEXT NOT NULL,
   change_type TEXT NOT NULL, previous_hash TEXT, current_hash TEXT,

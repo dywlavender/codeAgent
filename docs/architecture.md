@@ -7,7 +7,7 @@
 - 用户端由 Query Agent 解答问题，只读取业务知识、代码事实、需求证据和 Mapping；
 - 管理端导入人工业务基线、检查结构化知识和代码 Mapping。
 
-当前实现覆盖 MVP1 和 MVP2：人工业务基线、结构化知识、代码映射、业务驱动问答，以及从充分问答证据中观察新的 Business-Code Mapping。问答观察不会自动改写人工业务语义。
+当前实现覆盖 MVP1、MVP2 和 MVP2.5：人工业务基线、结构化知识、代码映射、业务驱动问答、从充分问答证据中观察新的 Business-Code Mapping，以及 Vue H5 到多个 Spring 应用的技术调用链。问答观察不会自动改写人工业务语义。
 
 ## 三层知识
 
@@ -36,7 +36,25 @@ Repository / File / Class / Method / API / Job / Table / Field
 
 ### Code Knowledge
 
-代码事实由 Java/MyBatis 索引器确定性产生，包括 Symbol、调用、字段读写与校验、表和列访问。业务模型与代码模型不共用实体。
+代码事实由索引器确定性产生。Java/MyBatis 覆盖 Symbol、Spring Endpoint、Feign、调用、字段读写与校验、表和列访问；Vue/TS/JS 覆盖 Page/Component、Function、Route、UI Event 和 HTTP Call。业务模型与代码模型不共用实体。
+
+### 技术拓扑与跨应用边
+
+```text
+Software System
+  └─ Application (FRONTEND / BACKEND / JOB / GATEWAY)
+       └─ Repository + Source Root
+```
+
+`software_system` 和 `application` 是部署/代码归属，不等于人工业务知识中的 `SYSTEM`。`application_code_file` 把索引文件归属到最长匹配的 `sourceRoot`。
+
+跨应用关系保存在 `cross_application_edge`。当前只建立有直接代码 Evidence 的边：
+
+- 前端 `HTTP_CALL` 与 Spring `HTTP_ENDPOINT` 按 HTTP Method + 规范化 Path 唯一匹配；
+- Feign `RPC_SERVICE` + `RPC_CALL` 与目标应用及 Spring Endpoint 唯一匹配；
+- 同一应用内的 UI Handler 和普通方法调用只在目标方法名唯一时形成局部技术边。
+
+唯一匹配为 `VERIFIED`，多个目标为 `CANDIDATE`，没有证据不会创建边。每条已验证边保留调用端、接收端以及类级前缀/服务名所需的全部 Evidence ID。
 
 ### Business-Code Mapping
 
@@ -104,6 +122,13 @@ business_code_mapping (VERIFIED, QUERY_REVIEW)
 - `evidence`
 - `evidence_lifecycle`
 
+技术拓扑侧：
+
+- `software_system`
+- `application`
+- `application_code_file`
+- `cross_application_edge`
+
 历史 `functional_*` 表暂时保留兼容读取，不再作为新业务基线的主模型。
 
 ## Query Agent
@@ -116,8 +141,11 @@ Query Agent 的检索顺序是：
 → 从业务实体与关系取得 Mapping
 → 优先检查映射到的代码 Symbol
 → 证据不足时扩大字段、表和调用关系检索
+→ 命中 UI/HTTP/RPC Symbol 时执行 FOLLOW_INTEGRATION_EDGE
 → 输出事实、推断、冲突和未知项
 ```
+
+回答中的 `businessFlow` 只承载人工业务基线支持的流程；`technicalFlow` 只承载代码证据支持的 UI、HTTP、普通调用和 Feign 链路。二者不相互冒充。
 
 业务知识负责缩小代码调查空间，不能替代代码证据。`CANDIDATE` Mapping 只能作为搜索线索，不能直接成为回答中的已确认事实。
 
@@ -139,7 +167,8 @@ Query Agent 的检索顺序是：
 
 ## 当前限制
 
-- 代码索引以 Java 和 MyBatis 为主；
+- Web 索引采用保守静态模式，动态拼接 URL、运行时路由和依赖注入歧义不会强行连边；
+- 当前跨应用协议只覆盖 HTTP 和 Feign。MQ 与 Job 触发链留到后续阶段；
 - 无模型时的业务结构化是保守能力，不等价于完整语义理解；
 - MVP2 只把充分证据下的 Business-Code 关联写入候选观察，不自动把每次问答写回业务知识；
 - 第一阶段不根据 Git 变化自动修改业务语义，只允许重建 Mapping；

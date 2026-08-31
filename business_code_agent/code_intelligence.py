@@ -92,7 +92,21 @@ class JavaIndexer:
         relative = str(path.relative_to(root))
         file_id = stable_id("CF", repository_id, relative)
         old = self.db.execute("SELECT content_hash FROM code_file WHERE id=?", (file_id,)).fetchone()
-        if old and old[0] == digest(content):
+        integration_source = bool(re.search(r"@(FeignClient|(?:Get|Post|Put|Delete|Patch|Request)Mapping)\b", content))
+        integration_indexed = self.db.execute(
+            """SELECT 1 FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
+                 WHERE s.file_id=? AND f.fact_type IN ('HTTP_BASE_PATH','HTTP_ENDPOINT','RPC_SERVICE','RPC_CALL') LIMIT 1""",
+            (file_id,),
+        ).fetchone()
+        declarations_indexed = self.db.execute(
+            """SELECT 1 FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
+                 WHERE s.file_id=? AND f.fact_type='CODE_DECLARATION' LIMIT 1""",
+            (file_id,),
+        ).fetchone()
+        declaration_expected = self.syntax_backend is not None or any(
+            METHOD_RE.match(line) for line in content.splitlines()
+        )
+        if old and old[0] == digest(content) and (not declaration_expected or declarations_indexed) and (not integration_source or integration_indexed):
             return {"files": 0, "symbols": 0, "facts": 0}
         if old:
             self._archive_file_evidence(file_id, "SOURCE_MODIFIED", relative)
@@ -108,7 +122,9 @@ class JavaIndexer:
                 (file_id, int(tree.root_node.has_error), tree.root_node.type, datetime.now(timezone.utc).isoformat()),
             )
             if not tree.root_node.has_error:
-                return self._index_tree(file_id, relative, content, tree.root_node)
+                result = self._index_tree(file_id, relative, content, tree.root_node)
+                result["facts"] += self._index_spring_integrations(file_id, relative, content)
+                return result
         else:
             self.db.execute(
                 "INSERT OR REPLACE INTO parse_diagnostic VALUES (?, 'conservative-pattern', 0, 'unknown', ?)",
@@ -141,9 +157,11 @@ class JavaIndexer:
                 sid = stable_id("SYM", file_id, qualified, str(number))
                 symbol_kind = "API" if pending_api_annotation or re.search(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\b", line) else "METHOD"
                 self._symbol(sid, file_id, symbol_kind, qualified, method, number, len(lines))
+                self._fact((sid, qualified), "CODE_DECLARATION", "METHOD", qualified, file_id, relative, number, line)
                 current_symbol = (sid, qualified)
                 method_depth = brace_depth
                 symbols += 1
+                facts += 1
                 pending_api_annotation = False
             elif re.search(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\b", line):
                 pending_api_annotation = True
@@ -176,7 +194,83 @@ class JavaIndexer:
             if current_symbol and brace_depth <= method_depth:
                 self.db.execute("UPDATE code_symbol SET line_end=? WHERE id=?", (number, current_symbol[0]))
                 current_symbol = None
+        facts += self._index_spring_integrations(file_id, relative, content)
         return {"files": 1, "symbols": symbols, "facts": facts}
+
+    def _index_spring_integrations(self, file_id: str, relative: str, content: str) -> int:
+        """Extract Spring endpoints and Feign calls without merging their evidence."""
+        type_match = re.search(r"\b(class|interface)\s+([A-Za-z_$][\w$]*)", content)
+        if not type_match:
+            return 0
+        class_row = self.db.execute(
+            """SELECT id,qualified_name,line_start FROM code_symbol
+                 WHERE file_id=? AND kind IN ('CLASS','INTERFACE')
+                 ORDER BY line_start LIMIT 1""",
+            (file_id,),
+        ).fetchone()
+        if not class_row:
+            return 0
+        before_type = content[:type_match.start()]
+        feign_matches = list(re.finditer(r"@FeignClient\s*\((.*?)\)", before_type, re.DOTALL))
+        controller = bool(re.search(r"@(RestController|Controller)\b", before_type))
+        facts = 0
+        if feign_matches:
+            annotation = feign_matches[-1]
+            service = _annotation_string(annotation.group(1), keys=("name", "value"))
+            if service:
+                line = _line_number(content, annotation.start())
+                self._fact(
+                    (class_row["id"], class_row["qualified_name"]), "RPC_SERVICE", service, service,
+                    file_id, relative, line, annotation.group(0),
+                    end_line=_line_number(content, annotation.end()),
+                )
+                facts += 1
+
+        class_mappings = list(re.finditer(r"@RequestMapping\s*\((.*?)\)", before_type, re.DOTALL))
+        if class_mappings:
+            annotation = class_mappings[-1]
+            base_path = _annotation_string(annotation.group(1), keys=("path", "value"))
+            if base_path:
+                line = _line_number(content, annotation.start())
+                self._fact(
+                    (class_row["id"], class_row["qualified_name"]), "HTTP_BASE_PATH", "ANY", _normalize_http_path(base_path),
+                    file_id, relative, line, annotation.group(0),
+                    end_line=_line_number(content, annotation.end()),
+                )
+                facts += 1
+
+        mapping_re = re.compile(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\s*(?:\((.*?)\))?", re.DOTALL)
+        method_rows = self.db.execute(
+            """SELECT id,qualified_name,line_start FROM code_symbol
+                 WHERE file_id=? AND kind IN ('API','METHOD') ORDER BY line_start""",
+            (file_id,),
+        ).fetchall()
+        for annotation in mapping_re.finditer(content):
+            if annotation.start() < type_match.start():
+                continue
+            annotation_line = _line_number(content, annotation.start())
+            method_row = next(
+                (row for row in method_rows if annotation_line <= row["line_start"] <= annotation_line + 20),
+                None,
+            )
+            if not method_row:
+                continue
+            method = annotation.group(1).upper()
+            arguments = annotation.group(2) or ""
+            if method == "REQUEST":
+                request_method = re.search(r"RequestMethod\.([A-Z]+)", arguments)
+                method = request_method.group(1) if request_method else "ANY"
+            path = _annotation_string(arguments, keys=("path", "value")) or "/"
+            fact_type = "RPC_CALL" if feign_matches else "HTTP_ENDPOINT" if controller else ""
+            if not fact_type:
+                continue
+            self._fact(
+                (method_row["id"], method_row["qualified_name"]), fact_type, method, _normalize_http_path(path),
+                file_id, relative, annotation_line, annotation.group(0),
+                end_line=_line_number(content, annotation.end()),
+            )
+            facts += 1
+        return facts
 
     def _index_tree(self, file_id: str, relative: str, content: str, root_node) -> dict[str, int]:
         source = content.encode("utf-8")
@@ -219,6 +313,12 @@ class JavaIndexer:
                     symbol_kind = "API" if re.search(r"@(Get|Post|Put|Delete|Patch|Request)Mapping\b", method_source) else "METHOD"
                     self._symbol(method_id, file_id, symbol_kind, qualified, method_name, method_start, method_end)
                     symbols += 1
+                    declaration = content.splitlines()[method_start - 1].strip()
+                    self._fact(
+                        (method_id, qualified), "CODE_DECLARATION", "METHOD", qualified,
+                        file_id, relative, method_start, declaration,
+                    )
+                    facts += 1
                     for invocation, ancestors in self._invocations(child):
                         name_part = invocation.child_by_field_name("name")
                         if not name_part:
@@ -428,3 +528,21 @@ class JavaIndexer:
         )
         fact_id = stable_id("FACT", symbol[0], kind, subject, target, evidence_id)
         self.db.execute("INSERT OR IGNORE INTO code_fact VALUES (?, ?, ?, ?, ?, ?)", (fact_id, symbol[0], kind, subject, target, evidence_id))
+
+
+def _line_number(content: str, offset: int) -> int:
+    return content.count("\n", 0, offset) + 1
+
+
+def _annotation_string(arguments: str, *, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        match = re.search(rf"\b{key}\s*=\s*(?:\{{\s*)?[\"']([^\"']+)[\"']", arguments)
+        if match:
+            return match.group(1)
+    direct = re.search(r"(?:^|,)\s*(?:\{\s*)?[\"']([^\"']+)[\"']", arguments)
+    return direct.group(1) if direct else ""
+
+
+def _normalize_http_path(value: str) -> str:
+    path = value.strip().split("?", 1)[0]
+    return "/" + path.strip("/") if path.strip("/") else "/"

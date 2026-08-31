@@ -4,7 +4,7 @@ import json
 import re
 from sqlite3 import Connection
 
-from .util import digest, tokens
+from .util import digest, stable_id, tokens
 
 
 class EvidenceTools:
@@ -85,8 +85,15 @@ class EvidenceTools:
     def search_symbol(self, query: str) -> list[dict]:
         pattern = f"%{query.lower()}%"
         return [dict(row) for row in self.db.execute(
-            "SELECT id, kind, qualified_name, line_start, line_end FROM code_symbol WHERE lower(qualified_name) LIKE ? ORDER BY qualified_name",
-            (pattern,),
+            """SELECT cs.id,cs.kind,cs.qualified_name,cs.line_start,cs.line_end,
+                      a.id application_id,a.name application_name,ss.name system_name
+                 FROM code_symbol cs
+                 LEFT JOIN application_code_file acf ON acf.file_id=cs.file_id
+                 LEFT JOIN application a ON a.id=acf.application_id
+                 LEFT JOIN software_system ss ON ss.id=a.system_id
+                WHERE lower(cs.qualified_name) LIKE ? OR lower(a.name) LIKE ?
+                ORDER BY cs.qualified_name""",
+            (pattern, pattern),
         )]
 
     def search_code(self, query: str, limit: int = 50) -> list[dict]:
@@ -94,13 +101,22 @@ class EvidenceTools:
         terms = [term.lower() for term in tokens(query)]
         rows = self.db.execute(
             """SELECT cs.id, cs.kind, cs.qualified_name,
-                      group_concat(coalesce(cf.fact_type,'') || ':' || coalesce(cf.subject,''), ' ') summary
+                      group_concat(coalesce(cf.fact_type,'') || ':' || coalesce(cf.subject,'') || ':' || coalesce(cf.target,''), ' ') summary,
+                      group_concat(DISTINCT a.id) application_ids,
+                      group_concat(DISTINCT a.name) application_names,
+                      group_concat(DISTINCT ss.name) system_names
                  FROM code_symbol cs LEFT JOIN code_fact cf ON cf.symbol_id=cs.id
+                 LEFT JOIN application_code_file acf ON acf.file_id=cs.file_id
+                 LEFT JOIN application a ON a.id=acf.application_id
+                 LEFT JOIN software_system ss ON ss.id=a.system_id
                 GROUP BY cs.id ORDER BY cs.qualified_name"""
         )
         results = []
         for row in rows:
-            haystack = f"{row['qualified_name']} {row['summary'] or ''}".lower()
+            haystack = " ".join(str(value or "") for value in (
+                row["qualified_name"], row["summary"], row["application_ids"],
+                row["application_names"], row["system_names"],
+            )).lower()
             if any(term in haystack for term in terms):
                 results.append(dict(row))
         return results[:limit]
@@ -127,9 +143,167 @@ class EvidenceTools:
 
     def get_symbol_relations(self, symbol_id: str) -> list[dict]:
         return [dict(row) for row in self.db.execute(
-            "SELECT fact_type, subject, target, evidence_id FROM code_fact WHERE symbol_id=? ORDER BY fact_type, subject",
+            """SELECT f.fact_type,f.subject,f.target,f.evidence_id,s.id symbol_id,
+                      s.qualified_name,a.id application_id,a.name application_name
+                 FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
+                 LEFT JOIN application_code_file acf ON acf.file_id=s.file_id
+                 LEFT JOIN application a ON a.id=acf.application_id
+                WHERE f.symbol_id=? ORDER BY f.fact_type,f.subject""",
             (symbol_id,),
         )]
+
+    def follow_integration_edges(self, symbol_id: str) -> list[dict]:
+        """Return both endpoint facts for verified edges touching a symbol."""
+        edges = self.db.execute(
+            """SELECT e.*,sa.name source_application_name,ta.name target_application_name,
+                      ss.qualified_name source_qualified_name,
+                      ts.qualified_name target_qualified_name
+                 FROM cross_application_edge e
+                 JOIN application sa ON sa.id=e.source_application_id
+                 JOIN application ta ON ta.id=e.target_application_id
+                 JOIN code_symbol ss ON ss.id=e.source_symbol_id
+                 JOIN code_symbol ts ON ts.id=e.target_symbol_id
+                WHERE (e.source_symbol_id=? OR e.target_symbol_id=?) AND e.status='VERIFIED'
+                ORDER BY e.edge_type,e.edge_key""",
+            (symbol_id, symbol_id),
+        ).fetchall()
+        results = []
+        for edge in edges:
+            evidence_ids = json.loads(edge["evidence_ids_json"] or "[]")
+            for evidence_id in evidence_ids:
+                fact = self.db.execute(
+                    """SELECT f.fact_type,f.subject,f.target,s.id symbol_id,s.qualified_name
+                         FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
+                        WHERE f.evidence_id=? LIMIT 1""",
+                    (evidence_id,),
+                ).fetchone()
+                if not fact:
+                    continue
+                results.append({
+                    **dict(fact),
+                    "evidence_id": evidence_id,
+                    "edge_id": edge["id"],
+                    "edge_type": edge["edge_type"],
+                    "edge_key": edge["edge_key"],
+                    "protocol": edge["protocol"],
+                    "status": edge["status"],
+                    "confidence": edge["confidence"],
+                    "source_application_id": edge["source_application_id"],
+                    "source_application_name": edge["source_application_name"],
+                    "source_symbol_id": edge["source_symbol_id"],
+                    "source_qualified_name": edge["source_qualified_name"],
+                    "target_application_id": edge["target_application_id"],
+                    "target_application_name": edge["target_application_name"],
+                    "target_symbol_id": edge["target_symbol_id"],
+                    "target_qualified_name": edge["target_qualified_name"],
+                    "required_evidence_ids": evidence_ids,
+                })
+        return results
+
+    def resolve_local_calls(self, symbol_id: str) -> list[dict]:
+        """Navigate a CALL only when its target name is unique in the application."""
+        calls = self.db.execute(
+            """SELECT fact_type,subject,target,evidence_id FROM code_fact
+                 WHERE symbol_id=? AND fact_type IN ('CALL','UI_EVENT')""",
+            (symbol_id,),
+        ).fetchall()
+        source_rows = self.db.execute(
+            """SELECT s.qualified_name,a.id application_id,a.name application_name
+                 FROM code_symbol s JOIN application_code_file acf ON acf.file_id=s.file_id
+                 JOIN application a ON a.id=acf.application_id WHERE s.id=?""",
+            (symbol_id,),
+        ).fetchall()
+        if not source_rows:
+            return []
+        source = source_rows[0]
+        source_apps = [row["application_id"] for row in source_rows]
+        results = []
+        for call in calls:
+            called_name = call["target"] if call["fact_type"] == "UI_EVENT" else call["subject"]
+            matches = self.db.execute(
+                """SELECT DISTINCT s.id,s.qualified_name,s.kind,a.id application_id,a.name application_name
+                     FROM code_symbol s JOIN application_code_file acf ON acf.file_id=s.file_id
+                     JOIN application a ON a.id=acf.application_id
+                    WHERE acf.application_id IN ({}) AND s.id!=? AND lower(s.name)=lower(?)
+                    ORDER BY s.qualified_name""".format(",".join("?" for _ in source_apps)),
+                (*source_apps, symbol_id, called_name),
+            ).fetchall() if source_apps else []
+            if len(matches) != 1:
+                continue
+            declaration = self.db.execute(
+                """SELECT evidence_id FROM code_fact
+                     WHERE symbol_id=? AND fact_type='CODE_DECLARATION' LIMIT 1""",
+                (matches[0]["id"],),
+            ).fetchone()
+            if not declaration:
+                continue
+            edge_id = stable_id("LEDGE", symbol_id, call["fact_type"], matches[0]["id"])
+            evidence_ids = [call["evidence_id"], declaration["evidence_id"]]
+            results.append({
+                **dict(matches[0]),
+                "navigation": "LOCAL_CALL",
+                "edge_id": edge_id,
+                "edge_type": "UI_EVENT" if call["fact_type"] == "UI_EVENT" else "CALL",
+                "edge_key": call["target"],
+                "protocol": "UI" if call["fact_type"] == "UI_EVENT" else "CALL",
+                "status": "VERIFIED",
+                "confidence": 1.0,
+                "source_application_id": source["application_id"],
+                "source_application_name": source["application_name"],
+                "source_symbol_id": symbol_id,
+                "source_qualified_name": source["qualified_name"],
+                "target_application_id": matches[0]["application_id"],
+                "target_application_name": matches[0]["application_name"],
+                "target_symbol_id": matches[0]["id"],
+                "target_qualified_name": matches[0]["qualified_name"],
+                "required_evidence_ids": evidence_ids,
+                "call_evidence_id": call["evidence_id"],
+                "call_target": call["target"],
+            })
+        return results
+
+    def follow_integration_flow(self, symbol_id: str, max_hops: int = 6) -> list[dict]:
+        """Traverse verified integration edges and unique in-application calls."""
+        queue = [(symbol_id, 0)]
+        visited: set[str] = set()
+        results: list[dict] = []
+        seen_rows: set[tuple[str, str]] = set()
+        while queue:
+            current, depth = queue.pop(0)
+            if current in visited or depth > max_hops:
+                continue
+            visited.add(current)
+            for row in self.follow_integration_edges(current):
+                identity = (str(row.get("edge_id")), str(row.get("evidence_id")))
+                if identity not in seen_rows:
+                    seen_rows.add(identity)
+                    results.append(row)
+                for target in (row.get("source_symbol_id"), row.get("target_symbol_id")):
+                    if target and str(target) not in visited:
+                        queue.append((str(target), depth + 1))
+            for target in self.resolve_local_calls(current):
+                target_id = str(target.get("id") or "")
+                for evidence_id in target.get("required_evidence_ids", []):
+                    fact = self.db.execute(
+                        """SELECT f.fact_type,f.subject,f.target,s.id symbol_id,s.qualified_name
+                             FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
+                            WHERE f.evidence_id=? LIMIT 1""",
+                        (evidence_id,),
+                    ).fetchone()
+                    if not fact:
+                        continue
+                    identity = (str(target["edge_id"]), str(evidence_id))
+                    if identity in seen_rows:
+                        continue
+                    seen_rows.add(identity)
+                    results.append({
+                        **dict(fact),
+                        "evidence_id": evidence_id,
+                        **{key: value for key, value in target.items() if key not in {"id", "qualified_name", "kind"}},
+                    })
+                if target_id and target_id not in visited:
+                    queue.append((target_id, depth + 1))
+        return results
 
     def has_direct_call(self, source_symbol_id: str, target_symbol_id: str) -> bool:
         """Return only a directly indexed CALL edge; absence is scoped to this index."""

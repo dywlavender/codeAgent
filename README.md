@@ -1,6 +1,6 @@
 # Business Code Agent
 
-面向 Java / MyBatis 老项目的 Agent 知识工作台。MVP 用少量自然语言业务基线告诉系统“业务是什么、什么和什么有关”，再把这些知识定向映射到当前代码；问答 Agent 先用业务知识缩小调查范围，最后回到代码和原文证据回答。
+面向多仓库老项目的 Agent 知识工作台。MVP 用少量自然语言业务基线告诉系统“业务是什么、什么和什么有关”，再把这些知识定向映射到当前代码；问答 Agent 先用业务知识缩小调查范围，随后沿 Vue/Java 应用间的 HTTP、Feign 调用继续调查，最后回到代码和原文证据回答。
 
 ## MVP1 + MVP2 已实现的主链路
 
@@ -18,6 +18,8 @@ Query Agent 检索业务知识、映射和代码证据
 MVP2 问答观察：从答案中的业务/代码证据生成 Mapping 候选
   ↓
 管理员确认后写入正式 Mapping
+  ↓
+MVP2.5 多应用调用：H5 UI → HTTP → Spring → Feign → Spring
 ```
 
 三类数据始终分开保存：
@@ -27,6 +29,8 @@ MVP2 问答观察：从答案中的业务/代码证据生成 Mapping 候选
 - Mapping：某条业务知识在代码中对应哪里。
 
 重新索引代码只重建静态 Mapping，不会改写人工业务基线；问答发现的 Mapping 先进入独立观察记录，确认后才进入正式 Mapping。
+
+技术拓扑同样单独保存。`software_system` / `application` 表示部署与代码归属，不会混入人工维护的业务 `SYSTEM` 知识。
 
 ## 一键启动
 
@@ -87,15 +91,33 @@ cp project.config.example.json project.config.json
   "knowledge": {
     "baselineRoot": "knowledge/baseline"
   },
+  "systems": [
+    {"id": "channel", "name": "渠道系统"},
+    {"id": "middle", "name": "贷款中台"}
+  ],
   "repositories": [
     {
-      "id": "loan-core",
-      "gitUrl": "https://github.com/your-company/loan-core.git",
+      "id": "withdraw-h5-repo",
+      "gitUrl": "ssh://git@git.company.local/loan/withdraw-h5.git",
       "branch": "main"
+    }
+  ],
+  "applications": [
+    {
+      "id": "withdraw-h5",
+      "name": "提款 H5",
+      "systemId": "channel",
+      "repositoryId": "withdraw-h5-repo",
+      "sourceRoot": ".",
+      "type": "FRONTEND",
+      "language": "typescript",
+      "framework": "vue"
     }
   ]
 }
 ```
+
+`applications` 可以把一个仓库按 `sourceRoot` 拆成多个应用，也可以让多个仓库归属同一个系统。未配置 `systems/applications` 时保持兼容：每个仓库自动视为一个应用。完整说明与验收示例见 [多应用业务流使用指南](docs/multi-application-flow.md)。
 
 私有仓库使用本机已有的 SSH Key 或 Git 凭据管理器，配置文件不保存账号密码。
 
@@ -242,6 +264,6 @@ cd frontend
 npm run build
 ```
 
-内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线、独立 Mapping 和问答检索链路。
+内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线、独立 Mapping 和问答检索链路；`examples/multi-application-flow` 验证不提供类名时，从 H5 点击事件追踪到中台最终处理方法。
 
 详细技术结构见 [当前架构](docs/architecture.md)。

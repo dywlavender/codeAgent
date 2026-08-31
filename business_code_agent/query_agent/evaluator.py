@@ -75,7 +75,15 @@ class EvidenceSufficiencyEvaluator:
                 gaps.append(_gap("两个流程之间通过什么数据或业务关系连接？", "PROCESS_LINK"))
             code_processes = {item.process for item in evidence if item.source_type is SourceType.CODE and item.process}
             code_processes.update(fact.process for fact in usable_facts if fact.source_type is SourceType.CODE and fact.process)
-            if len(code_processes) < 2:
+            for fact in usable_facts:
+                if fact.source_type is SourceType.CODE and fact.role is EvidenceRole.PROCESS_LINK:
+                    code_processes.update(value for value in (fact.subject, fact.object) if value)
+            has_code_link = any(
+                fact.source_type is SourceType.CODE and fact.role is EvidenceRole.PROCESS_LINK
+                for fact in usable_facts
+            )
+            asks_direct_call = any(term in state.question for term in ("直接 CALL", "直接调用", "同步调用"))
+            if len(code_processes) < 2 or (asks_direct_call and not has_code_link):
                 gaps.append(_gap("两个流程各自的代码端点在哪里？", "CODE_PROCESS_ENDPOINTS"))
 
         # A date/history question needs dated evidence.  A rule statement can
@@ -148,6 +156,9 @@ def _process_names(state: QueryAgentState, evidence, facts: Iterable[StructuredF
     result = set(state.processes)
     result.update(item.process for item in evidence if item.process)
     result.update(fact.process for fact in facts if fact.process)
+    for fact in facts:
+        if fact.role is EvidenceRole.PROCESS_LINK:
+            result.update(value for value in (fact.subject, fact.object) if value)
     return result
 
 

@@ -5,7 +5,7 @@ from typing import Any, Iterable, Mapping
 from .conflicts import ConflictDetector
 
 
-ANSWER_KEYS = ("conclusion", "businessFlow", "facts", "inferences", "unknowns", "conflicts")
+ANSWER_KEYS = ("conclusion", "businessFlow", "technicalFlow", "facts", "inferences", "unknowns", "conflicts")
 
 
 def _get(value: Any, *names: str, default: Any = None) -> Any:
@@ -92,7 +92,8 @@ class AnswerBuilder:
         inferences = self._inferences(_as_list(_get(state, "inferences", default=[])))
         flow = self._business_flow(_as_list(_get(state, "business_flow", "businessFlow", default=[])))
         if not flow:
-            flow = self._flow_from_facts(known)
+            flow = self._flow_from_facts(known, source_type="BUSINESS")
+        technical_flow = self._flow_from_facts(known, source_type="CODE")
 
         if conflicts:
             conclusion = "CONFLICT：当前不同来源的已验证证据存在不一致，不能合并为单一确定结论。"
@@ -106,6 +107,7 @@ class AnswerBuilder:
         return {
             "conclusion": conclusion,
             "businessFlow": flow,
+            "technicalFlow": technical_flow,
             "facts": facts,
             "inferences": inferences,
             "unknowns": unknowns,
@@ -155,10 +157,12 @@ class AnswerBuilder:
         return result
 
     @staticmethod
-    def _flow_from_facts(values: list[Any]) -> list[Any]:
+    def _flow_from_facts(values: list[Any], *, source_type: str) -> list[Any]:
         result = []
         for value in values:
             if str(_get(value, "role", default="")).upper() != "PROCESS_LINK":
+                continue
+            if _source(value) != source_type:
                 continue
             statement, ids = _statement(value), _evidence_ids(value)
             if statement and ids:
@@ -192,6 +196,7 @@ class AnswerRenderer:
     def render(self, answer: Mapping[str, Any]) -> str:
         lines = ["结论", str(answer.get("conclusion", ""))]
         self._section(lines, "业务链路", answer.get("businessFlow", []), self._flow_text)
+        self._section(lines, "技术链路", answer.get("technicalFlow", []), self._flow_text)
         self._section(lines, "确定事实", answer.get("facts", []), self._fact_text)
         self._section(lines, "推断", answer.get("inferences", []), self._inference_text)
         self._section(lines, "未确认", answer.get("unknowns", []), str)

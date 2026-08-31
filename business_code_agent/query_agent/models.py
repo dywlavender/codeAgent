@@ -86,7 +86,7 @@ class EvidenceRef:
 
     def identity(self) -> tuple[Any, ...]:
         location = tuple(sorted((str(k), str(v)) for k, v in self.location.items()))
-        return self.source_type.value, self.source_id, self.source_version, location
+        return self.evidence_id, self.source_type.value, self.source_id, self.source_version, location
 
 
 @dataclass(frozen=True)
@@ -209,7 +209,14 @@ def _candidate_projection(item: Any, source: str) -> dict[str, Any]:
         item = _enum_values(asdict(item))
     common = {"id", "source_id", "sourceId", "score", "reason", "status", "evidence_id", "evidenceId"}
     allowed = {
-        "CODE": common | {"symbol_id", "symbolId", "qualified_name", "qualifiedName", "fact_type", "factType", "subject", "locator", "line_start", "line_end", "target_type", "targetType"},
+        "CODE": common | {
+            "symbol_id", "symbolId", "qualified_name", "qualifiedName", "fact_type", "factType",
+            "subject", "locator", "line_start", "line_end", "target_type", "targetType",
+            "edge_id", "edge_type", "edge_key", "protocol", "required_evidence_ids",
+            "application_id", "application_name", "system_id", "system_name",
+            "source_application_id", "source_application_name", "source_symbol_id", "source_qualified_name",
+            "target_application_id", "target_application_name", "target_symbol_id", "target_qualified_name",
+        },
         "BUSINESS": common | {"knowledge_id", "knowledgeId", "title", "knowledge_type", "version"},
         "REQUIREMENT": common | {"requirement_id", "requirementId", "title", "current_version", "versionId", "digest"},
     }[source]

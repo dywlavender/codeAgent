@@ -11,6 +11,12 @@
   "knowledge": {
     "baselineRoot": "knowledge/baseline"
   },
+  "systems": [
+    {
+      "id": "loan-system",
+      "name": "贷款核心系统"
+    }
+  ],
   "repositories": [
     {
       "id": "loan-core",
@@ -21,6 +27,28 @@
       "id": "loan-job",
       "gitUrl": "https://github.com/your-company/loan-job.git",
       "branch": "develop"
+    }
+  ],
+  "applications": [
+    {
+      "id": "loan-core-app",
+      "name": "贷款核心服务",
+      "systemId": "loan-system",
+      "repositoryId": "loan-core",
+      "sourceRoot": ".",
+      "type": "BACKEND",
+      "language": "java",
+      "framework": "spring-boot"
+    },
+    {
+      "id": "loan-job-app",
+      "name": "贷款批处理",
+      "systemId": "loan-system",
+      "repositoryId": "loan-job",
+      "sourceRoot": ".",
+      "type": "JOB",
+      "language": "java",
+      "framework": "spring-boot"
     }
   ]
 }

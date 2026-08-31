@@ -8,7 +8,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .code_intelligence import JavaIndexer
+from .application_topology import ApplicationTopologyStore, load_application_config
+from .indexing import CodeIndexer
+from .integration_edges import IntegrationEdgeResolver
 from .schema import connect
 
 
@@ -69,14 +71,20 @@ def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool 
         raise ProjectSyncError("没有找到 Git，请先安装 Git")
 
     project, repositories = load_project_config(config_path)
+    systems, applications = load_application_config(
+        config_path, project, {item.repository_id for item in repositories},
+    )
     db = connect(str(db_path))
     results = []
+    topology = integration_edges = {}
     try:
-        indexer = JavaIndexer(db)
+        indexer = CodeIndexer(db)
         for repository in repositories:
             sync_result = sync_repository_offline(repository) if offline else sync_repository(repository)
             indexed = indexer.ingest(str(repository.local_path), repository.repository_id)
             results.append({**sync_result, "indexed": indexed})
+        topology = ApplicationTopologyStore(db).replace(systems, applications)
+        integration_edges = IntegrationEdgeResolver(db).rebuild()
     finally:
         db.close()
 
@@ -84,6 +92,8 @@ def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool 
         "projectId": project["id"],
         "projectName": project.get("name") or project["id"],
         "repositories": results,
+        "topology": topology,
+        "integrationEdges": integration_edges,
     }
 
 

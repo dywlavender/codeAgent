@@ -755,11 +755,16 @@ def _markdown_sections(text: str) -> list[tuple[str, str, str]]:
 
 
 def _explicit_type(title: str, body: str) -> str:
-    value = f"{title} {body[:80]}".casefold()
-    if any(token in value for token in ("系统", "平台", "system")): return "SYSTEM"
-    if any(token in value for token in ("流程", "flow")): return "FLOW"
-    if any(token in value for token in ("规则", "条件", "rule")): return "RULE"
-    if any(token in value for token in ("能力", "处理", "capability")): return "CAPABILITY"
+    heading = title.casefold()
+    combined = f"{title} {body[:80]}".casefold()
+    # The author-controlled section heading is a stronger type declaration
+    # than nouns appearing inside the prose. A flow that mentions “渠道系统”
+    # must remain a FLOW rather than being reclassified as SYSTEM.
+    for value in (heading, combined):
+        if any(token in value for token in ("流程", "flow")): return "FLOW"
+        if any(token in value for token in ("规则", "条件", "rule")): return "RULE"
+        if any(token in value for token in ("能力", "处理", "capability")): return "CAPABILITY"
+        if any(token in value for token in ("系统", "平台", "system")): return "SYSTEM"
     return "BUSINESS_TERM"
 
 

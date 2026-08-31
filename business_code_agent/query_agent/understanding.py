@@ -58,6 +58,12 @@ class QuestionUnderstandingService:
         business_objects = _extract_business_objects(text, processes, systems)
         search_terms = _unique(field_hints + table_hints + code_hints_without_members(explicit_code)
                                + business_objects + processes + systems + quoted)
+        # Free-form Chinese terms are valuable when the question contains only
+        # business language.  With an explicit class/member/field/table hint,
+        # adding generic verbs such as “读取” broadens retrieval to unrelated
+        # business cards and can falsely close an evidence gap.
+        if not (explicit_code or field_hints or table_hints):
+            search_terms = _unique(search_terms + _question_terms(text))
         if not search_terms:
             search_terms = _question_terms(text)
         return QuestionUnderstanding(
