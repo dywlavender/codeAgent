@@ -4,7 +4,6 @@ import argparse
 import logging
 import os
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -55,11 +54,11 @@ def main() -> None:
     sync.add_argument("--config", required=True)
     sync.add_argument("--db", required=True)
     sync.add_argument("--offline", action="store_true", help="只索引配置中的包内源码，不调用 Git 或网络")
-    baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线并建立代码映射")
+    baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线和调查入口")
     baseline.add_argument("--config", required=True)
     baseline.add_argument("--db", required=True)
     baseline.add_argument("--no-model", action="store_true", help="仅使用安全的确定性解析")
-    baseline.add_argument("--no-map", action="store_true", help="暂不建立业务到代码的映射")
+    baseline.add_argument("--no-map", action="store_true", help="兼容旧参数；当前基线导入不会建立 Business-Code Mapping")
     mapping_observations = sub.add_parser("mapping-observations", help="查看问答发现的 Business-Code 映射候选")
     mapping_observations.add_argument("--db", required=True)
     mapping_observations.add_argument("--status", default="CANDIDATE")
@@ -173,7 +172,9 @@ def main() -> None:
         from .knowledge_update.baseline_service import BaselineKnowledgeService
         service = BaselineKnowledgeService(connect(args.db), project_config=args.config)
         print(json.dumps(service.refresh(
-            map_code=not args.no_map, use_model=not args.no_model,
+            # ``--no-map`` remains accepted for old scripts; baseline import
+            # no longer has a mapping mode in the default command path.
+            map_code=False, use_model=not args.no_model,
         ), ensure_ascii=False, indent=2))
     elif args.command == "mapping-observations":
         from .knowledge_update.mapping_observer import MappingObservationService

@@ -57,8 +57,18 @@ class BusinessCodeQueryAgent:
 
         @tool
         def search_business_knowledge(query: str) -> list[dict]:
-            """Search verified business entities, relations and code mappings."""
+            """Search verified business entities and relations."""
             return self.retriever.tools.business.search_business_knowledge(query)[:8]
+
+        @tool
+        def get_business_entry_anchors(business_id: str) -> list[dict]:
+            """Read durable FLOW/CAPABILITY entry hints; this never returns answer facts."""
+            return self.retriever.tools.code.get_business_entry_anchors(business_id)
+
+        @tool
+        def resolve_entry_anchor(application_id: str, entry_name: str) -> dict:
+            """Resolve one entry name against the current application code index."""
+            return self.retriever.tools.code.resolve_entry_anchor(application_id, entry_name)
 
         @tool
         def search_requirements(query: str) -> list[dict]:
@@ -70,7 +80,10 @@ class BusinessCodeQueryAgent:
             """Follow verified HTTP/RPC edges from one indexed symbol."""
             return self.retriever.tools.code.follow_integration_flow(symbol_id)[:24]
 
-        return [search_code_facts, search_business_knowledge, search_requirements, follow_integration_edge]
+        return [
+            search_code_facts, search_business_knowledge, get_business_entry_anchors,
+            resolve_entry_anchor, search_requirements, follow_integration_edge,
+        ]
 
     def run(self, question: str, *, history=()) -> dict:
         run_id = stable_id("QRUN", question, datetime.now(timezone.utc).isoformat())
@@ -159,9 +172,9 @@ class BusinessCodeQueryAgent:
                 "resolvedQuestion": " ".join(state.search_terms),
                 "answerMode": answer_mode,
                 "entities": answer["entities"],
-                # Structured candidates are returned for MVP2 observation
-                # only.  They contain identifiers and metadata, never raw
-                # source excerpts.
+                # Structured candidates are navigation references only.  They
+                # contain identifiers and metadata, never raw source excerpts
+                # or durable Business→Code mappings.
                 "businessCandidates": reference_state.get("business_candidates", []),
                 "codeCandidates": reference_state.get("code_candidates", []),
             }
@@ -288,7 +301,7 @@ class BusinessCodeQueryAgent:
                 collection.append(ref)
 
     def _fact(self, item, ref, state, code_candidates, business_candidates, requirement_candidates):
-        if str(item.get("status", "")).upper() in {"STALE", "CONFLICT", "REJECTED", "SUGGESTED"}:
+        if str(item.get("status", "")).upper() in {"STALE", "CONFLICT", "REJECTED", "SUGGESTED", "CANDIDATE"}:
             return None
         if state.field_hints and ref.source_type is not SourceType.CODE:
             content_key = self.retriever.tools.code.normalize_field(str(item.get("content", "")))
@@ -297,6 +310,11 @@ class BusinessCodeQueryAgent:
         if ref.source_type is SourceType.CODE:
             candidate = next((row for row in code_candidates if _candidate_matches(row, item)), {})
             fact_type = str(candidate.get("fact_type") or candidate.get("factType") or item.get("relationType") or "")
+            # An entry anchor is a navigation hint.  Its source file is read
+            # by the runtime resolver, but the hint itself cannot become a
+            # behaviour fact.
+            if fact_type == "ENTRY_ANCHOR":
+                return None
             # Declarations prove local technical edges, but are not useful
             # standalone answer claims. Rendering every declaration also lets a
             # search hit masquerade as observed runtime behaviour.

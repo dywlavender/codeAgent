@@ -13,7 +13,7 @@ class KnowledgeGraphService:
     """
 
     NODE_TYPES = {
-        "FUNCTION", "PROJECT", "CODE", "TABLE", "TAG",
+        "FUNCTION", "PROJECT", "CODE", "TABLE", "TAG", "ENTRY_ANCHOR",
         "SYSTEM", "BUSINESS_TERM", "CAPABILITY", "FLOW", "RULE",
     }
 
@@ -303,6 +303,7 @@ def _type_label(value: str) -> str:
     return {
         "FUNCTION": "功能",
         "PROJECT": "工程",
+        "ENTRY_ANCHOR": "调查入口",
         "CODE": "代码",
         "TABLE": "数据表",
         "TAG": "知识标签",
@@ -339,6 +340,7 @@ def _relation_label(value: str) -> str:
 def _count_key(value: str) -> str:
     return {
         "FUNCTION": "functions", "PROJECT": "projects", "CODE": "code", "TABLE": "tables", "TAG": "tags",
+        "ENTRY_ANCHOR": "entryAnchors",
         "SYSTEM": "systems", "BUSINESS_TERM": "terms", "CAPABILITY": "capabilities",
         "FLOW": "flows", "RULE": "rules",
     }.get(value, value.casefold())
@@ -384,25 +386,32 @@ def _baseline_graph(db, query: str, node_type: str, limit: int) -> dict[str, Any
         if target not in nodes:
             add_node(target, "BUSINESS_TERM", row["to_label"], subtitle="关系端点", statusLabel="人工业务基线")
         add_edge(source, target, row["relation_type"], row["status"], [row["evidence_id"]])
+    # Entry anchors are the only durable business-to-code navigation hints.
+    # They intentionally stop at an application/name pair; the current symbol
+    # and all implementation facts are resolved by Query Agent at runtime.
     for row in db.execute(
-        """SELECT bcm.*,cs.qualified_name,cs.kind
-             FROM business_code_mapping bcm
-             LEFT JOIN code_symbol cs ON cs.id=bcm.code_symbol_id
-            WHERE bcm.status IN ('VERIFIED','CANDIDATE') AND bcm.code_symbol_id IS NOT NULL
-            ORDER BY bcm.confidence DESC"""
+        """SELECT ea.*,a.name application_name,ss.name system_name
+             FROM business_entry_anchor ea
+             JOIN application a ON a.id=ea.application_id
+             LEFT JOIN software_system ss ON ss.id=a.system_id
+            WHERE ea.status IN ('ACTIVE','VERIFIED','CANDIDATE')
+            ORDER BY a.name,ea.entry_type,ea.entry_name"""
     ):
         business = f"BUSINESS:{row['business_id']}"
         if business not in nodes:
             continue
-        code = add_node(
-            f"CODE:{row['code_symbol_id']}", "CODE", row["qualified_name"] or row["code_reference"],
-            subtitle=row["kind"] or "代码对象", statusLabel="代码映射", sourceId=row["code_symbol_id"],
-            evidenceCount=len(json.loads(row["evidence_ids_json"])),
+        application = add_node(
+            f"APPLICATION:{row['application_id']}", "PROJECT", row["application_name"],
+            subtitle="应用", statusLabel=row["system_name"] or "项目上下文",
+            sourceId=row["application_id"],
         )
-        add_edge(
-            business, code, row["relation_type"], row["status"],
-            json.loads(row["evidence_ids_json"]),
+        entry = add_node(
+            f"ENTRY_ANCHOR:{row['id']}", "ENTRY_ANCHOR", row["entry_name"],
+            subtitle=row["entry_type"], statusLabel=row["status"],
+            sourceId=row["id"], applicationId=row["application_id"],
         )
+        add_edge(business, entry, "HAS_ENTRY", row["status"])
+        add_edge(entry, application, "BELONGS_TO_APPLICATION", row["status"])
 
     visible_ids = set(nodes)
     if node_type:

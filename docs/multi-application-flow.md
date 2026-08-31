@@ -56,7 +56,7 @@ MQ 消费、定时任务、动态 URL、运行时路由和无法唯一解析的�
 
 ## 人工业务基线仍然要少
 
-业务基线只描述代码无法可靠判断的粗粒度事实，不写类名、URL 或调用链：
+业务基线只描述代码无法可靠判断的粗粒度事实；如果知道稳定入口，可以只登记应用和入口名称，不写 URL 或调用链：
 
 ```markdown
 # 提款业务基线
@@ -66,9 +66,15 @@ MQ 消费、定时任务、动态 URL、运行时路由和无法唯一解析的�
 1. 用户在 H5 发起提款申请。
 2. 渠道系统接收并转交提款申请。
 3. 贷款中台完成提款申请处理。
+
+### 调查入口
+
+- 提款 H5 | PAGE | WithdrawApply.vue
+- 渠道服务 | CONTROLLER | ChannelWithdrawController
+- 贷款中台 | CONTROLLER | MiddleWithdrawController
 ```
 
-系统会把它作为 `businessFlow`；代码索引得到的跨应用链作为 `technicalFlow`。两层分别保留原文 Evidence 和代码 Evidence。
+系统会把它作为 `businessFlow`；入口之后由当前代码索引得到的跨应用链作为 `technicalFlow`。两层分别保留原文 Evidence 和代码 Evidence。入口名称不会固化为 Symbol ID，代码重构后重新解析即可。
 
 ## 启动和使用
 
@@ -77,6 +83,8 @@ MQ 消费、定时任务、动态 URL、运行时路由和无法唯一解析的�
 3. 在管理端导入业务基线。
 4. 在用户端直接使用业务语言提问，例如：`H5 点击提款提交按钮以后，后端经过哪些应用，最终在哪里处理提款？`
 5. 查看回答中的业务流程、技术调用链、每段代码入口和 Evidence。
+
+如果入口不存在或同名，运行轨迹会记录 `NOT_FOUND` / `MULTIPLE`，Agent 仍会继续普通代码搜索，不会把旧入口当成事实。
 
 仓库内置的 `examples/multi-application-flow` 是最小验收项目。它不在问题或业务基线中提供类名，测试仍要求 Agent 找到 H5、渠道服务、贷款中台、HTTP、Feign 和最终处理方法。
 

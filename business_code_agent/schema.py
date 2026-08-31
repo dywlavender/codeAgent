@@ -253,6 +253,23 @@ CREATE TABLE IF NOT EXISTS business_relation_v2 (
   UNIQUE(source_id, from_label, relation_type, to_label, scope),
   FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
 );
+
+-- Stable navigation hints maintained with business knowledge. These are not
+-- code mappings: they keep only an application and a human-authored entry
+-- name. The current symbol, method and source location are resolved at query
+-- time from the latest code index.
+CREATE TABLE IF NOT EXISTS business_entry_anchor (
+  id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
+  application_id TEXT NOT NULL, entry_type TEXT NOT NULL, entry_name TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'HUMAN', status TEXT NOT NULL DEFAULT 'ACTIVE',
+  source_evidence_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(business_type, business_id, application_id, entry_type, entry_name),
+  FOREIGN KEY(application_id) REFERENCES application(id)
+);
+CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_business
+  ON business_entry_anchor(business_type, business_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_application
+  ON business_entry_anchor(application_id, entry_name, status);
 CREATE TABLE IF NOT EXISTS business_code_mapping (
   id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
   relation_type TEXT NOT NULL, code_symbol_id TEXT,

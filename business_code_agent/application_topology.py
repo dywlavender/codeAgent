@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from sqlite3 import Connection
 
@@ -107,21 +108,39 @@ class ApplicationTopologyStore:
     def replace(self, systems: list[SystemConfig], applications: list[ApplicationConfig]) -> dict[str, int]:
         self.db.execute("DELETE FROM cross_application_edge")
         self.db.execute("DELETE FROM application_code_file")
-        self.db.execute("DELETE FROM application")
-        self.db.execute("DELETE FROM software_system")
+        # Entry anchors reference application IDs and must survive a code
+        # re-index. Replacing application rows with DELETE would violate that
+        # foreign key and make every anchor disappear on refresh, so upsert the
+        # configured topology instead.
+        application_ids = {item.application_id for item in applications}
+        self.db.execute("UPDATE application SET status='DEPRECATED'")
+        self.db.execute("UPDATE software_system SET status='DEPRECATED'")
         self.db.executemany(
-            "INSERT INTO software_system(id,name,status) VALUES (?,?,'ACTIVE')",
+            """INSERT INTO software_system(id,name,status) VALUES (?,?,'ACTIVE')
+               ON CONFLICT(id) DO UPDATE SET name=excluded.name,status='ACTIVE'""",
             [(item.system_id, item.name) for item in systems],
         )
         self.db.executemany(
             """INSERT INTO application(
                    id,name,system_id,repository_id,source_root,app_type,language,framework,status
-                 ) VALUES (?,?,?,?,?,?,?,?,'ACTIVE')""",
+                 ) VALUES (?,?,?,?,?,?,?,?,'ACTIVE')
+                 ON CONFLICT(id) DO UPDATE SET name=excluded.name,system_id=excluded.system_id,
+                   repository_id=excluded.repository_id,source_root=excluded.source_root,
+                   app_type=excluded.app_type,language=excluded.language,framework=excluded.framework,
+                   status='ACTIVE'""",
             [(
                 item.application_id, item.name, item.system_id, item.repository_id,
                 item.source_root, item.app_type, item.language, item.framework,
             ) for item in applications],
         )
+        # Keep removed application rows for historical references, but retire
+        # their anchors so runtime resolution cannot use a stale application.
+        if application_ids:
+            marks = ",".join("?" for _ in application_ids)
+            self.db.execute(
+                f"UPDATE business_entry_anchor SET status='DEPRECATED',updated_at=? WHERE application_id NOT IN ({marks})",
+                (datetime.now(timezone.utc).isoformat(), *application_ids),
+            )
         mapped = self._map_files(applications)
         self.db.commit()
         return {"systems": len(systems), "applications": len(applications), "mappedFiles": mapped}

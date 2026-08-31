@@ -74,7 +74,10 @@ def make_server(
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     body = self._body()
                     self._json(200, service.refresh(
-                        map_code=bool(body.get("mapCode", True)),
+                        # ``mapCode`` is accepted for old clients but is no
+                        # longer allowed to re-introduce the legacy mapping
+                        # refresh into the baseline main path.
+                        map_code=False,
                         use_model=bool(body.get("useModel", True)),
                     ))
                     return
@@ -192,6 +195,21 @@ def make_server(
                         "relations": service.list_relations(query),
                     })
                     return
+                if parsed.path == "/api/knowledge/entry-anchors":
+                    from ..knowledge_update.entry_anchor_service import EntryAnchorService
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    params = parse_qs(parsed.query)
+                    business_id = params.get("businessId", params.get("business_id", [""]))[0]
+                    anchor_service = EntryAnchorService(service.db)
+                    if business_id:
+                        row = service.db.execute(
+                            "SELECT entity_type FROM business_entity WHERE id=?", (business_id,)
+                        ).fetchone()
+                        items = anchor_service.list_for_business(row["entity_type"], business_id) if row else []
+                    else:
+                        items = anchor_service.list_all()
+                    self._json(200, {"items": items})
+                    return
                 if parsed.path in {
                     "/api/knowledge/mapping-observations", "/api/knowledge/mappings/observations",
                     "/api/knowledge/mapping-suggestions",
@@ -219,6 +237,12 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     self._json(200, service.get_entity(entity_match.group(1)))
+                    return
+                anchor_match = re.fullmatch(r"/api/knowledge/entry-anchors/([^/]+)", parsed.path)
+                if anchor_match:
+                    from ..knowledge_update.entry_anchor_service import EntryAnchorService
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    self._json(200, EntryAnchorService(service.db).get(anchor_match.group(1)))
                     return
                 relation_match = re.fullmatch(r"/api/knowledge/relations/([^/]+)", parsed.path)
                 if relation_match:

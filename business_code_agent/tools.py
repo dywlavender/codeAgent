@@ -96,6 +96,25 @@ class EvidenceTools:
             (pattern, pattern),
         )]
 
+    def get_business_entry_anchors(self, business_id: str) -> list[dict]:
+        """Return durable navigation hints without resolving them to code."""
+        from .knowledge_update.entry_anchor_service import EntryAnchorService
+
+        row = self.db.execute(
+            "SELECT entity_type FROM business_entity WHERE id=?", (business_id,)
+        ).fetchone()
+        if not row or row["entity_type"] not in {"FLOW", "CAPABILITY"}:
+            return []
+        return [
+            item for item in EntryAnchorService(self.db).list_for_business(row["entity_type"], business_id)
+            if item.get("status") in {"ACTIVE", "VERIFIED"} and item.get("sourceType") == "HUMAN"
+        ]
+
+    def resolve_entry_anchor(self, application_id: str, entry_name: str) -> dict:
+        from .query_agent.entry_resolver import EntryResolver
+
+        return EntryResolver(self.db).resolve(application_id, entry_name)
+
     def search_code(self, query: str, limit: int = 50) -> list[dict]:
         """Search indexed symbol/fact summaries without reading full source files."""
         terms = [term.lower() for term in tokens(query)]

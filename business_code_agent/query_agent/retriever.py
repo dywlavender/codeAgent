@@ -47,25 +47,39 @@ class QueryRetriever:
         self.candidate_limit = candidate_limit
 
     def initial_search(self, understanding: Any, state: Any | None = None) -> dict:
-        """Search Code, Business and Requirement summaries, never raw content."""
+        """Start from business knowledge and anchors, then use runtime code search.
+
+        A global code search is deliberately delayed until no usable anchor was
+        resolved (or the question contains an explicit field/table/code hint).
+        This keeps an anchor a priority hint rather than turning it into a hard
+        boundary: stale or ambiguous anchors still fall back to the current
+        index.
+        """
         query = _search_query(understanding, state)
         fields = _values(understanding, state, "fields", "field_hints", "fieldHints")
         tables = _values(understanding, state, "tables", "table_hints", "tableHints")
         code_hints = _values(understanding, state, "code_hints", "codeHints")
 
-        operations = {
-            "code": lambda bundle: self._initial_code(bundle.code, query, fields, tables, code_hints),
-            "business": lambda bundle: self._initial_business(bundle.business, query),
-            "requirement": lambda bundle: self._initial_requirement(bundle.requirement, query),
-        }
-        results = self._run_sources(operations)
+        # Business search is the routing decision for this first pass.  The
+        # repository can be large, so do not spend the initial budget on a
+        # whole-code FTS scan when a maintained FLOW/CAPABILITY anchor exists.
+        business_rows, business_calls = self._initial_business(self.tools.business, query)
+        anchor_result = self._resolve_entry_anchors(business_rows)
+        explicit_code_hint = bool(fields or tables or code_hints)
+        use_global_code = explicit_code_hint or not anchor_result["resolved"] or anchor_result["needsGlobal"]
+        if use_global_code:
+            code_rows, code_calls = self._initial_code(self.tools.code, query, fields, tables, code_hints)
+            code_rows = _dedupe([*anchor_result["candidates"], *code_rows], "evidence_id", "evidenceId", "id", "symbol_id", "symbolId")
+        else:
+            code_rows, code_calls = anchor_result["candidates"], []
+        requirement_rows, requirement_calls = self._initial_requirement(self.tools.requirement, query)
         return {
             "search_query": query,
-            "code_candidates": results["code"][0],
-            "business_candidates": results["business"][0],
-            "requirement_candidates": results["requirement"][0],
-            "tool_calls": [*results["code"][1], *results["business"][1], *results["requirement"][1]],
-            "parallel": self.connection_factory is not None,
+            "code_candidates": code_rows,
+            "business_candidates": business_rows,
+            "requirement_candidates": requirement_rows,
+            "tool_calls": [*business_calls, *anchor_result["calls"], *code_calls, *requirement_calls],
+            "parallel": False,
             "raw_evidence_loaded": False,
         }
 
@@ -116,6 +130,7 @@ class QueryRetriever:
         candidates = {"code": [], "business": [], "requirement": []}
         calls: list[dict] = []
         plan: list[dict] = []
+        anchor_needs_global = False
 
         # 1. Field/Table relations.
         for field in sorted(fields):
@@ -161,14 +176,14 @@ class QueryRetriever:
                 continue
             card = detail.get("knowledge", {})
             candidates["business"].append(_business_summary(card))
-            for relation in detail.get("relations", []):
-                # A candidate mapping is a valid navigation hint, but remains
-                # labelled CANDIDATE so downstream evidence rules cannot turn
-                # it into a confirmed answer fact by itself.
-                if relation.get("target_type") == "CODE_SYMBOL" and relation.get("status") in {"CONFIRMED", "DERIVED", "CANDIDATE"}:
-                    candidates["code"].append(_strip_one(relation))
-            calls.append(_call("get_business_knowledge", {"knowledgeId": knowledge_id}, detail.get("relations", []), "BUSINESS"))
+            anchors = self._resolve_entry_anchors([{"id": knowledge_id}])
+            candidates["code"].extend(anchors["candidates"])
+            calls.extend(anchors["calls"])
+            anchor_needs_global = anchor_needs_global or anchors["needsGlobal"]
+            calls.append(_call("get_business_knowledge", {"knowledgeId": knowledge_id}, [*detail.get("relations", []), *detail.get("entryAnchors", [])], "BUSINESS"))
             plan.append({"priority": 3, "strategy": "BUSINESS_RELATION", "target": knowledge_id})
+            if anchors["candidates"]:
+                plan.extend(anchors["plan"])
 
         # 4. Requirement digest and explicit relations (still no chunks).
         for requirement_id in sorted(requirements)[: self.candidate_limit]:
@@ -183,7 +198,20 @@ class QueryRetriever:
             calls.append(_call("find_requirement_code_relations", {"requirementId": requirement_id}, relations, "REQUIREMENT"))
             plan.append({"priority": 4, "strategy": "REQUIREMENT_RELATION", "target": requirement_id})
 
-        # 5. FTS fallback only if deterministic expansion yielded nothing useful.
+        # A stale/ambiguous anchor must not become a dead end just because the
+        # business card itself was found.  Search the current code index when
+        # the anchor resolver could not provide a unique starting symbol.
+        if anchor_needs_global:
+            query = " ".join(term for term in fallback_terms if term.strip()) or str(_get(state, "question", default=""))
+            code_rows, code_calls = self._initial_code(
+                self.tools.code, query, list(fields), list(tables),
+                _values(state, None, "code_hints", "codeHints"),
+            )
+            candidates["code"].extend(code_rows)
+            calls.extend(code_calls)
+            plan.append({"priority": 6, "strategy": "STALE_ANCHOR_GLOBAL_FALLBACK", "target": query})
+
+        # 6. FTS fallback only if deterministic expansion yielded nothing useful.
         if not any(candidates.values()):
             query = " ".join(term for term in fallback_terms if term.strip()) or str(_get(state, "question", default=""))
             initial = self.initial_search({"searchTerms": [query]}, state)
@@ -200,6 +228,77 @@ class QueryRetriever:
             "requirement_candidates": _dedupe(candidates["requirement"], "id", "requirement_id"),
             "tool_calls": calls,
             "raw_evidence_loaded": False,
+        }
+
+    def _resolve_entry_anchors(self, business_rows: list[dict]) -> dict:
+        """Resolve active human anchors into runtime-only code candidates."""
+        candidates: list[dict] = []
+        calls: list[dict] = []
+        plan: list[dict] = []
+        resolved = 0
+        needs_global = False
+        seen_anchors: set[str] = set()
+        for business in business_rows:
+            business_id = _get(business, "id", "knowledgeId", "knowledge_id", "sourceId", "source_id")
+            if not business_id:
+                continue
+            anchors = self.tools.code.get_business_entry_anchors(str(business_id))
+            calls.append(_call("get_business_entry_anchors", {"businessId": str(business_id)}, anchors, "BUSINESS"))
+            for anchor in anchors:
+                anchor_id = str(anchor.get("id") or repr(sorted(anchor.items())))
+                if anchor_id in seen_anchors:
+                    continue
+                seen_anchors.add(anchor_id)
+                application_id = str(anchor.get("applicationId") or "")
+                entry_name = str(anchor.get("entryName") or "")
+                resolution = self.tools.code.resolve_entry_anchor(application_id, entry_name)
+                symbols = resolution.get("symbols", []) if isinstance(resolution, dict) else []
+                calls.append(_call(
+                    "resolve_entry_anchor",
+                    {"applicationId": application_id, "entryName": entry_name},
+                    symbols, "CODE",
+                ))
+                status = str(resolution.get("status") or "NOT_FOUND").upper()
+                if status == "RESOLVED":
+                    resolved += 1
+                else:
+                    needs_global = True
+                plan.append({
+                    "priority": 2, "strategy": "ENTRY_ANCHOR",
+                    "target": entry_name, "applicationId": application_id,
+                    "resolution": status,
+                })
+                for symbol in symbols:
+                    evidence_id = symbol.get("evidenceId") or symbol.get("evidence_id")
+                    candidates.append({
+                        "id": symbol.get("symbolId"),
+                        "symbolId": symbol.get("symbolId"),
+                        "symbol_id": symbol.get("symbolId"),
+                        "kind": symbol.get("kind"),
+                        "qualified_name": symbol.get("qualifiedName"),
+                        "qualifiedName": symbol.get("qualifiedName"),
+                        "application_id": application_id,
+                        "applicationId": application_id,
+                        "application_name": symbol.get("applicationName"),
+                        "evidence_id": evidence_id,
+                        "evidenceId": evidence_id,
+                        "fact_type": symbol.get("factType") or symbol.get("fact_type"),
+                        "factType": symbol.get("factType") or symbol.get("fact_type"),
+                        "status": "DIRECT" if status == "RESOLVED" else "CANDIDATE",
+                        "entry_anchor_id": anchor.get("id"),
+                        "entryAnchorId": anchor.get("id"),
+                        "entry_resolution": status,
+                        "entryResolution": status,
+                        "anchor_status": anchor.get("status"),
+                        "anchor_application_id": application_id,
+                        "anchor_entry_name": entry_name,
+                    })
+        return {
+            "candidates": _dedupe(candidates, "evidence_id", "evidenceId", "symbol_id", "symbolId", "id"),
+            "calls": calls,
+            "plan": plan,
+            "resolved": resolved,
+            "needsGlobal": needs_global,
         }
 
     def _initial_code(self, tools: EvidenceTools, query: str, fields: list[str], tables: list[str], hints: list[str]):

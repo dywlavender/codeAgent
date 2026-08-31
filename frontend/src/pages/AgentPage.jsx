@@ -369,26 +369,6 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
           style={{ marginTop: 4 }}
         />
       )}
-      {Array.isArray(result.mappingSuggestions) && result.mappingSuggestions.length > 0 && (
-        <div
-          style={{
-            marginTop: 14, padding: "10px 14px", borderRadius: 12,
-            background: palette.brandSoft, border: "1px solid rgba(27,107,101,.22)",
-          }}
-        >
-          <Typography.Text strong style={{ fontSize: 12.5, color: palette.brandStrong }}>本轮发现可补充的业务—代码映射</Typography.Text>
-          <Typography.Paragraph type="secondary" style={{ fontSize: 11.5, marginTop: 2, marginBottom: 6 }}>
-            已保存为候选，不会自动修改人工业务基线；管理员可在「业务知识维护」中确认。
-          </Typography.Paragraph>
-          <Flex gap={6} wrap="wrap">
-            {result.mappingSuggestions.slice(0, 3).map((item) => (
-              <span key={item.id} className="fact-src" style={{ background: "#fff", color: palette.brandStrong, fontFamily: "var(--mono)", borderColor: "rgba(27,107,101,.25)" }}>
-                {item.codeReference || "未定位"}
-              </span>
-            ))}
-          </Flex>
-        </div>
-      )}
       <Divider style={{ margin: "10px 0 12px" }} />
       <Flex gap={6} wrap="wrap" align="center">
         <CopyButton detail={detail} />

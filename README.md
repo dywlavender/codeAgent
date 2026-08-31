@@ -1,34 +1,30 @@
 # Business Code Agent
 
-面向多仓库老项目的 Agent 知识工作台。MVP 用少量自然语言业务基线告诉系统“业务是什么、什么和什么有关”，再把这些知识定向映射到当前代码；问答 Agent 先用业务知识缩小调查范围，随后沿 Vue/Java 应用间的 HTTP、Feign 调用继续调查，最后回到代码和原文证据回答。
+面向多仓库老项目的 Agent 知识工作台。核心是 Agent：少量稳定的业务知识和项目上下文用于理解问题、确定调查入口；入口之后的类、方法、调用链、HTTP/RPC、SQL 和代码证据都基于当前索引实时调查，不作为长期业务知识。
 
-## MVP1 + MVP2 已实现的主链路
+## 当前主链路
 
 ```text
 自然语言业务基线
   ↓  模型结构化（未配置模型时使用保守解析）
 System / BusinessTerm / Capability / Flow / Relation / Rule
   ↓
-定向搜索当前代码
+FLOW / CAPABILITY 的 Entry Anchor（可选）
   ↓
-独立 Business-Code Mapping
+Runtime Agent 解析当前代码入口
   ↓
-Query Agent 检索业务知识、映射和代码证据
+实时调查 Method / Call / HTTP / RPC / MQ / DB
   ↓
-MVP2 问答观察：从答案中的业务/代码证据生成 Mapping 候选
-  ↓
-管理员确认后写入正式 Mapping
-  ↓
-MVP2.5 多应用调用：H5 UI → HTTP → Spring → Feign → Spring
+Runtime Evidence → Answer
 ```
 
-三类数据始终分开保存：
+长期保存、可重建索引和单次运行数据分开：
 
 - Business Knowledge：业务是什么、为什么、有哪些关系；
-- Code Knowledge：类、方法、字段、API、任务、表和调用事实；
-- Mapping：某条业务知识在代码中对应哪里。
+- Project Context：系统、应用、仓库及代码归属；
+- Entry Anchor：应用 + 页面/类/Job/Consumer 名称，仅作为调查起点。
 
-重新索引代码只重建静态 Mapping，不会改写人工业务基线；问答发现的 Mapping 先进入独立观察记录，确认后才进入正式 Mapping。
+代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）可以重建；旧 `business_code_mapping*` 表只为兼容历史数据保留，不参与默认基线导入、问答和统计。
 
 技术拓扑同样单独保存。`software_system` / `application` 表示部署与代码归属，不会混入人工维护的业务 `SYSTEM` 知识。
 
@@ -141,7 +137,7 @@ BUSINESS_CODE_MODEL_MAX_RETRIES=2
 
 - 同步和索引代码；
 - 从明确的 Markdown 标题和原句安全提取知识；
-- 搜索代码候选并建立 Mapping；
+- 搜索当前代码并从入口实时调查；
 - 使用确定性 Query Agent 回答有证据的问题。
 
 保守解析不会猜测业务规则或代码类名。
@@ -174,7 +170,7 @@ BUSINESS_CODE_MODEL_MAX_RETRIES=2
 - 粗粒度业务流程；
 - 业务关系和规则。
 
-不要求人工填写调用链、入口类、SQL、表字段或完整技术流程。
+不要求人工填写调用链、方法、SQL、表字段或完整技术流程。若业务人员知道稳定入口，可在流程/能力小节补一行入口锚点。
 
 完整说明见 [业务基线使用指南](docs/business-baseline-guide.md)。
 
@@ -184,10 +180,9 @@ BUSINESS_CODE_MODEL_MAX_RETRIES=2
 2. 启动工作台，等待代码同步和索引完成。
 3. 把一份或多份自然语言 Markdown 放入基线目录。
 4. 进入“业务知识维护”，点击“导入业务基线”。
-5. 查看六类知识、原文来源和代码映射。
-6. 对未定位或候选 Mapping 补充更明确的业务别名后重新导入。
-7. 在问答页面提问；Agent 会先命中业务知识，再沿 Mapping 调查代码。
-8. 若回答同时有充分的业务和代码证据，进入“业务知识维护”确认问答发现的 Mapping 候选。
+5. 查看六类知识、原文来源、业务关系和调查入口。
+6. 在问答页面提问；Agent 会优先解析入口，再基于当前代码实时调查。
+7. 入口失效时，Agent 自动退化到当前代码的普通搜索，不修改业务知识。
 
 命令行也可以执行：
 
@@ -206,49 +201,34 @@ python3 -m business_code_agent.cli baseline-refresh \
   --no-model
 ```
 
-查看和确认问答发现的候选也可以使用命令行：
+未定位不是失败。问答会标记入口解析状态，并在当前代码索引中继续搜索；不会把不存在的类或方法写入知识。
 
-```bash
-python3 -m business_code_agent.cli mapping-observations --db .data/knowledge.db
-python3 -m business_code_agent.cli mapping-review BMO-xxxxxxxxxxxxxxxx accept --db .data/knowledge.db --note "确认该入口属于此业务"
+## 业务入口锚点
+
+FLOW/CAPABILITY 的 Markdown 小节可以补充入口列表：
+
+```markdown
+## 提款申请流程
+
+用户在渠道发起提款，中台完成申请处理。
+
+### 调查入口
+
+- 提款 H5 | PAGE | WithdrawApply.vue
+- 渠道服务 | CONTROLLER | ChannelWithdrawController
+- 贷款中台 | CONTROLLER | MiddleWithdrawController
 ```
 
-## Mapping 状态
-
-- `VERIFIED`：代码证据明确且候选唯一；
-- `CANDIDATE`：存在合理候选，但不能唯一确定；
-- `UNRESOLVED`：当前代码索引中没有找到；
-- `CONFLICTED`：不同来源或证据存在冲突；
-- `DEPRECATED`：来源已经移除或知识不再有效。
-
-未定位不是失败。问答 Agent 会明确说明当前没有找到对应实现，不会生成不存在的类或方法。
-
-## MVP2：问答驱动的 Mapping 观察
-
-第二阶段只做一件事：利用已经完成的问答证据，补充 Business-Code Mapping。它不会自动修改人工 Markdown，也不会把搜索候选直接当成事实。观察器只读取最终回答 `facts` 实际引用的业务/代码 Evidence ID，不读取未被回答采用的搜索候选。
-
-触发条件是同一回答同时引用了：
-
-- 已发布的业务实体或业务关系证据；
-- 当前代码索引中的直接代码证据；
-- 回答证据状态为“证据充分”。
-
-系统会把候选写入 `business_code_mapping_observation`，状态为 `CANDIDATE`，并保存问题、业务对象、代码 Symbol、证据编号、可信度和生成原因。管理员在页面点击“确认”后，才会写入 `business_code_mapping`，来源标记为 `QUERY_REVIEW`；点击“忽略”只关闭该候选。
-
-这样做的判断边界是：问答可以发现“这两个事实可能有关”，但不能替人确认业务语义。候选越多不代表知识越好，后续仍以确认率和问答准确率衡量效果。
+入口名称只允许页面名、类名、Job 或 Consumer 名；不能填写限定类名、方法签名、文件路径或行号。入口必须在同一小节原文中逐字出现。每次问答都会按 `application + entryName` 解析当前代码，状态为 `RESOLVED`、`MULTIPLE` 或 `NOT_FOUND`；解析结果不回写业务知识。
 
 ## 管理接口
 
-- `POST /api/knowledge/baselines/refresh`：导入自然语言基线并建立 Mapping；
-- `POST /api/knowledge/mappings/rebuild`：不改业务知识，只重建代码 Mapping；
+- `POST /api/knowledge/baselines/refresh`：导入自然语言基线和入口锚点；
 - `GET /api/knowledge/entities`：查询 System、Term、Capability、Flow 和 Rule；
-- `GET /api/knowledge/entities/{id}`：查看知识、来源、关系和 Mapping；
+- `GET /api/knowledge/entities/{id}`：查看知识、来源、关系和入口锚点；
+- `GET /api/knowledge/entry-anchors`：查询入口锚点；
 - `GET /api/knowledge/relations/{id}`：查看业务关系；
-- `GET /api/knowledge-graph`：查看业务知识、关系和代码映射投影；
-- `GET /api/knowledge/mapping-observations?status=CANDIDATE`：查看问答发现的 Mapping 候选；
-- `GET /api/knowledge/mapping-observations/{id}`：查看候选及证据；
-- `POST /api/knowledge/mapping-observations/{id}/accept`：管理员确认候选；
-- `POST /api/knowledge/mapping-observations/{id}/reject`：管理员忽略候选；
+- `GET /api/knowledge-graph`：查看业务知识、业务关系、应用和入口投影；
 - `POST /api/query`：执行问答。
 
 管理员写操作可通过 `admin.apiTokenEnv` 配置的口令保护；读取接口保持只读。
@@ -264,6 +244,6 @@ cd frontend
 npm run build
 ```
 
-内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线、独立 Mapping 和问答检索链路；`examples/multi-application-flow` 验证不提供类名时，从 H5 点击事件追踪到中台最终处理方法。
+内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线和问答检索链路；`examples/multi-application-flow` 验证入口锚点驱动的多应用流程，从 H5 点击事件追踪到中台最终处理方法。
 
 详细技术结构见 [当前架构](docs/architecture.md)。

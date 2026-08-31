@@ -213,6 +213,8 @@ def _candidate_projection(item: Any, source: str) -> dict[str, Any]:
             "symbol_id", "symbolId", "qualified_name", "qualifiedName", "fact_type", "factType",
             "subject", "locator", "line_start", "line_end", "target_type", "targetType",
             "edge_id", "edge_type", "edge_key", "protocol", "required_evidence_ids",
+            "entry_anchor_id", "entryAnchorId", "entry_resolution", "entryResolution",
+            "anchor_status", "anchor_application_id", "anchor_entry_name",
             "application_id", "application_name", "system_id", "system_name",
             "source_application_id", "source_application_name", "source_symbol_id", "source_qualified_name",
             "target_application_id", "target_application_name", "target_symbol_id", "target_qualified_name",

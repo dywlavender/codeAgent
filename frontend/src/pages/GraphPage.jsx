@@ -8,6 +8,7 @@ import { request } from "../lib/api.js";
 const TYPE_STYLE = {
   FUNCTION: { glyph: "功", color: "#1a7f4e", soft: "#e7f4ee" },
   PROJECT: { glyph: "工", color: "#0b6a63", soft: "#e6f2f1" },
+  ENTRY_ANCHOR: { glyph: "入", color: "#8d5a1f", soft: "#fbf1e4" },
   CODE: { glyph: "{}", color: "#57606a", soft: "#f0f2f4" },
   TABLE: { glyph: "表", color: "#9a6700", soft: "#fcf3e3" },
   TAG: { glyph: "#", color: "#8d8d88", soft: "#f4f4f2" },
@@ -25,6 +26,7 @@ const TYPE_OPTIONS = [
   { label: "能力", value: "CAPABILITY", countKey: "capabilities" },
   { label: "流程", value: "FLOW", countKey: "flows" },
   { label: "规则", value: "RULE", countKey: "rules" },
+  { label: "入口", value: "ENTRY_ANCHOR", countKey: "entryAnchors" },
   { label: "代码", value: "CODE", countKey: "code" },
 ];
 
@@ -112,7 +114,7 @@ export function GraphPage({ workspace }) {
           <Splitter.Panel defaultSize="24%" min="16%" max="36%">
             <div className="result-list">
               {nodes.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>导入业务基线并建立代码映射后，关系会出现在这里。</span>} style={{ marginTop: 90 }} />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>导入业务基线后，业务关系和调查入口会出现在这里。</span>} style={{ marginTop: 90 }} />
               ) : nodes.map((node) => (
                 <GraphRow key={node.id} node={node} active={node.id === selectedId} onSelect={() => setSelectedId(node.id)} />
               ))}

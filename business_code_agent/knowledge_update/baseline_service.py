@@ -10,6 +10,13 @@ from typing import Any, Mapping, Protocol
 
 from ..code_matching import CodeKnowledge, CodeMatcher
 from ..util import digest, stable_id
+from .entry_anchor_service import (
+    EntryAnchor,
+    EntryAnchorError,
+    EntryAnchorService,
+    normalize_anchor_payload,
+    validate_entry_name,
+)
 from .langchain_adapter import ModelConfig, init_configured_chat_model, model_config_from_environment
 
 
@@ -44,9 +51,11 @@ class BaselineDocument:
 
 
 class BaselineKnowledgeService:
-    """Import a natural-language baseline and build bounded code mappings.
+    """Import business knowledge and durable investigation entry anchors.
 
-    Human statements, code facts and mappings deliberately remain separate.
+    Human statements, entry anchors and runtime code facts deliberately remain
+    separate. A refresh never derives ordinary Business→Code mappings; those
+    legacy tables remain available only for explicit compatibility tooling.
     The model may structure source text, but every accepted business item must
     point back to a literal excerpt in that source.
     """
@@ -57,7 +66,7 @@ class BaselineKnowledgeService:
         self.config = self._load_config()
         self._extractor = extractor
 
-    def refresh(self, *, map_code: bool = True, use_model: bool = True) -> dict[str, Any]:
+    def refresh(self, *, map_code: bool = False, use_model: bool = True) -> dict[str, Any]:
         root = self.knowledge_root()
         if not root.is_dir():
             raise ValueError(f"业务基线目录不存在: {root}")
@@ -66,17 +75,15 @@ class BaselineKnowledgeService:
         documents = [self._read_document(path, extractor) for path in paths]
         active_sources: set[str] = set()
         counts = {name: 0 for name in sorted(ALL_KNOWLEDGE_TYPES)}
-        mapping_counts = {"VERIFIED": 0, "CANDIDATE": 0, "UNRESOLVED": 0}
+        anchor_counts = {"ACTIVE": 0, "CANDIDATE": 0, "UNRESOLVED": 0}
         for document in documents:
             active_sources.add(document.id)
-            self._save_document(document)
+            saved = self._save_document(document)
             for entity in document.entities:
                 counts[entity["type"]] += 1
             counts["RELATION"] += len(document.relations)
-            if map_code:
-                current = self.rebuild_mappings(source_id=document.id)
-                for key in mapping_counts:
-                    mapping_counts[key] += current.get(key, 0)
+            for key in anchor_counts:
+                anchor_counts[key] += saved.get(key, 0)
         if active_sources:
             marks = ",".join("?" for _ in active_sources)
             self.db.execute(
@@ -91,14 +98,24 @@ class BaselineKnowledgeService:
                 f"UPDATE business_relation_v2 SET status='DEPRECATED' WHERE source_id NOT IN ({marks})",
                 tuple(active_sources),
             )
+            self.db.execute(
+                """UPDATE business_entry_anchor SET status='DEPRECATED',updated_at=?
+                     WHERE business_id IN (
+                       SELECT id FROM business_entity WHERE source_id NOT IN ({0})
+                     )""".format(marks),
+                (_now(), *active_sources),
+            )
         else:
             self.db.execute("UPDATE business_baseline_source SET status='MISSING'")
             self.db.execute("UPDATE business_entity SET status='DEPRECATED'")
             self.db.execute("UPDATE business_relation_v2 SET status='DEPRECATED'")
+            self.db.execute("UPDATE business_entry_anchor SET status='DEPRECATED',updated_at=?", (_now(),))
         self.db.commit()
         return {
             "root": str(root), "sourceCount": len(documents), "entityCounts": counts,
-            "mappingCounts": mapping_counts,
+            "anchorCounts": anchor_counts,
+            "mappingCounts": {"VERIFIED": 0, "CANDIDATE": 0, "UNRESOLVED": 0},
+            "legacyMappingRefresh": False,
             "sources": [{"id": item.id, "title": item.title, "path": item.path, "mode": item.mode} for item in documents],
         }
 
@@ -128,7 +145,7 @@ class BaselineKnowledgeService:
         values = []
         for row in rows:
             item = self._relation_dict(row)
-            item["mappings"] = self._mapping_values("RELATION", row["id"])
+            item["mappings"] = []
             values.append(item)
         needle = query.strip().casefold()
         return [item for item in values if not needle or needle in json.dumps(item, ensure_ascii=False).casefold()][:100]
@@ -140,7 +157,10 @@ class BaselineKnowledgeService:
         source = self.db.execute(
             "SELECT id,path,title,status,imported_at FROM business_baseline_source WHERE id=?", (row["source_id"],)
         ).fetchone()
-        mappings = self._mapping_values("ENTITY", entity_id)
+        anchors = (
+            EntryAnchorService(self.db).list_for_business(row["entity_type"], entity_id)
+            if row["entity_type"] in {"FLOW", "CAPABILITY"} else []
+        )
         outgoing = [self._relation_dict(item) for item in self.db.execute(
             "SELECT * FROM business_relation_v2 WHERE from_entity_id=? AND status!='DEPRECATED'", (entity_id,)
         )]
@@ -153,7 +173,8 @@ class BaselineKnowledgeService:
             "attributes": json.loads(row["attributes_json"]), "sourceType": row["source_type"],
             "sourceId": row["source_id"], "sourceEvidenceId": row["source_evidence_id"],
             "confidence": row["confidence"], "status": row["status"], "updatedAt": row["updated_at"],
-            "source": dict(source) if source else None, "mappings": mappings,
+            "source": dict(source) if source else None, "entryAnchors": anchors,
+            "mappings": [],
             "relations": [*outgoing, *incoming],
         }
 
@@ -162,7 +183,7 @@ class BaselineKnowledgeService:
         if not row:
             raise KeyError(relation_id)
         result = self._relation_dict(row)
-        result["mappings"] = self._mapping_values("RELATION", relation_id)
+        result["mappings"] = []
         return result
 
     def rebuild_mappings(self, *, source_id: str | None = None) -> dict[str, int]:
@@ -238,7 +259,7 @@ class BaselineKnowledgeService:
         entities, relations = _validate_payload(payload, text)
         return BaselineDocument(source_id, str(path.resolve()), title, text, tuple(entities), tuple(relations), mode)
 
-    def _save_document(self, document: BaselineDocument) -> None:
+    def _save_document(self, document: BaselineDocument) -> dict[str, int]:
         now = _now()
         revision = digest(document.text)
         self.db.execute(
@@ -248,10 +269,16 @@ class BaselineKnowledgeService:
                  source_revision=excluded.source_revision,content=excluded.content,status='ACTIVE',imported_at=excluded.imported_at""",
             (document.id, document.path, document.title, revision, document.text, now),
         )
+        self.db.execute(
+            """UPDATE business_entry_anchor SET status='DEPRECATED',updated_at=?
+                 WHERE business_id IN (SELECT id FROM business_entity WHERE source_id=?)""",
+            (now, document.id),
+        )
         self.db.execute("UPDATE business_entity SET status='DEPRECATED' WHERE source_id=?", (document.id,))
         self.db.execute("UPDATE business_relation_v2 SET status='DEPRECATED' WHERE source_id=?", (document.id,))
         entity_ids: dict[str, str] = {}
         alias_ids: dict[str, str] = {}
+        anchor_counts = {"ACTIVE": 0, "CANDIDATE": 0, "UNRESOLVED": 0}
         for item in document.entities:
             entity_id = stable_id("BKE", document.id, item["type"], item["name"])
             entity_ids[item["name"].casefold()] = entity_id
@@ -270,6 +297,10 @@ class BaselineKnowledgeService:
                  item["definition"], json.dumps(item["attributes"], ensure_ascii=False), document.id,
                  evidence_id, now),
             )
+            if item["type"] in {"FLOW", "CAPABILITY"}:
+                for raw_anchor in item.get("entryAnchors", []):
+                    status = self._save_entry_anchor(document, entity_id, item["type"], raw_anchor)
+                    anchor_counts[status] = anchor_counts.get(status, 0) + 1
         for item in document.relations:
             from_id = entity_ids.get(item["from"].casefold()) or alias_ids.get(item["from"].casefold())
             to_id = entity_ids.get(item["to"].casefold()) or alias_ids.get(item["to"].casefold())
@@ -287,6 +318,52 @@ class BaselineKnowledgeService:
                  json.dumps(item["attributes"], ensure_ascii=False), document.id, evidence_id, now),
             )
         self.db.commit()
+        return anchor_counts
+
+    def _save_entry_anchor(self, document: BaselineDocument, business_id: str, business_type: str, raw_anchor: Mapping) -> str:
+        """Validate and persist one grounded anchor, returning its outcome."""
+        try:
+            if not isinstance(raw_anchor, Mapping):
+                raise EntryAnchorError("调查入口必须是对象")
+            payload = dict(raw_anchor)
+            payload.setdefault("businessType", business_type)
+            application_ref = str(
+                payload.get("applicationId") or payload.get("application_id")
+                or payload.get("application") or ""
+            ).strip()
+            entry_type = str(payload.get("entryType") or payload.get("entry_type") or payload.get("type") or "").strip().upper()
+            entry_name = str(payload.get("entryName") or payload.get("entry_name") or payload.get("name") or "").strip()
+            quote = str(payload.get("sourceQuote") or payload.get("source_quote") or "").strip()
+            if not quote:
+                raise EntryAnchorError("调查入口必须提供 sourceQuote")
+            quote = _grounded_quote(document.text, quote, entry_name, application_ref)
+            scope = _section_containing_quote(document.text, quote, entry_name)
+            if not _literal_in_source(scope, application_ref) or not _literal_in_source(scope, entry_type) or not _literal_in_source(scope, entry_name):
+                raise EntryAnchorError("调查入口的应用、类型和名称必须在同一 Markdown 小节中出现")
+            application = EntryAnchorService(self.db).resolve_application(application_ref)
+            if not application:
+                logger.warning("调查入口引用了未配置的应用: %s", application_ref)
+                return "UNRESOLVED"
+            normalized = normalize_anchor_payload(payload)
+            anchor_id = stable_id(
+                "BEA", business_type, business_id, application["id"], normalized.entry_type, normalized.entry_name,
+            )
+            evidence_id = self._save_source_evidence(document, quote, anchor_id)
+            anchor = EntryAnchor(
+                business_type=business_type,
+                business_id=business_id,
+                application_id=application["id"],
+                entry_type=normalized.entry_type,
+                entry_name=normalized.entry_name,
+                source_type=normalized.source_type,
+                status=normalized.status,
+                source_evidence_id=evidence_id,
+            )
+            EntryAnchorService(self.db).save(anchor, anchor_id=anchor_id)
+            return "CANDIDATE" if anchor.status == "CANDIDATE" else "ACTIVE"
+        except (EntryAnchorError, ValueError) as exc:
+            logger.warning("忽略无效调查入口: %s", exc)
+            return "UNRESOLVED"
 
     def _save_source_evidence(self, document: BaselineDocument, quote: str, owner_id: str) -> str:
         quote = quote.strip()
@@ -449,6 +526,7 @@ def _baseline_schema():
         aliases: list[str] = Field(default_factory=list)
         definition: str
         attributes: dict[str, Any] = Field(default_factory=dict)
+        entryAnchors: list[dict[str, Any]] = Field(default_factory=list)
         sourceQuote: str
 
     class Relation(BaseModel):
@@ -473,7 +551,8 @@ _BASELINE_PROMPT = """你负责把人工业务基线转换为严格的内部知�
 不要补充原文没有表达的业务事实。每个实体和关系必须提供 sourceQuote，且必须逐字出现在原文。
 实体的名称、别名和属性必须出现在 sourceQuote 所在的 Markdown 小节中；关系的 from、to 和关系语义必须同时出现在 sourceQuote 中。
 FLOW 的业务步骤放 attributes.steps；RULE 的 condition、behavior、scope 放 attributes；
-SYSTEM 的 responsibilities、nonResponsibilities 放 attributes。英文缩写或代码名称放 aliases 或 attributes.codeHints。
+SYSTEM 的 responsibilities、nonResponsibilities 放 attributes。不要把类、方法、路径、SQL 或代码位置放进 attributes.codeHints。
+FLOW/CAPABILITY 可以从同一 Markdown 小节的“调查入口”列表提取 entryAnchors，格式为 application、entryType、entryName、sourceQuote；entryName 只能是页面名、类名、Job 或 Consumer 名，不能是限定类名、方法签名或文件行号。入口必须逐字出现在 sourceQuote 所在小节中。
 关系使用简短稳定的英文谓词，例如 TRIGGERS、PRODUCES、BELONGS_TO、DEPENDS_ON、HANDLED_BY。
 无法确定时少提取，不要猜测代码类名。"""
 
@@ -499,6 +578,12 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         if not _literal_in_source(grounding_scope, name):
             logger.warning("忽略缺少原文依据的业务实体: %s", name)
             continue
+        attributes = _grounded_attributes(raw.get("attributes"), grounding_scope)
+        if kind in {"FLOW", "CAPABILITY"}:
+            # Code-like hints are implementation mappings in disguise. Entry
+            # anchors are the only durable code navigation allowed here.
+            attributes.pop("codeHints", None)
+            attributes.pop("code_hints", None)
         entities.append({
             "type": kind, "name": name,
             # Aliases and retrieval hints are not harmless presentation
@@ -507,7 +592,10 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
             # name and then use that name to prove its own mapping.
             "aliases": _grounded_strings(raw.get("aliases"), grounding_scope),
             "definition": _grounded_definition(definition, grounding_scope, quote, name),
-            "attributes": _grounded_attributes(raw.get("attributes"), grounding_scope),
+            "attributes": attributes,
+            "entryAnchors": _validate_entry_anchor_payload(
+                raw.get("entryAnchors") or raw.get("entry_anchors"), kind, grounding_scope,
+            ),
             "sourceQuote": quote,
         })
     relations: list[dict[str, Any]] = []
@@ -537,6 +625,38 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
             "attributes": _grounded_attributes(raw.get("attributes"), quote), "sourceQuote": quote,
         })
     return entities, relations
+
+
+def _validate_entry_anchor_payload(value: Any, business_type: str, grounding_scope: str) -> list[dict[str, Any]]:
+    """Keep only explicitly grounded FLOW/CAPABILITY navigation hints."""
+    if business_type not in {"FLOW", "CAPABILITY"}:
+        return []
+    anchors: list[dict[str, Any]] = []
+    for raw in _as_list(value):
+        if not isinstance(raw, Mapping):
+            continue
+        application = str(raw.get("applicationId") or raw.get("application_id") or raw.get("application") or "").strip()
+        entry_type = str(raw.get("entryType") or raw.get("entry_type") or raw.get("type") or "").strip().upper()
+        entry_name = str(raw.get("entryName") or raw.get("entry_name") or raw.get("name") or "").strip()
+        quote = str(raw.get("sourceQuote") or raw.get("source_quote") or "").strip()
+        if not application or not entry_type or not entry_name or not quote or quote not in grounding_scope:
+            logger.warning("忽略缺少同节原文依据的调查入口: %s", entry_name or application)
+            continue
+        try:
+            validate_entry_name(entry_name)
+        except EntryAnchorError:
+            logger.warning("忽略非法调查入口名称: %s", entry_name)
+            continue
+        if not all(_literal_in_source(grounding_scope, item) for item in (application, entry_type, entry_name)):
+            logger.warning("忽略未在同节逐字出现的调查入口: %s", entry_name)
+            continue
+        anchors.append({
+            "application": application, "entryType": entry_type, "entryName": entry_name,
+            "sourceType": str(raw.get("sourceType") or "HUMAN").strip().upper(),
+            "status": str(raw.get("status") or "").strip().upper(),
+            "sourceQuote": quote,
+        })
+    return anchors
 
 
 def _grounded_quote(text: str, quote: str, *fallbacks: str) -> str:
@@ -709,32 +829,104 @@ def _deterministic_extract(text: str) -> dict[str, Any]:
     sections = _markdown_sections(text)
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
+    relation_keys: set[tuple[str, str, str]] = set()
     for title, body, quote in sections:
-        kind = _explicit_type(title, body)
+        if title.strip().casefold() in {"调查入口", "entry anchors", "entry anchor"}:
+            continue
+        parent_body, parent_quote = _section_by_title(text, title) or (body, quote)
+        anchors = _extract_entry_anchors(parent_quote)
+        kind = _explicit_type(title, parent_body)
+        if anchors and kind == "BUSINESS_TERM":
+            kind = "FLOW" if any("流程" in value for value in (title, parent_body)) else "CAPABILITY"
+        body = parent_body
+        quote = parent_quote
         definition = _first_sentence(body) or title
         aliases = re.findall(r"(?:代码中(?:一般)?用|简称(?:为)?|别名(?:为)?)[：:\s]*([A-Za-z][A-Za-z0-9_-]*)", body)
         attributes: dict[str, Any] = {}
         if kind == "FLOW":
-            attributes["steps"] = [line.strip().lstrip("-0123456789. ") for line in body.splitlines() if line.strip().startswith(("-", "1", "2", "3", "4", "5"))]
+            steps: list[str] = []
+            for line in body.splitlines():
+                value = line.strip()
+                if value.casefold().startswith(("### 调查入口", "### entry anchor", "### entry anchors")):
+                    break
+                if value.startswith(("-", "1", "2", "3", "4", "5")) and "|" not in value:
+                    steps.append(value.lstrip("-0123456789. "))
+            if steps:
+                attributes["steps"] = steps
         if kind == "RULE":
             attributes["statement"] = definition
         identifiers = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b", body)
         ignored = {"the", "and", "for", "with", "from", "this", "that"}
         code_hints = [value for value in identifiers if value.casefold() not in ignored]
-        if code_hints:
+        if code_hints and kind not in {"FLOW", "CAPABILITY"}:
             attributes["codeHints"] = _unique(code_hints)[:12]
         if "关系" not in title:
             entities.append({
                 "type": kind, "name": title, "aliases": aliases,
-                "definition": definition, "attributes": attributes, "sourceQuote": quote,
+                "definition": definition, "attributes": attributes,
+                "entryAnchors": anchors, "sourceQuote": quote,
             })
-        match = re.search(r"(.{2,24}?)(?:完成|成功|失败|创建)后[，,]\s*(?:需要|会|将)?\s*(.{2,32}?)(?:。|$)", body)
-        if match:
+        for sentence in re.split(r"(?<=[。！？!?])\s*", body):
+            sentence = sentence.strip()
+            match = re.search(
+                r"^(.{1,40}?)(?:完成|成功|失败|创建)后[，,]\s*(?:需要|会|将)?\s*(.{2,120})$",
+                sentence,
+            )
+            if not match:
+                continue
+            source, target = match.group(1).strip(), match.group(2).strip()
+            target_key = re.split(r"(?:需要|通过|并|，|,|。)", target, maxsplit=1)[0].strip()
+            key = (source.casefold(), "TRIGGERS", target_key.casefold())
+            if key in relation_keys:
+                continue
+            relation_keys.add(key)
             relations.append({
-                "from": match.group(1).strip(), "relation": "TRIGGERS", "to": match.group(2).strip(),
-                "scope": title, "attributes": {}, "sourceQuote": match.group(0).strip(),
+                "from": source, "relation": "TRIGGERS", "to": target,
+                "scope": title, "attributes": {}, "sourceQuote": sentence,
             })
     return {"entities": entities, "relations": relations}
+
+
+def _section_by_title(text: str, title: str) -> tuple[str, str] | None:
+    """Return the complete heading section, including nested entry lists."""
+    matches = list(re.finditer(r"^(#{1,6})\s+(.+?)\s*$", text, re.MULTILINE))
+    for index, match in enumerate(matches):
+        if match.group(2).strip() != title.strip():
+            continue
+        level = len(match.group(1))
+        end = next(
+            (item.start() for item in matches[index + 1:] if len(item.group(1)) <= level),
+            len(text),
+        )
+        section = text[match.start():end].strip()
+        return text[match.end():end].strip(), section
+    return None
+
+
+def _extract_entry_anchors(section: str) -> list[dict[str, Any]]:
+    """Parse only the explicit pipe-delimited entry list in a section."""
+    anchors: list[dict[str, Any]] = []
+    for line in section.splitlines():
+        value = line.strip()
+        if not value.startswith(("-", "*", "+")):
+            continue
+        value = re.sub(r"^[-*+]\s*", "", value).strip()
+        parts = [part.strip() for part in value.split("|")]
+        if len(parts) != 3:
+            continue
+        application, entry_type, entry_name = parts
+        entry_type = entry_type.upper()
+        if entry_type not in {"PAGE", "CONTROLLER", "JOB", "CONSUMER", "ENTRY_CLASS", "OTHER"}:
+            continue
+        try:
+            validate_entry_name(entry_name)
+        except EntryAnchorError:
+            continue
+        anchors.append({
+            "application": application, "entryType": entry_type, "entryName": entry_name,
+            "sourceType": "HUMAN", "status": "ACTIVE", "sourceQuote": value,
+        })
+    return anchors
 
 
 def _markdown_sections(text: str) -> list[tuple[str, str, str]]:

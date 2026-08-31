@@ -142,7 +142,12 @@ class BusinessTools:
 
     def _get_baseline_entity(self, knowledge_id: str) -> dict:
         row = self.db.execute("SELECT * FROM business_entity WHERE id=?", (knowledge_id,)).fetchone()
-        mappings = self._baseline_mappings("ENTITY", knowledge_id)
+        from .knowledge_update.entry_anchor_service import EntryAnchorService
+
+        anchors = (
+            EntryAnchorService(self.db).list_for_business(row["entity_type"], knowledge_id)
+            if row["entity_type"] in {"FLOW", "CAPABILITY"} else []
+        )
         business_relations = [dict(item) for item in self.db.execute(
             """SELECT * FROM business_relation_v2
                 WHERE status!='DEPRECATED' AND (from_entity_id=? OR to_entity_id=?)""",
@@ -158,7 +163,9 @@ class BusinessTools:
             }
             for item in business_relations
         ]
-        evidence_ids = [row["source_evidence_id"], *[value for item in mappings for value in item["evidence_ids"]]]
+        evidence_ids = [row["source_evidence_id"]]
+        evidence_ids.extend(item["sourceEvidenceId"] for item in anchors if item.get("sourceEvidenceId"))
+        evidence_ids.extend(item["evidence_id"] for item in relation_values if item.get("evidence_id"))
         evidence = self._load_evidence(evidence_ids)
         return {
             "knowledge": {
@@ -167,13 +174,13 @@ class BusinessTools:
                 "knowledge_type": row["entity_type"], "version": 1,
                 "evidence_id": row["source_evidence_id"],
             },
-            "relations": [*mappings, *relation_values], "evidence": evidence, "reviews": [],
+            "relations": relation_values, "entryAnchors": anchors,
+            "evidence": evidence, "reviews": [],
         }
 
     def _get_baseline_relation(self, knowledge_id: str) -> dict:
         row = self.db.execute("SELECT * FROM business_relation_v2 WHERE id=?", (knowledge_id,)).fetchone()
-        mappings = self._baseline_mappings("RELATION", knowledge_id)
-        evidence_ids = [row["evidence_id"], *[value for item in mappings for value in item["evidence_ids"]]]
+        evidence_ids = [row["evidence_id"]]
         return {
             "knowledge": {
                 "id": knowledge_id, "title": f"{row['from_label']} → {row['to_label']}",
@@ -181,7 +188,7 @@ class BusinessTools:
                 "status": "CONFIRMED" if row["status"] == "VERIFIED" else row["status"],
                 "knowledge_type": "RELATION", "version": 1, "evidence_id": row["evidence_id"],
             },
-            "relations": mappings, "evidence": self._load_evidence(evidence_ids), "reviews": [],
+            "relations": [], "entryAnchors": [], "evidence": self._load_evidence(evidence_ids), "reviews": [],
         }
 
     def _baseline_mappings(self, business_type: str, business_id: str) -> list[dict]:
