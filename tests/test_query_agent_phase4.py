@@ -150,7 +150,7 @@ class QueryAgentPhase4Test(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_representative_twenty_case_fixture_passes(self):
-        cases = Path(__file__).resolve().parent.parent / "examples" / "query_validation" / "cases.json"
+        cases = Path(__file__).resolve().parent.parent / "examples" / "demo" / "query_validation" / "cases.json"
         report = run_validation(self.db, cases)
         self.assertEqual((20, 20, True), (report["totalCases"], report["passedCases"], report["passed"]))
         self.assertEqual("REPEATABLE_REPRESENTATIVE_NOT_PRODUCTION", report["fixtureType"])

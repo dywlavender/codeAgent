@@ -13,7 +13,9 @@ from business_code_agent.tools import EvidenceTools
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / "examples" / "multi-application-flow"
+# Keep regression data under tests/fixtures so user-facing examples can be
+# replaced without breaking the automated multi-application checks.
+FIXTURE = ROOT / "tests" / "fixtures" / "multi_application_flow"
 
 
 class MultiApplicationFlowTest(unittest.TestCase):

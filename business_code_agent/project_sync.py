@@ -119,6 +119,16 @@ def sync_repository_offline(config: RepositoryConfig) -> dict:
 
 def sync_repository(config: RepositoryConfig) -> dict:
     target = config.local_path
+    if _is_local_snapshot_url(config.git_url):
+        if not target.is_dir():
+            raise ProjectSyncError(
+                f"仓库 {config.repository_id} 使用本地快照配置，但 localPath 不存在: {target}；"
+                "请修正 localPath，或把 gitUrl 改成可访问的内网 Git 地址"
+            )
+        return {
+            **_result(config, config.branch or "local", "LOCAL_SNAPSHOT"),
+            "message": "gitUrl=unused，跳过 Git 同步并直接使用 localPath",
+        }
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         arguments = ["clone"]
@@ -224,7 +234,7 @@ def _resolve_git_url(config_path: Path, value: str) -> str:
     """Resolve local relative Git sources while leaving hosted URLs unchanged.
 
     A validation fixture can point at a sibling directory with
-    ``"gitUrl": "examples/validation-project"``.  Resolving that path once at
+    ``"gitUrl": "examples/demo"``.  Resolving that path once at
     config-load time makes the cloned repository's ``origin`` stable across
     subsequent syncs.  HTTPS, SSH and other non-local Git URLs remain exactly
     as configured.
@@ -241,6 +251,11 @@ def _resolve_git_url(config_path: Path, value: str) -> str:
     if working_directory.exists():
         return str(working_directory)
     return value
+
+
+def _is_local_snapshot_url(value: str) -> bool:
+    """Recognize the explicit placeholder used by local example fixtures."""
+    return str(value or "").strip().casefold() in {"unused", "local", "local-only"}
 
 
 def _normalise_remote(value: str) -> str:

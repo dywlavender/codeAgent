@@ -1,0 +1,10 @@
+{
+  "project": {
+    "id": "validation-project",
+    "name": "Validation Project"
+  },
+  "startup": {
+    "database": ".data/validation-project.db",
+    "port": 8083
+  }
+}

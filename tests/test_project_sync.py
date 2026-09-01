@@ -80,6 +80,26 @@ class ProjectSyncTest(unittest.TestCase):
         self.assertEqual("UP_TO_DATE", second["repositories"][0]["syncStatus"])
         self.assertEqual(0, second["repositories"][0]["indexed"]["files"])
 
+    def test_unused_git_url_uses_existing_local_snapshot_without_cloning(self):
+        source = self.root / "local snapshot"
+        source.mkdir()
+        (source / "Entry.java").write_text(
+            "package demo; public class Entry { public void run() {} }",
+            encoding="utf-8",
+        )
+        config = self.root / "local-config.json"
+        config.write_text(json.dumps({
+            "project": {"id": "local-system", "name": "Local System"},
+            "repositories": [{
+                "id": "local-core", "gitUrl": "unused", "localPath": "local snapshot",
+            }],
+        }), encoding="utf-8")
+
+        result = sync_project(config, self.root / "local.db")
+
+        self.assertEqual("LOCAL_SNAPSHOT", result["repositories"][0]["syncStatus"])
+        self.assertGreater(result["repositories"][0]["indexed"]["symbols"], 0)
+
     def _write_java(self, content: str):
         path = self.source / "src" / "Entry.java"
         path.parent.mkdir(exist_ok=True)

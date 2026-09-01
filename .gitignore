@@ -26,4 +26,8 @@ examples/validation-project/
 # Local runtime config (copy from project.config.example.json)
 project.config.json
 
+# Committed demo/test configurations are fixtures, not local runtime state.
+!examples/demo/project.config.json
+!tests/fixtures/**/project.config.json
+
 .workbuddy/

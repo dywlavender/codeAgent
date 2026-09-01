@@ -58,7 +58,9 @@ class WindowsLauncherTest(unittest.TestCase):
         self.assertNotIn("Set-ExecutionPolicy", script)
 
     def test_validation_project_config_supplies_startup_defaults(self):
-        config = json.loads((ROOT / "project.config.json").read_text(encoding="utf-8"))
+        config = json.loads(
+            (ROOT / "tests" / "fixtures" / "windows" / "project.config.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(".data/validation-project.db", config["startup"]["database"])
         self.assertEqual(8083, config["startup"]["port"])
         self.assertEqual("validation-project", config["project"]["id"])

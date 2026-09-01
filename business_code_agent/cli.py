@@ -8,18 +8,39 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .application_topology import ApplicationTopologyStore, load_application_config
 from .code_intelligence import JavaIndexer
 from .env import EnvFileError, load_env_file
+from .integration_edges import IntegrationEdgeResolver
 from .orchestrator import Orchestrator
+from .project_sync import load_project_config
 from .requirements import RequirementBuilder
 from .schema import connect
 
 
 def load_demo(db_path: str):
+    """Load the shipped canonical demo without Git or a model call.
+
+    The demo is deliberately seeded through the same project topology,
+    baseline and requirement services used by a real deployment.  It does not
+    rely on retired storage.  It works for both file databases and
+    ``:memory:`` connections used by the CLI/tests.
+    """
+    root = Path(__file__).resolve().parent.parent / "examples" / "demo"
+    config_path = root / "project.config.json"
     db = connect(db_path)
-    root = Path(__file__).resolve().parent.parent / "examples" / "acceptance"
-    JavaIndexer(db).ingest(str(root / "java"), "acceptance-repo")
+    project, repositories = load_project_config(config_path)
+    indexer = JavaIndexer(db)
+    for repository in repositories:
+        indexer.ingest(str(repository.local_path), repository.repository_id)
+    systems, applications = load_application_config(
+        config_path, project, {item.repository_id for item in repositories},
+    )
+    ApplicationTopologyStore(db).replace(systems, applications)
+    IntegrationEdgeResolver(db).rebuild()
     RequirementBuilder(db).ingest(str(root / "requirements" / "REQ-2026-001.json"))
+    from .knowledge_update.baseline_service import BaselineKnowledgeService
+    BaselineKnowledgeService(db, project_config=config_path).refresh(parser="markdown")
     return db
 
 
@@ -121,7 +142,10 @@ def main() -> None:
     query_run.add_argument("--db", required=True)
     query_validate = sub.add_parser("query-validate")
     query_validate.add_argument("--db", default=":memory:")
-    query_validate.add_argument("--cases", default=str(Path(__file__).resolve().parent.parent / "examples" / "query_validation" / "cases.json"))
+    query_validate.add_argument(
+        "--cases",
+        default=str(Path(__file__).resolve().parent.parent / "examples" / "demo" / "query_validation" / "cases.json"),
+    )
     serve_query = sub.add_parser("serve-query")
     serve_query.add_argument("--db", required=True)
     serve_query.add_argument("--host", default="127.0.0.1")
@@ -157,8 +181,13 @@ def main() -> None:
     elif args.command == "ingest-repo":
         print(JavaIndexer(connect(args.db)).ingest(args.repo, args.repository_id))
     elif args.command == "sync-project":
-        from .project_sync import sync_project
-        print(json.dumps(sync_project(args.config, args.db, offline=args.offline), ensure_ascii=False, indent=2))
+        from .project_sync import ProjectSyncError, sync_project
+        try:
+            result = sync_project(args.config, args.db, offline=args.offline)
+        except ProjectSyncError as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "baseline-refresh":
         from .knowledge_update.baseline_service import BaselineKnowledgeService
         service = BaselineKnowledgeService(connect(args.db), project_config=args.config)

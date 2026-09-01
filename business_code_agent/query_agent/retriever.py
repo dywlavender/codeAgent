@@ -49,11 +49,12 @@ class QueryRetriever:
     def initial_search(self, understanding: Any, state: Any | None = None) -> dict:
         """Start from business knowledge and anchors, then use runtime code search.
 
-        A global code search is used only for explicit code hints or when the
-        question has no matching business card.  Once a business card exists,
-        its maintained entry anchors are the investigation boundary; an
-        unresolved anchor is reported to the agent rather than replaced by a
-        broad search that can mix unrelated applications.
+        A global code search is used for explicit code hints, when the
+        question has no matching business card, or when a matching business
+        card has no resolved entry anchor.  Resolved anchors remain the first
+        candidates; the last condition permits one current-index search to
+        recover after a complete anchor miss without rewriting the business
+        knowledge.
         """
         query = _search_query(understanding, state)
         fields = _values(understanding, state, "fields", "field_hints", "fieldHints")
@@ -66,7 +67,11 @@ class QueryRetriever:
         business_rows, business_calls = self._initial_business(self.tools.business, query)
         anchor_result = self._resolve_entry_anchors(business_rows)
         explicit_code_hint = bool(fields or tables or code_hints)
-        use_global_code = explicit_code_hint or not business_rows
+        # A matching business card without any maintained anchor is also a
+        # valid reason to search the current index.  Anchors are a preferred
+        # route, not a requirement for code discovery.
+        anchor_miss = bool(business_rows) and anchor_result["resolved"] == 0
+        use_global_code = explicit_code_hint or not business_rows or anchor_miss
         if use_global_code:
             code_rows, code_calls = self._initial_code(self.tools.code, query, fields, tables, code_hints)
             code_rows = _dedupe([*anchor_result["candidates"], *code_rows], "evidence_id", "evidenceId", "id", "symbol_id", "symbolId")

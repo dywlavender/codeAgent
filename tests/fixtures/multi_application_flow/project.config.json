@@ -1,0 +1,51 @@
+{
+  "knowledge": {
+    "baselineRoot": "knowledge/baseline"
+  },
+  "project": {
+    "id": "withdraw-flow",
+    "name": "提款多应用流程验证"
+  },
+  "repositoryRoot": ".data/repositories",
+  "systems": [
+    {"id": "channel", "name": "渠道系统"},
+    {"id": "middle", "name": "贷款中台"}
+  ],
+  "repositories": [
+    {"id": "withdraw-h5-repo", "gitUrl": "unused", "localPath": "h5"},
+    {"id": "channel-repo", "gitUrl": "unused", "localPath": "channel"},
+    {"id": "middle-repo", "gitUrl": "unused", "localPath": "middle"}
+  ],
+  "applications": [
+    {
+      "id": "withdraw-h5",
+      "name": "提款 H5",
+      "systemId": "channel",
+      "repositoryId": "withdraw-h5-repo",
+      "sourceRoot": ".",
+      "type": "FRONTEND",
+      "language": "typescript",
+      "framework": "vue"
+    },
+    {
+      "id": "channel-service",
+      "name": "渠道服务",
+      "systemId": "channel",
+      "repositoryId": "channel-repo",
+      "sourceRoot": ".",
+      "type": "BACKEND",
+      "language": "java",
+      "framework": "spring-boot"
+    },
+    {
+      "id": "loan-middle",
+      "name": "贷款中台",
+      "systemId": "middle",
+      "repositoryId": "middle-repo",
+      "sourceRoot": ".",
+      "type": "BACKEND",
+      "language": "java",
+      "framework": "spring-boot"
+    }
+  ]
+}

@@ -30,6 +30,11 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
         self.assertNotIn("business_knowledge", names)
         self.assertNotIn("knowledge_relation", names)
         self.assertNotIn("knowledge_change", names)
+        self.assertNotIn("functional_knowledge", names)
+        self.assertNotIn("functional_entry_anchor", names)
+        self.assertNotIn("functional_key_table", names)
+        self.assertNotIn("functional_retrieval_link", names)
+        self.assertNotIn("functional_analysis", names)
 
     def test_existing_retired_rows_are_removed_on_open(self):
         with tempfile.TemporaryDirectory() as folder:

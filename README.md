@@ -117,6 +117,14 @@ cp project.config.example.json project.config.json
 
 `applications` 可以把一个仓库按 `sourceRoot` 拆成多个应用，也可以让多个仓库归属同一个系统。未配置 `systems/applications` 时保持兼容：每个仓库自动视为一个应用。完整说明与验收示例见 [多应用业务流使用指南](docs/multi-application-flow.md)。
 
+`localPath` 是相对于配置文件所在目录的路径。内置多应用示例可直接使用：
+
+```bash
+./start-mac.sh --project-config examples/project.config.json
+```
+
+示例中的 `gitUrl: "unused"` 表示本地快照，目录存在时会跳过 Git；真实项目必须替换为部署机可访问的内网 Git 地址。
+
 私有仓库使用本机已有的 SSH Key 或 Git 凭据管理器，配置文件不保存账号密码。
 
 ## 模型配置
@@ -184,7 +192,7 @@ python3 -m business_code_agent.cli baseline-refresh \
 4. 进入“业务知识维护”，点击“导入业务基线”。
 5. 查看六类知识、原文来源、业务关系和调查入口。
 6. 在问答页面提问；Agent 会优先解析入口，再基于当前代码实时调查。
-7. 入口失效时，Agent 会报告入口解析状态并停止该入口分支；只有问题本身明确提供代码线索时才会检索对应线索，不修改业务知识。
+7. 入口失效时，Agent 会报告入口解析状态；仍有入口成功时继续沿成功入口调查，入口全部失效或尚未维护入口时最多进行一次当前索引搜索，不修改业务知识。
 
 命令行也可以执行：
 
@@ -194,7 +202,7 @@ python3 -m business_code_agent.cli baseline-refresh \
   --db .data/knowledge.db
 ```
 
-无模型导入使用 `--parser markdown`；该模式必须显式指定。入口未定位会标记解析状态并停止该入口分支，不会把不存在的类或方法写入知识，也不会自动扩大为全局代码搜索。
+无模型导入使用 `--parser markdown`；该模式必须显式指定。入口未定位会标记解析状态，不会把不存在的类或方法写入知识；入口全部失效或尚未维护入口时只允许一次当前索引搜索恢复调查。
 
 ## 业务入口锚点
 
@@ -237,6 +245,6 @@ cd frontend
 npm run build
 ```
 
-内置 `examples/validation-project` 用于验证 Java/MyBatis 代码事实、自然语言业务基线和问答检索链路；`examples/multi-application-flow` 验证入口锚点驱动的多应用流程，从 H5 点击事件追踪到中台最终处理方法。
+内置 `examples/demo` 用于验证 Java/MyBatis 代码事实、自然语言业务基线和问答检索链路；多应用流程的回归数据位于 `tests/fixtures/multi_application_flow`，与用户自己的示例项目分离。
 
 详细技术结构见 [当前架构](docs/architecture.md)。

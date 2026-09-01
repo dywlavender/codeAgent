@@ -15,7 +15,9 @@ from business_code_agent.business_tools import BusinessTools
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / "examples" / "multi-application-flow"
+# Keep regression data under tests/fixtures so user-facing examples can be
+# replaced without breaking the automated convergence checks.
+FIXTURE = ROOT / "tests" / "fixtures" / "multi_application_flow"
 
 
 class EntryAnchorConvergenceTest(unittest.TestCase):
@@ -66,7 +68,33 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
         self.assertEqual(3, len(result["code_candidates"]))
         self.assertTrue(all(item.get("entry_resolution") == "RESOLVED" for item in result["code_candidates"]))
 
-    def test_stale_anchor_stops_at_runtime_without_rewriting_knowledge(self):
+    def test_stale_anchors_use_one_runtime_search_without_rewriting_knowledge(self):
+        anchors = self.db.execute(
+            "SELECT id,application_id FROM business_entry_anchor ORDER BY id"
+        ).fetchall()
+        for index, anchor in enumerate(anchors):
+            self.db.execute(
+                "UPDATE business_entry_anchor SET entry_name=? WHERE id=?",
+                (f"OldWithdrawResultJob{index}", anchor["id"]),
+            )
+        self.db.commit()
+        for index, anchor in enumerate(anchors):
+            self.assertEqual(
+                "NOT_FOUND",
+                EntryResolver(self.db).resolve(anchor["application_id"], f"OldWithdrawResultJob{index}")["status"],
+            )
+        result = QueryRetriever(self.db).initial_search({"searchTerms": ["提款申请主流程"]})
+        tools = [item["tool"] for item in result["tool_calls"]]
+        self.assertIn("resolve_entry_anchor", tools)
+        self.assertEqual(1, tools.count("search_code"))
+        self.assertTrue(all(item.get("entry_resolution") != "NOT_FOUND" for item in result["code_candidates"]))
+        for index, anchor in enumerate(anchors):
+            self.assertEqual(f"OldWithdrawResultJob{index}", self.db.execute(
+                "SELECT entry_name FROM business_entry_anchor WHERE id=?", (anchor["id"],)
+            ).fetchone()["entry_name"])
+        self.assertEqual(3, self.db.execute("SELECT count(*) FROM business_entry_anchor").fetchone()[0])
+
+    def test_partial_anchor_miss_keeps_successful_anchor_path(self):
         anchor = self.db.execute(
             "SELECT id,application_id FROM business_entry_anchor ORDER BY id LIMIT 1"
         ).fetchone()
@@ -75,19 +103,20 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
             (anchor["id"],),
         )
         self.db.commit()
-        self.assertEqual(
-            "NOT_FOUND",
-            EntryResolver(self.db).resolve(anchor["application_id"], "OldWithdrawResultJob")["status"],
-        )
         result = QueryRetriever(self.db).initial_search({"searchTerms": ["提款申请主流程"]})
         tools = [item["tool"] for item in result["tool_calls"]]
-        self.assertIn("resolve_entry_anchor", tools)
+        self.assertEqual(3, tools.count("resolve_entry_anchor"))
         self.assertNotIn("search_code", tools)
-        self.assertEqual([], result["code_candidates"])
-        self.assertEqual("OldWithdrawResultJob", self.db.execute(
-            "SELECT entry_name FROM business_entry_anchor WHERE id=?", (anchor["id"],)
-        ).fetchone()["entry_name"])
-        self.assertEqual(3, self.db.execute("SELECT count(*) FROM business_entry_anchor").fetchone()[0])
+        self.assertEqual(2, len(result["code_candidates"]))
+        self.assertTrue(all(item.get("entry_resolution") == "RESOLVED" for item in result["code_candidates"]))
+
+    def test_business_card_without_anchor_uses_current_index_search(self):
+        self.db.execute("DELETE FROM business_entry_anchor")
+        self.db.commit()
+        result = QueryRetriever(self.db).initial_search({"searchTerms": ["提款申请主流程"]})
+        tools = [item["tool"] for item in result["tool_calls"]]
+        self.assertNotIn("resolve_entry_anchor", tools)
+        self.assertEqual(1, tools.count("search_code"))
 
     def test_entry_resolution_is_scoped_to_application(self):
         resolver = EntryResolver(self.db)

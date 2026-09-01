@@ -67,7 +67,9 @@ start-windows.bat
 
 根目录存在 `project.config.json` 时会自动加载。首次运行自动克隆；以后先检查远端。本地已是最新版本时不会更新工作区，本地落后时才快进更新。同步完成后只增量索引变化源码。私有仓库复用 Windows Git Credential Manager 或 SSH Key。
 
-当前仓库的 `project.config.json` 已配置内置验证项目、`.data\validation-project.db` 和 8083 端口。直接运行 `start-windows.bat` 即可验证配置驱动的同步；显式传入 `-Database` 或 `-Port` 时会覆盖配置文件值。切换真实项目时，将它替换为 `project.config.example.json` 的副本并填写实际 Git 地址。
+`localPath` 始终相对于配置文件所在目录。随仓库提供的本地多应用示例位于 `examples` 目录，可在 PowerShell 中显式指定 `examples\project.config.json`；其中 `gitUrl: "unused"` 仅表示本地快照，真实项目应替换为可访问的内网 Git 地址。
+
+如果根目录存在 `project.config.json`，启动器会读取其中的 `startup.database` 和 `startup.port`；没有该文件时使用 `.data\knowledge.db` 和 8082。想体验随包提供的示例可使用 `start-windows.bat -Mode Demo`。切换真实项目时，将 `project.config.example.json` 复制为 `project.config.json` 并填写实际内网 Git 地址。
 
 Knowledge Update Agent 和 Query Agent 共用 `.env` 中的模型配置。推荐复制根目录 `.env.example` 为 `.env`，然后填写模型参数、模型密钥和管理员口令：
 
