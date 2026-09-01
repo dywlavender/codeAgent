@@ -100,7 +100,7 @@ def _extract_business_objects(text: str, processes: list[str], systems: list[str
 
 
 def _question_terms(text: str) -> list[str]:
-    """Conservative fallback: terms are copied from the question itself."""
+    """Conservative local extraction: terms are copied from the question itself."""
     preferred = ("申请", "提款", "还款", "校验", "拒绝", "规则", "需求", "流程", "阶段", "关系")
     values = [item for item in preferred if item in text]
     for clause in re.findall(r"[\u4e00-\u9fff]{2,32}", text):

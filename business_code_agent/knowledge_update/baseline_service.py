@@ -54,8 +54,10 @@ class BaselineKnowledgeService:
 
     Human statements, entry anchors and runtime code facts deliberately remain
     separate. A refresh never derives Business→Code mappings.
-    The model may structure source text, but every accepted business item must
-    point back to a literal excerpt in that source.
+    The configured model may structure source text, but every accepted
+    business item must point back to a literal excerpt in that source.  A
+    deterministic Markdown parser is available only when explicitly selected
+    by the caller; a model error is never silently converted to another mode.
     """
 
     def __init__(self, db, *, project_config: str | Path | None = None, extractor: BaselineExtractor | None = None):
@@ -64,12 +66,12 @@ class BaselineKnowledgeService:
         self.config = self._load_config()
         self._extractor = extractor
 
-    def refresh(self, *, use_model: bool = True) -> dict[str, Any]:
+    def refresh(self, *, parser: str = "model") -> dict[str, Any]:
         root = self.knowledge_root()
         if not root.is_dir():
             raise ValueError(f"业务基线目录不存在: {root}")
         paths = sorted(root.rglob("*.md"))
-        extractor = self._extractor or (self._configured_extractor() if use_model else None)
+        extractor = self._extractor or self._extractor_for(parser)
         documents = [self._read_document(path, extractor) for path in paths]
         active_sources: set[str] = set()
         counts = {name: 0 for name in sorted(ALL_KNOWLEDGE_TYPES)}
@@ -179,7 +181,7 @@ class BaselineKnowledgeService:
 
     def knowledge_root(self) -> Path:
         knowledge = self.config.get("knowledge") or {}
-        configured = knowledge.get("baselineRoot") or knowledge.get("root") or "knowledge/baseline"
+        configured = knowledge.get("baselineRoot") or "knowledge/baseline"
         base = self.project_config.parent if self.project_config else Path.cwd()
         path = Path(str(configured)).expanduser()
         return path.resolve() if path.is_absolute() else (base / path).resolve()
@@ -188,17 +190,10 @@ class BaselineKnowledgeService:
         text = path.read_text(encoding="utf-8-sig")
         title = _document_title(text, path.stem)
         source_id = stable_id("BKS", str(path.resolve()))
-        if extractor:
-            try:
-                payload = extractor.extract(source_path=str(path.resolve()), text=text)
-                mode = "MODEL"
-            except Exception as exc:
-                logger.warning("业务基线模型调用失败，使用安全回退解析: %s", type(exc).__name__)
-                payload = _deterministic_extract(text)
-                mode = "MODEL_FALLBACK"
-        else:
-            payload = _deterministic_extract(text)
-            mode = "SAFE_FALLBACK"
+        if extractor is None:
+            raise RuntimeError("业务基线导入需要模型；如需显式使用 Markdown 解析，请传入 parser='markdown'")
+        payload = extractor.extract(source_path=str(path.resolve()), text=text)
+        mode = getattr(extractor, "mode", "MODEL")
         entities, relations = _validate_payload(payload, text)
         return BaselineDocument(source_id, str(path.resolve()), title, text, tuple(entities), tuple(relations), mode)
 
@@ -279,7 +274,7 @@ class BaselineKnowledgeService:
             quote = str(payload.get("sourceQuote") or payload.get("source_quote") or "").strip()
             if not quote:
                 raise EntryAnchorError("调查入口必须提供 sourceQuote")
-            quote = _grounded_quote(document.text, quote, entry_name, application_ref)
+            quote = _grounded_quote(document.text, quote)
             scope = _section_containing_quote(document.text, quote, entry_name)
             if not _literal_in_source(scope, application_ref) or not _literal_in_source(scope, entry_type) or not _literal_in_source(scope, entry_name):
                 raise EntryAnchorError("调查入口的应用、类型和名称必须在同一 Markdown 小节中出现")
@@ -324,14 +319,23 @@ class BaselineKnowledgeService:
         self.db.execute("INSERT OR REPLACE INTO evidence_lifecycle VALUES (?,'ACTIVE',NULL,NULL,NULL)", (evidence_id,))
         return evidence_id
 
-    def _configured_extractor(self) -> BaselineExtractor | None:
+    def _extractor_for(self, parser: str) -> BaselineExtractor:
+        parser = str(parser or "model").strip().lower()
+        if parser == "markdown":
+            return MarkdownBaselineExtractor()
+        if parser != "model":
+            raise ValueError("parser must be 'model' or 'markdown'")
+        return self._configured_extractor()
+
+    def _configured_extractor(self) -> BaselineExtractor:
         config = model_config_from_environment()
         if not config or not config.get("enabled", True):
-            return None
+            raise RuntimeError("业务基线导入需要启用模型，请配置 BUSINESS_CODE_MODEL_ENABLED=true 和 API 凭据")
         try:
-            return LangChainBaselineExtractor(init_configured_chat_model(ModelConfig.from_mapping(config)))
-        except (RuntimeError, ValueError):
-            return None
+            model = init_configured_chat_model(ModelConfig.from_mapping(config))
+        except (RuntimeError, ValueError) as exc:
+            raise RuntimeError(f"业务基线模型初始化失败: {exc}") from exc
+        return LangChainBaselineExtractor(model)
 
     def _load_config(self) -> dict[str, Any]:
         if not self.project_config or not self.project_config.is_file():
@@ -348,6 +352,19 @@ class BaselineKnowledgeService:
             "sourceId": row["source_id"], "evidenceId": row["evidence_id"],
             "confidence": row["confidence"], "status": row["status"], "updatedAt": row["updated_at"],
         }
+
+class MarkdownBaselineExtractor:
+    """Explicit local parser for environments that do not use a model.
+
+    This parser is intentionally opt-in.  It is useful for smoke tests and
+    air-gapped demonstrations, but it is never selected after a model error.
+    """
+
+    mode = "MARKDOWN"
+
+    def extract(self, *, source_path: str, text: str) -> Mapping[str, Any]:
+        return _markdown_extract(text)
+
 
 class LangChainBaselineExtractor:
     def __init__(self, model, *, agent_factory=None):
@@ -422,7 +439,7 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         quote = str(raw.get("sourceQuote") or raw.get("source_quote") or "").strip()
         if kind not in ENTITY_TYPES or not name or not definition:
             continue
-        quote = _grounded_quote(text, quote, name, definition)
+        quote = _grounded_quote(text, quote)
         grounding_scope = _section_containing_quote(text, quote, name)
         # A model may use a valid quote as cover for a second, invented
         # business object.  The object name itself must be present in the
@@ -462,7 +479,7 @@ def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[
         quote = str(raw.get("sourceQuote") or raw.get("source_quote") or "").strip()
         if not source or not relation or not target:
             continue
-        quote = _grounded_quote(text, quote, source, target)
+        quote = _grounded_quote(text, quote)
         # Relations are stricter than entities: both endpoints and the
         # linguistic expression of the normalized predicate must be present
         # in the same quoted passage.  Merely appearing elsewhere in the same
@@ -513,16 +530,11 @@ def _validate_entry_anchor_payload(value: Any, business_type: str, grounding_sco
     return anchors
 
 
-def _grounded_quote(text: str, quote: str, *fallbacks: str) -> str:
-    if quote:
-        if quote in text:
-            return quote
-        raise ValueError("结构化知识引用的原文片段不存在")
-    for value in fallbacks:
-        if value and value in text:
-            line = next((line.strip() for line in text.splitlines() if value in line), value)
-            return line
-    raise ValueError("结构化知识缺少可回溯的原文片段")
+def _grounded_quote(text: str, quote: str) -> str:
+    quote = str(quote or "").strip()
+    if quote and quote in text:
+        return quote
+    raise ValueError("结构化知识必须提供存在于原文的 sourceQuote")
 
 
 def _section_containing_quote(text: str, quote: str, anchor: str = "") -> str:
@@ -678,8 +690,8 @@ def _quote_body(quote: str) -> str:
     return " ".join(lines)
 
 
-def _deterministic_extract(text: str) -> dict[str, Any]:
-    """Safe no-model fallback: extract only explicit Markdown sections."""
+def _markdown_extract(text: str) -> dict[str, Any]:
+    """Extract only explicit Markdown sections for the opt-in local parser."""
     sections = _markdown_sections(text)
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []

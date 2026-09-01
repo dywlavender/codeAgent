@@ -73,25 +73,7 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     body = self._body()
-                    self._json(200, service.refresh(
-                        use_model=bool(body.get("useModel", True)),
-                    ))
-                    return
-                if path == "/api/knowledge/refresh":
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
-                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
-                    body = self._body()
-                    self._json(200, service.refresh(analyze=bool(body.get("analyze", True))))
-                    return
-                analyze_match = re.fullmatch(r"/api/knowledge/functions/([^/]+)/analyze", path)
-                if analyze_match:
-                    if not self._require_admin():
-                        return
-                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
-                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
-                    self._json(200, service.analyze(analyze_match.group(1)))
+                    self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
                     return
                 feedback_match = re.fullmatch(r"/api/query/([^/]+)/feedback", path)
                 if feedback_match:
@@ -136,12 +118,6 @@ def make_server(
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                     query = parse_qs(parsed.query).get("q", [""])[0]
                     self._json(200, {"items": EvidenceTools(service.db).search_code(query or "_", 50) if query else []})
-                    return
-                if parsed.path == "/api/functions":
-                    from ..business_tools import BusinessTools
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    query = parse_qs(parsed.query).get("q", [""])[0]
-                    self._json(200, {"items": BusinessTools(service.db).search_business_knowledge(query)})
                     return
                 if parsed.path == "/api/requirements":
                     from ..requirement.service import RequirementService
@@ -200,18 +176,6 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     self._json(200, service.get_relation(relation_match.group(1)))
-                    return
-                if parsed.path == "/api/knowledge/functions":
-                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
-                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
-                    query = parse_qs(parsed.query).get("q", [""])[0]
-                    self._json(200, {"items": service.list_functions(query)})
-                    return
-                function_match = re.fullmatch(r"/api/knowledge/functions/([^/]+)", parsed.path)
-                if function_match:
-                    from ..knowledge_update.functional_service import FunctionalKnowledgeService
-                    service = FunctionalKnowledgeService(connect(db_path), project_config=project_config)
-                    self._json(200, service.get_function(function_match.group(1)))
                     return
                 match = re.fullmatch(r"/api/query/([^/]+)", parsed.path)
                 if match:

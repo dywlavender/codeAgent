@@ -16,7 +16,7 @@ const TYPE_CONFIG = {
     initialQuery: "repayType",
   },
   业务知识: {
-    endpoint: "/api/functions?q=",
+    endpoint: "/api/knowledge/entities?q=",
     placeholder: "搜索业务术语、能力、流程、规则或关系",
     empty: "还没有业务知识。请在管理页面导入业务基线。",
     countKey: "businessKnowledge",
@@ -148,7 +148,7 @@ function selectedRaw(items, id) {
 }
 
 function rowTitle(item, type) {
-  return item.qualified_name || item.title || item.id;
+  return item.qualified_name || item.title || item.name || item.id;
 }
 
 function rowSubtitle(item, type) {
@@ -157,14 +157,14 @@ function rowSubtitle(item, type) {
     return `${item.kind || "SYMBOL"} · ${facts} 条事实`;
   }
   if (type === "业务知识") {
-    return `${item.statement || ""}`;
+    return `${item.definition || item.statement || ""}`;
   }
   return `${item.status || ""}`;
 }
 
 function statusColor(status) {
   const value = String(status || "").toUpperCase();
-  if (["CONFIRMED", "ACTIVE", "READY"].includes(value)) return "green";
+  if (["CONFIRMED", "VERIFIED", "ACTIVE", "READY"].includes(value)) return "green";
   return "default";
 }
 
@@ -231,12 +231,12 @@ function CodeDetail({ item, detail }) {
 
 function KnowledgeDetail({ type, item }) {
   if (!item) return null;
-  const fields = type === "功能知识"
+  const fields = type === "业务知识"
     ? [
-      { key: "st", label: "摘要", children: item.statement || "—" },
-      { key: "ver", label: "版本", children: item.version != null ? `V${item.version}` : "—" },
-      { key: "kt", label: "知识类型", children: item.knowledge_type || "—" },
-      { key: "ev", label: "证据", children: item.evidence_id || "—" },
+      { key: "st", label: "定义", children: item.definition || item.statement || "—" },
+      { key: "kt", label: "知识类型", children: item.knowledge_type || item.type || "—" },
+      { key: "status", label: "状态", children: item.status || "—" },
+      { key: "ev", label: "原文证据", children: item.sourceEvidenceId || item.evidence_id || "—" },
     ]
     : [
       { key: "ver", label: "当前版本", children: item.current_version != null ? `V${item.current_version}` : "—" },
@@ -244,7 +244,7 @@ function KnowledgeDetail({ type, item }) {
     ];
   return (
     <Card styles={{ body: { padding: "18px 22px" } }}>
-      <Typography.Title level={5} style={{ marginTop: 0 }}>{item.title || item.id}</Typography.Title>
+      <Typography.Title level={5} style={{ marginTop: 0 }}>{item.title || item.name || item.id}</Typography.Title>
       <Descriptions size="small" column={1} items={fields} />
     </Card>
   );

@@ -33,7 +33,7 @@ class RepositoryAnalyzer:
         }
         knowledge = {
             "requirements": self.db.execute("SELECT count(*) FROM requirement").fetchone()[0],
-            "business_functions": self.db.execute(
+            "business_knowledge": self.db.execute(
                 "SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'"
             ).fetchone()[0],
         }
@@ -67,7 +67,7 @@ class RepositoryAnalyzer:
         requirements = self.tools.search_requirements(field)
         business = self.tools.search_business(field)
         candidate["requirements"] = [item["id"] for item in requirements]
-        candidate["business_functions"] = [item["id"] for item in business]
+        candidate["business_knowledge"] = [item["id"] for item in business]
         candidate["explanation_level"] = self._explanation_level(candidate)
         candidate["gaps"] = self._gaps(candidate)
         return candidate
@@ -123,7 +123,7 @@ class RepositoryAnalyzer:
     @staticmethod
     def _explanation_level(candidate: dict) -> str:
         code_chain = bool(candidate["writes"] and (candidate["checks"] or candidate["reads"]))
-        if code_chain and candidate["requirements"] and candidate["business_functions"]:
+        if code_chain and candidate["requirements"] and candidate["business_knowledge"]:
             return "EXPLAINED"
         if code_chain:
             return "CODE_CHAIN"
@@ -140,6 +140,6 @@ class RepositoryAnalyzer:
             gaps.append("未发现校验证据")
         if not candidate["requirements"]:
             gaps.append("未导入或未命中需求依据（可选增强）")
-        if not candidate["business_functions"]:
-            gaps.append("未命中功能知识文档（可选增强）")
+        if not candidate["business_knowledge"]:
+            gaps.append("未命中业务知识基线（可选增强）")
         return gaps

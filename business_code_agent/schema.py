@@ -184,49 +184,6 @@ CREATE TABLE IF NOT EXISTS query_feedback (
   FOREIGN KEY(run_id) REFERENCES query_agent_run(id)
 );
 
--- Function-centred knowledge V2. Human-authored definitions and generated
--- analysis are deliberately stored separately so a code refresh can never
--- rewrite the source document.
-CREATE TABLE IF NOT EXISTS functional_knowledge (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, aliases_json TEXT NOT NULL,
-  tags_json TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
-  scenarios_json TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
-  source_path TEXT NOT NULL UNIQUE, source_fingerprint TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'ACTIVE', refreshed_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS functional_entry_anchor (
-  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, project_name TEXT NOT NULL,
-  entry_type TEXT NOT NULL, class_name TEXT NOT NULL,
-  symbol_id TEXT, resolution_status TEXT NOT NULL,
-  candidate_ids_json TEXT NOT NULL DEFAULT '[]',
-  UNIQUE(function_id, project_name, entry_type, class_name),
-  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS functional_key_table (
-  id TEXT PRIMARY KEY, function_id TEXT NOT NULL, table_name TEXT NOT NULL,
-  purpose TEXT NOT NULL DEFAULT '',
-  UNIQUE(function_id, table_name),
-  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS functional_retrieval_link (
-  id TEXT PRIMARY KEY, function_id TEXT NOT NULL,
-  source_type TEXT NOT NULL, source_id TEXT NOT NULL,
-  relation_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
-  evidence_id TEXT, created_at TEXT NOT NULL,
-  UNIQUE(function_id, source_type, source_id, relation_type, target_type, target_id, evidence_id),
-  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS functional_analysis (
-  function_id TEXT PRIMARY KEY, status TEXT NOT NULL,
-  flow_json TEXT NOT NULL DEFAULT '[]', rules_json TEXT NOT NULL DEFAULT '[]',
-  coverage_json TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL,
-  analyzed_at TEXT, message TEXT NOT NULL DEFAULT '',
-  FOREIGN KEY(function_id) REFERENCES functional_knowledge(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_functional_knowledge_status ON functional_knowledge(status, refreshed_at);
-CREATE INDEX IF NOT EXISTS idx_functional_entry_function ON functional_entry_anchor(function_id, resolution_status);
-CREATE INDEX IF NOT EXISTS idx_functional_link_function ON functional_retrieval_link(function_id, relation_type);
-
 -- MVP business baseline. Human source, structured business knowledge and
 -- runtime code facts are separate records. Re-indexing code therefore never
 -- rewrites a human-authored business statement.
@@ -291,6 +248,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
     _purge_retired_business_schema(connection)
     _purge_legacy_function_governance(connection)
     _purge_legacy_mapping_schema(connection)
+    _purge_legacy_functional_schema(connection)
     additions = {
         "requirement": (
             ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
@@ -303,10 +261,55 @@ def _migrate(connection: sqlite3.Connection) -> None:
         for name, declaration in columns:
             if name not in existing:
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
-    entry_columns = {row[1] for row in connection.execute("PRAGMA table_info(functional_entry_anchor)")}
-    if "repository_id" in entry_columns and "project_name" not in entry_columns:
-        connection.execute("ALTER TABLE functional_entry_anchor RENAME COLUMN repository_id TO project_name")
     connection.commit()
+
+
+def _purge_legacy_functional_schema(connection: sqlite3.Connection) -> None:
+    """Drop the retired function-centred knowledge tables.
+
+    The function-document model was superseded by the natural-language
+    business baseline (``business_entity`` + ``business_entry_anchor``).
+    Existing local databases may still contain the five tables, so remove
+    them once on the next database open instead of leaving a second,
+    misleading source of truth behind. Only evidence owned by the retired
+    function documents is removed; code and baseline evidence stay.
+    """
+    indexes = (
+        "idx_functional_knowledge_status", "idx_functional_entry_function",
+        "idx_functional_link_function",
+    )
+    tables = (
+        "functional_analysis", "functional_retrieval_link", "functional_key_table",
+        "functional_entry_anchor", "functional_knowledge",
+    )
+    existing = {
+        row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if not existing.intersection(tables):
+        return
+    owned_evidence: list[str] = []
+    if "functional_knowledge" in existing and connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence'"
+    ).fetchone():
+        owned_evidence = [row[0] for row in connection.execute(
+            """SELECT DISTINCT e.id FROM evidence e
+                WHERE e.source_type='BUSINESS' AND e.source_id IN (SELECT id FROM functional_knowledge)"""
+        )]
+    if owned_evidence:
+        marks = ",".join("?" for _ in owned_evidence)
+        connection.execute(f"DELETE FROM evidence_lifecycle WHERE evidence_id IN ({marks})", owned_evidence)
+        connection.execute(f"DELETE FROM evidence WHERE id IN ({marks})", owned_evidence)
+    for index in indexes:
+        connection.execute(f'DROP INDEX IF EXISTS "{index}"')
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in tables:
+            if table in existing:
+                connection.execute(f'DROP TABLE "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
 
 
 def _purge_legacy_mapping_schema(connection: sqlite3.Connection) -> None:

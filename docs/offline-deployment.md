@@ -10,7 +10,7 @@
 | 前端 | 执行 `npm ci` 和构建 | 直接使用构建产物，不需要 Node.js |
 | 业务代码 | 不默认打包 | 通过内网 Git 克隆或更新 |
 | SQLite | 不预制业务数据库 | 首次启动建立，以后增量更新 |
-| 大模型 | 不打包 | 可关闭，或连接内网兼容接口 |
+| 大模型 | 不打包 | 问答可使用本地确定性流程；业务基线导入默认使用模型，也可显式选择 Markdown 解析 |
 
 前端产物和 Python 源码没有平台绑定，因此默认包可跨系统构建，部署机只需 Python 3.11+。Windows 和 Linux 仍分别生成入口包，避免启动器和部署说明混淆。只有显式选择“包内 wheel”严格断网模式时，构建机才必须与部署机的操作系统、CPU 架构和 Python 大小版本一致。
 
@@ -123,7 +123,7 @@ start-offline-windows.bat
 --host ADDRESS        / -HostAddress ADDRESS
 --port PORT           / -Port PORT
 --demo                / -Demo
---use-model           / -UseModel
+--baseline-parser     / -BaselineParser model|markdown
                       / -NoBrowser
 ```
 
@@ -139,15 +139,25 @@ Windows 示例：
 start-offline-windows.bat -Database "D:\business-code-agent\knowledge.db" -Port 8082
 ```
 
+端口被占用时，启动器会直接停止占用进程并复用原端口；如果系统无法取得 PID 或进程拒绝结束，错误信息会提示手工处理。
+
 生产环境建议把 SQLite 放在解压目录之外，这样替换应用包时不会误删业务知识。
 
 ## 四、内网模型配置
 
-复制 `.env.example` 为 `.env`。完全不使用模型时：
+复制 `.env.example` 为 `.env`。只使用代码索引和问答的本地确定性流程时：
 
 ```dotenv
 BUSINESS_CODE_MODEL_ENABLED=false
 ```
+
+此时不要在页面导入业务基线；如果确实需要无模型导入，请明确选择解析器：
+
+```bash
+./start-offline-linux.sh --baseline-parser markdown
+```
+
+Windows 使用 `-BaselineParser markdown`。这是一种显式运行模式，模型调用失败不会自动切换。
 
 使用公司内网 OpenAI 兼容接口时：
 
@@ -159,7 +169,7 @@ BUSINESS_CODE_MODEL_BASE_URL=http://model-gateway.company.local/v1
 BUSINESS_CODE_MODEL_API_KEY=internal-token
 ```
 
-启动器默认用保守解析刷新业务基线，不主动调用模型；只有显式增加 `--use-model`（Linux）或 `-UseModel`（Windows）才会在启动阶段使用模型。页面中的 Agent 是否调用模型仍由 `.env` 控制。
+启动器默认用配置的模型刷新业务基线；页面中的问答 Agent 是否调用模型仍由 `.env` 控制。模型初始化或结构化失败会直接报告错误，不会静默改用另一套知识体系。
 
 ## 五、更新与排查
 
@@ -170,4 +180,4 @@ BUSINESS_CODE_MODEL_API_KEY=internal-token
 - Python 依赖下载失败：检查部署机的 PyPI/内部镜像地址、代理和证书配置。
 - 严格 wheel 模式安装失败：检查构建机与部署机的平台、CPU 架构和 Python 大小版本是否一致。
 - 内网 Git 拉取失败：先在目标机命令行验证同一 Git URL 和凭据；应用不会保存 Git 密码。
-- 端口占用：用 `--port` 或 `-Port` 指定其他端口。
+- 端口占用：启动器会自动停止占用进程并复用原端口；如果无法取得 PID 或停止失败，请先手工结束占用进程再重试。

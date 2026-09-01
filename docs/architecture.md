@@ -44,7 +44,7 @@ source_type（HUMAN / AI_CANDIDATE）
 status
 ```
 
-Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或调用链。每次问答由 `EntryResolver` 在指定应用的最新索引中返回 `RESOLVED`、`MULTIPLE` 或 `NOT_FOUND`。解析失败只触发普通代码搜索，不修改知识。
+Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或调用链。每次问答由 `EntryResolver` 在指定应用的最新索引中返回 `RESOLVED`、`MULTIPLE` 或 `NOT_FOUND`。解析失败只记录状态，不启动无边界的全局代码搜索，也不修改知识。
 
 ### 可重建代码索引
 
@@ -58,7 +58,7 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 
 ```text
 扫描 Markdown
-→ 模型结构化或保守解析
+→ 模型结构化（需要无模型时，显式选择 Markdown 解析）
 → 验证实体、关系和 Entry Anchor 的同节原文依据
 → 保存业务知识、业务关系和入口锚点
 → 结束
@@ -75,11 +75,11 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 → 按 application + entryName 解析当前 Symbol
 → 实时读取入口源码和 Code Fact
 → 沿本地调用、HTTP/RPC 和 cross_application_edge 调查
-→ 证据不足时退化到字段、表或全局代码搜索
+→ 证据不足时按明确的字段、表、Symbol 或关系目标继续调查
 → 输出事实、链路、冲突和未知项
 ```
 
-Anchor 是优先级提示，不是搜索边界。一个流程可以有多个入口，Planner 根据问题选择；入口失效、同名冲突或代码重构都不会让 Agent 直接相信旧实现。
+Anchor 是调查边界，不是可直接采信的实现结论。一个流程可以有多个入口，Planner 根据问题选择；入口失效、同名冲突或代码重构会在运行结果中明确报告，且不会启动无边界的全局搜索来替代入口。
 
 `businessFlow` 只承载业务基线证据，`technicalFlow` 只承载当前代码证据。代码候选没有加载并验证 Evidence 前，不能成为回答事实。
 
@@ -91,11 +91,13 @@ Anchor 是优先级提示，不是搜索边界。一个流程可以有多个入�
 
 打开数据库时会自动删除早期 MVP 遗留的 `business_code_mapping` 和
 `business_code_mapping_observation` 表及其索引。它们不再属于当前数据模型；如需保留历史记录，请在升级前自行导出。
+同样，早期 `functional_*` 功能知识表会在首次打开时一次性清理；当前系统只保留
+`business_entity`、`business_relation_v2` 和 `business_entry_anchor` 作为业务知识来源。
 
 ## 当前限制
 
 - Web 索引采用保守静态模式，动态 URL、运行时路由和无法唯一解析的依赖注入不会强行连边；
 - 当前跨应用边主要覆盖 HTTP 和 Feign，MQ/Job 入口可通过 Anchor 开始调查，但自动协议识别仍有限；
-- 无模型时的基线结构化是保守解析，不等价于完整语义理解；
+- 业务基线默认需要模型；无模型导入必须显式选择 Markdown 解析，不会在模型失败后自动切换；
 - 入口锚点目前只接受人工基线，暂不自动学习新的 Anchor Candidate；
 - 跨文档业务实体合并仍需人工确认。

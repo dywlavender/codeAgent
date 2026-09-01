@@ -30,7 +30,10 @@ class WindowsLauncherTest(unittest.TestCase):
             self.assertEqual(1, second["repositories"])
             db = connect(str(demo))
             self.assertEqual(1, db.execute("SELECT count(*) FROM requirement").fetchone()[0])
-            self.assertEqual(1, db.execute("SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'").fetchone()[0])
+            self.assertGreater(
+                db.execute("SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'").fetchone()[0],
+                0,
+            )
             db.close()
 
     def test_windows_entrypoints_have_safe_defaults_and_no_destructive_commands(self):
@@ -48,6 +51,8 @@ class WindowsLauncherTest(unittest.TestCase):
         self.assertIn("startup.port", script)
         self.assertIn('Join-Path $ProjectRoot "project.config.json"', script)
         self.assertIn("Wait-Process", script)
+        self.assertIn("Test-PortOpen", script)
+        self.assertIn("Stop-PortProcesses", script)
         self.assertNotIn("Remove-Item -Recurse", script)
         self.assertNotIn("ExecutionPolicy Unrestricted", script)
         self.assertNotIn("Set-ExecutionPolicy", script)

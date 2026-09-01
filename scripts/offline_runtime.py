@@ -65,7 +65,7 @@ def _defaults(path: Path, output_format: str) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     startup = payload.get("startup") or {}
     knowledge = payload.get("knowledge") or {}
-    baseline_value = knowledge.get("baselineRoot") or knowledge.get("root")
+    baseline_value = knowledge.get("baselineRoot")
     baseline_exists = False
     if baseline_value:
         baseline = Path(str(baseline_value)).expanduser()

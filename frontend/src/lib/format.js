@@ -35,7 +35,7 @@ export function answerModeLabel(value) {
     CONTEXTUAL: "上下文回答",
     CLARIFICATION: "需要澄清",
     EVIDENCE_ONLY: "证据回答",
-    FALLBACK: "规则归纳",
+    DETERMINISTIC: "规则归纳",
   };
   return labels[String(value).toUpperCase()] || String(value);
 }

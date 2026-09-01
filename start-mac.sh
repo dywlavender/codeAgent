@@ -16,7 +16,6 @@ PROJECT_CONFIG=""
 HOST_ADDRESS="127.0.0.1"
 PORT="8082"
 PORT_EXPLICIT=0
-PORT_SCAN_LIMIT=20
 SKIP_INSTALL=0
 SKIP_FRONTEND_BUILD=0
 NO_BROWSER=0
@@ -35,7 +34,7 @@ Options:
   --repository-id ID            Repository identifier (default: repo-main)
   --project-config PATH         Override the default project.config.json path
   --host ADDRESS                Listen address (default: 127.0.0.1)
-  --port PORT                   Listen port (default: project startup.port or 8082; when omitted, use the next free port if occupied)
+  --port PORT                   Listen port (default: project startup.port or 8082)
   --skip-install                Reuse the installed Python environment
   --skip-frontend-build         Reuse frontend/dist
   --no-browser                  Do not open the browser automatically
@@ -201,7 +200,7 @@ fi
 if [ "$SKIP_INSTALL" -eq 0 ]; then
   step "Installing backend"
   if ! "$VENV_PYTHON" -m pip install --disable-pip-version-check -e ".[tree-sitter]"; then
-    printf '\n[WARN] Tree-sitter could not be installed. Using the conservative Java parser.\n' >&2
+    printf '\n[WARN] Optional Tree-sitter adapter could not be installed; continuing without it.\n' >&2
     "$VENV_PYTHON" -m pip install --disable-pip-version-check -e .
   fi
 elif ! "$VENV_PYTHON" -c "import business_code_agent" >/dev/null 2>&1; then
@@ -285,69 +284,35 @@ port_owner_pids() {
   fi
 }
 
-same_project_server_pid() {
+stop_port_processes() {
   local target_port="$1"
-  command -v lsof >/dev/null 2>&1 || return 0
-  local pid command_line
+  local owners pid
+  owners="$(port_owner_pids "$target_port")"
+  [ -n "$owners" ] || fail "Port $target_port is busy, but its owning PID could not be determined"
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    command_line="${command_line//\"/}"
-    if [[ "$command_line" == *"business_code_agent.cli serve-query"* ]] &&
-      { [[ "$command_line" == *"--db $DATABASE_PATH"* ]] || [[ "$command_line" == *"--db=$DATABASE_PATH"* ]]; }; then
-      printf '%s\n' "$pid"
-      return 0
-    fi
-  done < <(lsof -nP -iTCP:"$target_port" -sTCP:LISTEN -t 2>/dev/null)
-  return 0
-}
-
-stop_existing_server() {
-  local pid="$1"
-  step "Stopping existing same-project service (PID $pid)"
-  kill "$pid" >/dev/null 2>&1 || true
+    step "Stopping process listening on port $target_port (PID $pid)"
+    kill "$pid" >/dev/null 2>&1 || true
+  done <<< "$owners"
   for _ in $(seq 1 20); do
-    if ! kill -0 "$pid" >/dev/null 2>&1; then
+    if ! port_is_open "$target_port"; then
       return 0
     fi
     sleep 0.25
   done
+  owners="$(port_owner_pids "$target_port")"
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done <<< "$owners"
+  port_is_open "$target_port" && fail "Port $target_port is still in use after stopping its processes"
 }
 
-resolve_port() {
-  local requested_port="$PORT"
-  local existing_pid candidate offset owners
-
-  if port_is_open "$PORT"; then
-    existing_pid="$(same_project_server_pid "$PORT")"
-    [ -z "$existing_pid" ] || stop_existing_server "$existing_pid"
-  fi
-
-  if ! port_is_open "$PORT"; then
-    return 0
-  fi
-
-  if [ "$PORT_EXPLICIT" -eq 1 ]; then
-    owners="$(port_owner_pids "$PORT" | tr '\n' ',' | sed 's/,$//')"
-    if [ -n "$owners" ]; then
-      fail "Port $PORT is already in use (PID: $owners). Stop that process or pass --port with another value"
-    fi
-    fail "Port $PORT is already in use by another process. Stop it or pass --port with another value"
-  fi
-
-  for offset in $(seq 1 "$PORT_SCAN_LIMIT"); do
-    candidate=$((requested_port + offset))
-    [ "$candidate" -le 65535 ] || break
-    if ! port_is_open "$candidate"; then
-      PORT="$candidate"
-      printf '[WARN] Port %s is busy; using available port %s instead.\n' "$requested_port" "$PORT" >&2
-      return 0
-    fi
-  done
-  fail "Ports $requested_port-$((requested_port + PORT_SCAN_LIMIT)) are unavailable. Pass --port with an available value"
-}
-
-resolve_port
+if port_is_open "$PORT"; then
+  printf '[WARN] Port %s is already in use; stopping the existing process and restarting.\n' "$PORT" >&2
+  stop_port_processes "$PORT"
+fi
+port_is_open "$PORT" && fail "Port $PORT is still in use"
 
 URL_HOST="$PROBE_HOST"
 URL="http://$URL_HOST:$PORT/"

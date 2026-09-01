@@ -282,7 +282,7 @@ def _prepare_project_config(
             rewritten.append(portable)
 
     knowledge = dict(payload.get("knowledge") or {})
-    baseline_value = knowledge.get("baselineRoot") or knowledge.get("root")
+    baseline_value = knowledge.get("baselineRoot")
     if baseline_value:
         baseline_source = _resolve(config_path, baseline_value)
         if baseline_source.is_dir():

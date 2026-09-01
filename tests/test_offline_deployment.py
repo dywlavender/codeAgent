@@ -87,6 +87,10 @@ class OfflineDeploymentTest(unittest.TestCase):
             self.assertIn("sync-project", script)
             self.assertNotIn("npm ci", script)
             self.assertNotIn("npm run", script)
+        self.assertIn("port_is_open", linux)
+        self.assertIn("stop_port_processes", linux)
+        self.assertIn("Test-PortOpen", windows)
+        self.assertIn("Stop-PortProcesses", windows)
         self.assertIn("ExecutionPolicy Bypass", (ROOT / "start-offline-windows.bat").read_text(encoding="utf-8"))
 
     def test_canonical_build_entrypoints_default_to_all_targets(self):

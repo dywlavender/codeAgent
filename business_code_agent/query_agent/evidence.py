@@ -51,7 +51,7 @@ class EvidenceAssembler:
 
         ``state`` may be a dataclass/model or a plain dict.  When gaps identify
         concrete targets only those targets are read.  If no concrete target is
-        present, the bounded candidate lists are used as a conservative fallback.
+        present, the bounded candidate lists are used as the default target set.
         """
         gaps = list(gaps if gaps is not None else _get(state, "evidence_gaps", "evidenceGaps", default=[]))
         code_candidates = _as_list(_get(state, "code_candidates", "codeCandidates", default=[]))

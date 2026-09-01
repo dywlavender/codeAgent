@@ -53,12 +53,12 @@ class _Extractor:
 
 
 class BusinessBaselineMvpTest(unittest.TestCase):
-    def test_safe_fallback_imports_the_six_mvp_knowledge_kinds(self):
+    def test_explicit_markdown_parser_imports_the_six_mvp_knowledge_kinds(self):
         with tempfile.NamedTemporaryFile(suffix=".db") as handle:
             db = connect(handle.name)
             result = BaselineKnowledgeService(
                 db, project_config=ROOT / "project.config.example.json"
-            ).refresh(use_model=False)
+            ).refresh(parser="markdown")
             self.assertEqual({
                 "BUSINESS_TERM": 1, "CAPABILITY": 1, "FLOW": 1,
                 "RELATION": 1, "RULE": 1, "SYSTEM": 1,

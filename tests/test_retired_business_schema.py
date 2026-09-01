@@ -85,6 +85,32 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
             self.assertNotIn("business_code_mapping_observation", names)
             db.close()
 
+    def test_existing_function_knowledge_schema_is_removed_on_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "knowledge.db")
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE functional_knowledge (id TEXT PRIMARY KEY);
+                CREATE TABLE functional_entry_anchor (id TEXT PRIMARY KEY);
+                CREATE TABLE functional_key_table (id TEXT PRIMARY KEY);
+                CREATE TABLE functional_retrieval_link (id TEXT PRIMARY KEY);
+                CREATE TABLE functional_analysis (function_id TEXT PRIMARY KEY);
+                INSERT INTO functional_knowledge VALUES ('OLD-FUNCTION');
+                """
+            )
+            raw.commit()
+            raw.close()
+
+            db = connect(path)
+            names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in (
+                "functional_knowledge", "functional_entry_anchor", "functional_key_table",
+                "functional_retrieval_link", "functional_analysis",
+            ):
+                self.assertNotIn(table, names)
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

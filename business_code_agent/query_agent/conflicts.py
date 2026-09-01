@@ -75,7 +75,7 @@ def _claim_key(value: Any, statement: str) -> str:
     field = str(_get(value, "field", "fieldName", "field_name", default="")).strip()
     if subject or predicate or field:
         return "|".join(part.lower() for part in (subject, field, predicate) if part)
-    # Text fallback is intentionally conservative: it only groups claims that
+    # Text normalization is intentionally conservative: it only groups claims that
     # share a concrete identifier, avoiding generic verbs such as "validate".
     identifiers = re.findall(r"[A-Za-z][A-Za-z0-9_.]{2,}", statement)
     return identifiers[0].lower() if identifiers else ""

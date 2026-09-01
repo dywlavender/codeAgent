@@ -492,9 +492,13 @@ class EvidenceTools:
         best = max(score for score, _ in scored)
         return [row for score, row in scored if score == best]
 
-    def search_business(self, query: str, include_suggested: bool = False) -> list[dict]:
-        # ``include_suggested`` remains accepted for source compatibility; the
-        # public query surface intentionally exposes published functions only.
+    def search_business(self, query: str) -> list[dict]:
+        """Search the canonical business baseline.
+
+        Business knowledge is published directly from ``business_entity`` and
+        ``business_relation_v2``.  There is no second suggested/function
+        catalogue to merge into this query surface.
+        """
         from .business_tools import BusinessTools
 
         return BusinessTools(self.db).search_business_knowledge(query)

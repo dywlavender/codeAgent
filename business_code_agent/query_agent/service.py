@@ -49,13 +49,15 @@ class QueryService:
 
     def _model_stages(self, _project_config):
         config = model_config_from_environment()
-        try:
-            if not isinstance(config, dict) or not config.get("enabled", True):
-                return None, None
-            analyzer = LangChainQueryAnalyzer.from_config(config)
-            return analyzer, LangChainQueryComposer(analyzer.model)
-        except Exception:
+        # An absent/disabled model is an explicit deterministic query mode.
+        # Once a model is enabled, configuration and construction errors must
+        # be visible to the caller; silently replacing the model stages with a
+        # different mode makes a deployment look healthy while changing the
+        # answer path.
+        if not isinstance(config, dict) or not config.get("enabled", True):
             return None, None
+        analyzer = LangChainQueryAnalyzer.from_config(config)
+        return analyzer, LangChainQueryComposer(analyzer.model)
 
     def _conversation_history(self, conversation_id):
         rows = self.db.execute(

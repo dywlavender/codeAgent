@@ -24,7 +24,7 @@ class MultiApplicationFlowTest(unittest.TestCase):
         self.db = connect(str(self.database))
         BaselineKnowledgeService(
             self.db, project_config=FIXTURE / "project.config.json"
-        ).refresh(use_model=False)
+        ).refresh(parser="markdown")
 
     def tearDown(self):
         self.db.close()

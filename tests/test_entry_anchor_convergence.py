@@ -26,7 +26,7 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
         self.db = connect(str(self.database))
         self.refresh = BaselineKnowledgeService(
             self.db, project_config=FIXTURE / "project.config.json"
-        ).refresh(use_model=False)
+        ).refresh(parser="markdown")
         self.flow_id = self.db.execute(
             "SELECT id FROM business_entity WHERE entity_type='FLOW' LIMIT 1"
         ).fetchone()["id"]
@@ -66,7 +66,7 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
         self.assertEqual(3, len(result["code_candidates"]))
         self.assertTrue(all(item.get("entry_resolution") == "RESOLVED" for item in result["code_candidates"]))
 
-    def test_stale_anchor_falls_back_without_rewriting_knowledge(self):
+    def test_stale_anchor_stops_at_runtime_without_rewriting_knowledge(self):
         anchor = self.db.execute(
             "SELECT id,application_id FROM business_entry_anchor ORDER BY id LIMIT 1"
         ).fetchone()
@@ -82,7 +82,8 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
         result = QueryRetriever(self.db).initial_search({"searchTerms": ["提款申请主流程"]})
         tools = [item["tool"] for item in result["tool_calls"]]
         self.assertIn("resolve_entry_anchor", tools)
-        self.assertIn("search_code", tools)
+        self.assertNotIn("search_code", tools)
+        self.assertEqual([], result["code_candidates"])
         self.assertEqual("OldWithdrawResultJob", self.db.execute(
             "SELECT entry_name FROM business_entry_anchor WHERE id=?", (anchor["id"],)
         ).fetchone()["entry_name"])
@@ -103,7 +104,7 @@ class EntryAnchorConvergenceTest(unittest.TestCase):
             db = connect(str(database))
             BaselineKnowledgeService(
                 db, project_config=project / "project.config.json"
-            ).refresh(use_model=False)
+            ).refresh(parser="markdown")
             before = db.execute(
                 "SELECT id FROM business_entry_anchor ORDER BY id"
             ).fetchall()

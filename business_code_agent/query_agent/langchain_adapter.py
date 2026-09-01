@@ -9,7 +9,7 @@ from .models import QueryIntent, QuestionUnderstanding
 
 
 class QueryModelInvocationError(RuntimeError):
-    """A model-backed query stage failed and should use the deterministic path."""
+    """A model-backed query stage failed."""
 
 
 @dataclass(frozen=True)

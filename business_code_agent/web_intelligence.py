@@ -89,7 +89,6 @@ class WebIndexer(JavaIndexer):
             return {"files": 0, "symbols": 0, "facts": 0}
         if old:
             self._archive_file_evidence(file_id, "SOURCE_MODIFIED", relative)
-            self._mark_file_relations_stale(file_id, "SOURCE_MODIFIED", relative)
         self.db.execute("DELETE FROM code_fact WHERE symbol_id IN (SELECT id FROM code_symbol WHERE file_id=?)", (file_id,))
         self.db.execute("DELETE FROM code_symbol WHERE file_id=?", (file_id,))
         self.db.execute(

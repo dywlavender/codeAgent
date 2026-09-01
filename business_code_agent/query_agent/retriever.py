@@ -49,11 +49,11 @@ class QueryRetriever:
     def initial_search(self, understanding: Any, state: Any | None = None) -> dict:
         """Start from business knowledge and anchors, then use runtime code search.
 
-        A global code search is deliberately delayed until no usable anchor was
-        resolved (or the question contains an explicit field/table/code hint).
-        This keeps an anchor a priority hint rather than turning it into a hard
-        boundary: stale or ambiguous anchors still fall back to the current
-        index.
+        A global code search is used only for explicit code hints or when the
+        question has no matching business card.  Once a business card exists,
+        its maintained entry anchors are the investigation boundary; an
+        unresolved anchor is reported to the agent rather than replaced by a
+        broad search that can mix unrelated applications.
         """
         query = _search_query(understanding, state)
         fields = _values(understanding, state, "fields", "field_hints", "fieldHints")
@@ -66,7 +66,7 @@ class QueryRetriever:
         business_rows, business_calls = self._initial_business(self.tools.business, query)
         anchor_result = self._resolve_entry_anchors(business_rows)
         explicit_code_hint = bool(fields or tables or code_hints)
-        use_global_code = explicit_code_hint or not anchor_result["resolved"] or anchor_result["needsGlobal"]
+        use_global_code = explicit_code_hint or not business_rows
         if use_global_code:
             code_rows, code_calls = self._initial_code(self.tools.code, query, fields, tables, code_hints)
             code_rows = _dedupe([*anchor_result["candidates"], *code_rows], "evidence_id", "evidenceId", "id", "symbol_id", "symbolId")
@@ -84,15 +84,13 @@ class QueryRetriever:
         }
 
     def expand(self, state: Any, gaps: list[Any] | None = None) -> dict:
-        """Expand from deterministic relationships before falling back to FTS."""
+        """Expand from deterministic relationships and explicit evidence targets."""
         gaps = list(gaps if gaps is not None else _get(state, "evidence_gaps", "evidenceGaps", default=[]))
         fields = set(_values(state, None, "field_hints", "fieldHints", "fields"))
         tables = set(_values(state, None, "table_hints", "tableHints", "tables"))
         symbols: set[str] = set()
         businesses: set[str] = set()
         requirements: set[str] = set()
-        fallback_terms: list[str] = []
-
         for gap in gaps:
             target = _get(gap, "target", "targetId", "target_id")
             gap_type = str(_get(gap, "type", default="")).upper()
@@ -110,9 +108,9 @@ class QueryRetriever:
                     requirements.add(target)
                 elif "CODE" in gap_type or target.startswith(("SYM-", "METHOD-", "API-")):
                     symbols.add(target)
-                else:
-                    fallback_terms.append(target)
-            fallback_terms.append(str(_get(gap, "question", default="")))
+                # Unknown gap targets are intentionally ignored.  A broad
+                # text search would make the evidence loop look productive
+                # while mixing unrelated code into the answer.
 
         for item in _as_list(_get(state, "code_candidates", "codeCandidates", default=[])):
             symbol = _get(item, "symbolId", "symbol_id", "id", "targetId", "target_id")
@@ -130,8 +128,6 @@ class QueryRetriever:
         candidates = {"code": [], "business": [], "requirement": []}
         calls: list[dict] = []
         plan: list[dict] = []
-        anchor_needs_global = False
-
         # 1. Field/Table relations.
         for field in sorted(fields):
             rows = self.tools.code.find_field_activity(field)
@@ -179,7 +175,6 @@ class QueryRetriever:
             anchors = self._resolve_entry_anchors([{"id": knowledge_id}])
             candidates["code"].extend(anchors["candidates"])
             calls.extend(anchors["calls"])
-            anchor_needs_global = anchor_needs_global or anchors["needsGlobal"]
             calls.append(_call("get_business_knowledge", {"knowledgeId": knowledge_id}, [*detail.get("relations", []), *detail.get("entryAnchors", [])], "BUSINESS"))
             plan.append({"priority": 3, "strategy": "BUSINESS_RELATION", "target": knowledge_id})
             if anchors["candidates"]:
@@ -198,29 +193,6 @@ class QueryRetriever:
             calls.append(_call("find_requirement_code_relations", {"requirementId": requirement_id}, relations, "REQUIREMENT"))
             plan.append({"priority": 4, "strategy": "REQUIREMENT_RELATION", "target": requirement_id})
 
-        # A stale/ambiguous anchor must not become a dead end just because the
-        # business card itself was found.  Search the current code index when
-        # the anchor resolver could not provide a unique starting symbol.
-        if anchor_needs_global:
-            query = " ".join(term for term in fallback_terms if term.strip()) or str(_get(state, "question", default=""))
-            code_rows, code_calls = self._initial_code(
-                self.tools.code, query, list(fields), list(tables),
-                _values(state, None, "code_hints", "codeHints"),
-            )
-            candidates["code"].extend(code_rows)
-            calls.extend(code_calls)
-            plan.append({"priority": 6, "strategy": "STALE_ANCHOR_GLOBAL_FALLBACK", "target": query})
-
-        # 6. FTS fallback only if deterministic expansion yielded nothing useful.
-        if not any(candidates.values()):
-            query = " ".join(term for term in fallback_terms if term.strip()) or str(_get(state, "question", default=""))
-            initial = self.initial_search({"searchTerms": [query]}, state)
-            candidates["code"].extend(initial["code_candidates"])
-            candidates["business"].extend(initial["business_candidates"])
-            candidates["requirement"].extend(initial["requirement_candidates"])
-            calls.extend(initial["tool_calls"])
-            plan.append({"priority": 5, "strategy": "FTS_FALLBACK", "target": query})
-
         return {
             "plan": plan,
             "code_candidates": _dedupe(candidates["code"], "evidence_id", "evidenceId", "symbolId", "symbol_id", "id", "target_id"),
@@ -236,7 +208,6 @@ class QueryRetriever:
         calls: list[dict] = []
         plan: list[dict] = []
         resolved = 0
-        needs_global = False
         seen_anchors: set[str] = set()
         for business in business_rows:
             business_id = _get(business, "id", "knowledgeId", "knowledge_id", "sourceId", "source_id")
@@ -261,8 +232,6 @@ class QueryRetriever:
                 status = str(resolution.get("status") or "NOT_FOUND").upper()
                 if status == "RESOLVED":
                     resolved += 1
-                else:
-                    needs_global = True
                 plan.append({
                     "priority": 2, "strategy": "ENTRY_ANCHOR",
                     "target": entry_name, "applicationId": application_id,
@@ -298,7 +267,7 @@ class QueryRetriever:
             "calls": calls,
             "plan": plan,
             "resolved": resolved,
-            "needsGlobal": needs_global,
+            "hasAnchor": bool(seen_anchors),
         }
 
     def _initial_code(self, tools: EvidenceTools, query: str, fields: list[str], tables: list[str], hints: list[str]):

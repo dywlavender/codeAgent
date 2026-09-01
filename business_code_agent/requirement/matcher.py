@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 
@@ -19,52 +18,8 @@ class RequirementRelationBuilder:
     def enrich(self, requirement_id: str, version_id: str, digest_value, limit: int = 30) -> list[dict]:
         if limit < 1 or limit > 50:
             raise ValueError("relation candidate limit must be between 1 and 50")
-        results = []
-        results.extend(self._business(version_id, digest_value))
-        results.extend(self._code(requirement_id, version_id, digest_value, limit))
+        results = self._code(requirement_id, version_id, digest_value, limit)
         self.db.commit()
-        return results
-
-    def _business(self, version_id: str, digest_value) -> list[dict]:
-        requirement_terms = _terms(" ".join([
-            *digest_value.business_objects, *digest_value.affected_processes,
-            *digest_value.affected_systems, *[rule.statement for rule in digest_value.business_rules],
-        ]))
-        results = []
-        for row in self.db.execute("SELECT * FROM functional_knowledge WHERE status='ACTIVE' ORDER BY name LIMIT 100"):
-            analysis = self.db.execute(
-                "SELECT flow_json,rules_json FROM functional_analysis WHERE function_id=?", (row["id"],)
-            ).fetchone()
-            flow = json.loads(analysis["flow_json"]) if analysis else []
-            rules = json.loads(analysis["rules_json"]) if analysis else []
-            business_terms = _terms(" ".join([
-                row["name"], row["summary"], *json.loads(row["aliases_json"]),
-                *json.loads(row["tags_json"]), *json.loads(row["scenarios_json"]),
-                *[item.get("statement", "") for item in flow],
-                *[item.get("statement", "") for item in rules],
-            ]))
-            overlap = sorted(requirement_terms & business_terms)
-            if not overlap:
-                continue
-            statement = "；".join(item.get("statement", "") for item in rules)
-            explicit = len(overlap) >= 2 or any(statement and (statement in rule.statement or rule.statement in statement) for rule in digest_value.business_rules)
-            status = "DERIVED" if explicit else "SUGGESTED"
-            evidence_id = self._requirement_evidence_for_terms(version_id, overlap)
-            function_evidence = [item[0] for item in self.db.execute(
-                """SELECT evidence_id FROM functional_retrieval_link
-                    WHERE function_id=? AND relation_type='MANUAL_DEFINITION' AND evidence_id IS NOT NULL""",
-                (row["id"],),
-            )]
-            relation = self._save(
-                version_id, "DIGEST", version_id,
-                RequirementRelationType.RELATED_BUSINESS_KNOWLEDGE.value,
-                "FUNCTION", row["id"], "DETERMINISTIC_MATCH",
-                min(0.95, 0.45 + 0.1 * len(overlap)),
-                status if evidence_id and function_evidence else "SUGGESTED",
-                f"需求与已发布功能知识共同命中：{', '.join(overlap[:6])}",
-                evidence_id, function_evidence[0] if function_evidence else None,
-            )
-            results.append(relation)
         return results
 
     def _code(self, requirement_id: str, version_id: str, digest_value, limit: int) -> list[dict]:
@@ -107,12 +62,6 @@ class RequirementRelationBuilder:
             relation["label"] = candidate.label
             results.append(relation)
         return results
-
-    def _requirement_evidence_for_terms(self, version_id: str, terms: list[str]) -> str | None:
-        for row in self.db.execute("SELECT evidence_id,content FROM requirement_chunk_v2 WHERE requirement_version_id=? ORDER BY sequence", (version_id,)):
-            if any(term in row["content"].lower() for term in terms):
-                return row["evidence_id"]
-        return None
 
     def _requirement_evidence_for_candidate(self, version_id: str, digest_value, candidate) -> str | None:
         anchors = [*digest_value.fields, *digest_value.tables]
@@ -170,9 +119,3 @@ class RequirementRelationBuilder:
              origin, confidence, status, reason[:240], req_evidence, code_evidence, now),
         )
         return {"id": relation_id, "relationType": relation_type, "targetType": target_type, "targetId": target_id, "status": status, "requirementEvidenceId": req_evidence, "codeEvidenceId": code_evidence, "reason": reason[:240]}
-
-
-def _terms(text: str) -> set[str]:
-    latin = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text.lower())
-    chinese = re.findall(r"[一-鿿]{2,8}", text)
-    return {value for value in [*latin, *chinese] if len(value) >= 2}

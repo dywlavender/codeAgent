@@ -6,7 +6,8 @@ param(
     [ValidateRange(0, 65535)]
     [int]$Port = 0,
     [switch]$Demo,
-    [switch]$UseModel,
+    [ValidateSet("model", "markdown")]
+    [string]$BaselineParser = "model",
     [switch]$NoBrowser
 )
 
@@ -110,6 +111,42 @@ if ($dependenciesChanged) {
     Copy-Item $requirementsFile $installedRequirements -Force
 }
 
+function Test-PortOpen([string]$Address, [int]$TargetPort) {
+    $probeAddress = if ($Address -eq "0.0.0.0" -or $Address -eq "::") { "127.0.0.1" } else { $Address }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $async = $client.BeginConnect($probeAddress, $TargetPort, $null, $null)
+        if ($async.AsyncWaitHandle.WaitOne(300) -and $client.Connected) { return $true }
+        return $false
+    }
+    catch { return $false }
+    finally { $client.Dispose() }
+}
+
+function Get-PortOwnerIds([int]$TargetPort) {
+    try {
+        return @(Get-NetTCPConnection -State Listen -LocalPort $TargetPort -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+    }
+    catch { return @() }
+}
+
+function Stop-PortProcesses([string]$Address, [int]$TargetPort) {
+    $ownerIds = @(Get-PortOwnerIds $TargetPort)
+    if ($ownerIds.Count -eq 0) {
+        throw "Port $TargetPort is busy, but its owning PID could not be determined."
+    }
+    foreach ($ownerId in $ownerIds) {
+        Write-Host "`n==> Stopping process listening on port $TargetPort (PID $ownerId)" -ForegroundColor Cyan
+        Stop-Process -Id ([int]$ownerId) -Force -ErrorAction SilentlyContinue
+    }
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Test-PortOpen $Address $TargetPort)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Port $TargetPort is still in use after stopping its processes."
+}
+
 $DatabasePath = if ([System.IO.Path]::IsPathRooted($Database)) { $Database } else { Join-Path $ProjectRoot $Database }
 $DatabasePath = [System.IO.Path]::GetFullPath($DatabasePath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DatabasePath) | Out-Null
@@ -124,13 +161,19 @@ else {
     if ($repositoryMode -eq "bundled-snapshot") { $syncArguments += "--offline" }
     Invoke-Checked $VenvPython $syncArguments
     if ($baselineExists) {
-        $baselineArguments = @("-m", "business_code_agent.cli", "baseline-refresh", "--config", $ProjectConfig, "--db", $DatabasePath)
-        if (-not $UseModel) { $baselineArguments += "--no-model" }
+        $baselineArguments = @("-m", "business_code_agent.cli", "baseline-refresh", "--config", $ProjectConfig, "--db", $DatabasePath, "--parser", $BaselineParser)
         Invoke-Checked $VenvPython $baselineArguments
     }
 }
 
-$urlHost = if ($HostAddress -eq "0.0.0.0") { "127.0.0.1" } else { $HostAddress }
+if (Test-PortOpen $HostAddress $Port) {
+    Write-Host "`n==> Port $Port is already in use; stopping the existing process and restarting" -ForegroundColor Cyan
+    Stop-PortProcesses $HostAddress $Port
+}
+if (Test-PortOpen $HostAddress $Port) {
+    throw "Port $Port is still in use."
+}
+$urlHost = if ($HostAddress -eq "0.0.0.0" -or $HostAddress -eq "::") { "127.0.0.1" } else { $HostAddress }
 $url = "http://$urlHost`:$Port/"
 $logPath = Join-Path (Split-Path -Parent $DatabasePath) "server.log"
 $errorLogPath = Join-Path (Split-Path -Parent $DatabasePath) "server-error.log"

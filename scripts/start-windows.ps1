@@ -18,7 +18,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$PortExplicit = $PSBoundParameters.ContainsKey("Port")
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $DefaultProjectConfig = Join-Path $ProjectRoot "project.config.json"
 Set-Location $ProjectRoot
@@ -103,28 +102,6 @@ function Test-PortOpen([string]$Address, [int]$TargetPort) {
     }
 }
 
-function Get-ExistingWorkbenchProcess([string]$DatabasePath, [int]$TargetPort) {
-    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $TargetPort -ErrorAction SilentlyContinue)
-    foreach ($connection in $connections) {
-        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" -ErrorAction SilentlyContinue
-        if (-not $process -or [string]::IsNullOrWhiteSpace($process.CommandLine)) { continue }
-        $commandLine = ([string]$process.CommandLine).Replace('"', '')
-        $isWorkbench = $commandLine.IndexOf("business_code_agent.cli serve-query", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        $usesDatabase = $commandLine.IndexOf($DatabasePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        if ($isWorkbench -and $usesDatabase) { return $process }
-    }
-    return $null
-}
-
-function Stop-ExistingWorkbenchProcess($Process) {
-    Write-Step "Stopping existing same-project service (PID $($Process.ProcessId))"
-    Stop-Process -Id $Process.ProcessId -Force -ErrorAction SilentlyContinue
-    for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        if (-not (Get-Process -Id $Process.ProcessId -ErrorAction SilentlyContinue)) { return }
-        Start-Sleep -Milliseconds 250
-    }
-}
-
 function Get-PortOwnerIds([int]$TargetPort) {
     try {
         return @(Get-NetTCPConnection -State Listen -LocalPort $TargetPort -ErrorAction SilentlyContinue |
@@ -133,31 +110,20 @@ function Get-PortOwnerIds([int]$TargetPort) {
     catch { return @() }
 }
 
-function Resolve-ListenPort([string]$Address, [int]$RequestedPort, [bool]$Explicit, [string]$DatabasePath) {
-    $scanLimit = 20
-    for ($offset = 0; $offset -le $scanLimit; $offset++) {
-        $candidate = $RequestedPort + $offset
-        if ($candidate -gt 65535) { break }
-
-        $existing = Get-ExistingWorkbenchProcess $DatabasePath $candidate
-        if ($existing) {
-            Stop-ExistingWorkbenchProcess $existing
-        }
-
-        if (-not (Test-PortOpen $Address $candidate)) {
-            if ($offset -gt 0) {
-                Write-Warning "Port $RequestedPort is busy; using available port $candidate instead."
-            }
-            return $candidate
-        }
-
-        if ($Explicit) {
-            $ownerIds = @(Get-PortOwnerIds $candidate)
-            $ownerText = if ($ownerIds.Count -gt 0) { " (PID: $($ownerIds -join ', '))" } else { "" }
-            throw "Port $candidate is already in use$ownerText. Stop that process or pass -Port with another value."
-        }
+function Stop-PortProcesses([string]$Address, [int]$TargetPort) {
+    $ownerIds = @(Get-PortOwnerIds $TargetPort)
+    if ($ownerIds.Count -eq 0) {
+        throw "Port $TargetPort is busy, but its owning PID could not be determined."
     }
-    throw "Ports $RequestedPort-$([Math]::Min(65535, $RequestedPort + $scanLimit)) are unavailable. Pass -Port with an available value."
+    foreach ($ownerId in $ownerIds) {
+        Write-Step "Stopping process listening on port $TargetPort (PID $ownerId)"
+        Stop-Process -Id ([int]$ownerId) -Force -ErrorAction SilentlyContinue
+    }
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Test-PortOpen $Address $TargetPort)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Port $TargetPort is still in use after stopping its processes."
 }
 
 Write-Host "Business Code Agent - Windows launcher" -ForegroundColor Green
@@ -183,7 +149,7 @@ if (-not $SkipInstall) {
         Invoke-Checked $VenvPython @("-m", "pip", "install", "--disable-pip-version-check", "-e", ".[tree-sitter]")
     }
     catch {
-        Write-Warning "The optional Tree-sitter adapter could not be installed. Falling back to the conservative Java parser."
+        Write-Warning "The optional Tree-sitter adapter could not be installed; continuing without it."
         Invoke-Checked $VenvPython @("-m", "pip", "install", "--disable-pip-version-check", "-e", ".")
     }
 }
@@ -246,7 +212,13 @@ else {
     }
 }
 
-$Port = Resolve-ListenPort $HostAddress $Port $PortExplicit $DatabasePath
+if (Test-PortOpen $HostAddress $Port) {
+    Write-Step "Port $Port is already in use; stopping the existing process and restarting"
+    Stop-PortProcesses $HostAddress $Port
+}
+if (Test-PortOpen $HostAddress $Port) {
+    throw "Port $Port is still in use."
+}
 $UrlHost = if ($HostAddress -eq "0.0.0.0" -or $HostAddress -eq "::") { "127.0.0.1" } else { $HostAddress }
 $Url = "http://$UrlHost`:$Port/"
 

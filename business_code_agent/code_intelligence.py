@@ -47,7 +47,7 @@ class JavaIndexer:
 
             return Parser(Language(tree_sitter_java.language()))
         except ImportError:
-            logger.warning("tree-sitter 未安装，Java 解析回退到保守解析器（pip install '.[tree-sitter]' 可启用）")
+            logger.warning("tree-sitter 未安装，Java 解析使用内置解析器（pip install '.[tree-sitter]' 可启用）")
             return None
 
     def ingest(self, root: str, repository_id: str = "repo-main") -> dict[str, int]:
@@ -110,7 +110,6 @@ class JavaIndexer:
             return {"files": 0, "symbols": 0, "facts": 0}
         if old:
             self._archive_file_evidence(file_id, "SOURCE_MODIFIED", relative)
-            self._mark_file_relations_stale(file_id, "SOURCE_MODIFIED", relative)
         self.db.execute("DELETE FROM code_fact WHERE symbol_id IN (SELECT id FROM code_symbol WHERE file_id=?)", (file_id,))
         self.db.execute("DELETE FROM code_symbol WHERE file_id=?", (file_id,))
         self.db.execute("INSERT OR REPLACE INTO code_file VALUES (?, ?, ?, ?)", (file_id, repository_id, relative, digest(content)))
@@ -390,7 +389,6 @@ class JavaIndexer:
             return {"files": 0, "symbols": 0, "facts": 0}
         if old:
             self._archive_file_evidence(file_id, "SOURCE_MODIFIED", relative)
-            self._mark_file_relations_stale(file_id, "SOURCE_MODIFIED", relative)
         self.db.execute("DELETE FROM code_fact WHERE symbol_id IN (SELECT id FROM code_symbol WHERE file_id=?)", (file_id,))
         self.db.execute("DELETE FROM code_symbol WHERE file_id=?", (file_id,))
         self.db.execute("INSERT OR REPLACE INTO code_file VALUES (?, ?, ?, ?)", (file_id, repository_id, relative, digest(content)))
@@ -470,7 +468,6 @@ class JavaIndexer:
         for row in indexed:
             if (root / row["path"]).exists():
                 continue
-            self._mark_file_relations_stale(row["id"], "SOURCE_DELETED", row["path"])
             self._archive_file_evidence(row["id"], "SOURCE_DELETED", row["path"])
             self.db.execute("DELETE FROM code_fact WHERE symbol_id IN (SELECT id FROM code_symbol WHERE file_id=?)", (row["id"],))
             self.db.execute("DELETE FROM code_symbol WHERE file_id=?", (row["id"],))
@@ -482,22 +479,6 @@ class JavaIndexer:
                 "INSERT OR IGNORE INTO ingestion_change VALUES (?, ?, ?, 'DELETED', ?, NULL, ?)",
                 (change_id, repository_id, row["path"], row["content_hash"], now),
             )
-
-    def _mark_file_relations_stale(self, file_id: str, trigger_type: str, path: str) -> None:
-        # Generated analysis is disposable. If one of its code sources changes,
-        # mark only the automatic layer stale; the human document stays intact.
-        now = datetime.now(timezone.utc).isoformat()
-        self.db.execute(
-            """UPDATE functional_analysis
-                  SET status='STALE', analyzed_at=?, message=?
-                WHERE function_id IN (
-                  SELECT DISTINCT frl.function_id
-                    FROM functional_retrieval_link frl
-                    JOIN evidence e ON e.id=frl.evidence_id
-                   WHERE e.source_type='CODE' AND e.source_id=?
-                )""",
-            (now, f"关联代码 {path} 已变化，请更新知识库", file_id),
-        )
 
     def _archive_file_evidence(self, file_id: str, trigger_type: str, path: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

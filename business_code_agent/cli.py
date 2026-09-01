@@ -20,8 +20,6 @@ def load_demo(db_path: str):
     root = Path(__file__).resolve().parent.parent / "examples" / "acceptance"
     JavaIndexer(db).ingest(str(root / "java"), "acceptance-repo")
     RequirementBuilder(db).ingest(str(root / "requirements" / "REQ-2026-001.json"))
-    from .knowledge_update.functional_service import FunctionalKnowledgeService
-    FunctionalKnowledgeService(db, project_config=root / "project.config.json").refresh(analyze=False)
     return db
 
 
@@ -57,7 +55,10 @@ def main() -> None:
     baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线和调查入口")
     baseline.add_argument("--config", required=True)
     baseline.add_argument("--db", required=True)
-    baseline.add_argument("--no-model", action="store_true", help="仅使用安全的确定性解析")
+    baseline.add_argument(
+        "--parser", choices=("model", "markdown"), default="model",
+        help="结构化方式：默认使用配置的大模型；markdown 仅在明确需要本地解析时使用",
+    )
     req = sub.add_parser("ingest-requirement")
     req.add_argument("path")
     req.add_argument("--db", required=True)
@@ -147,7 +148,7 @@ def main() -> None:
             "repositories": db.execute("SELECT count(*) FROM repository").fetchone()[0],
             "symbols": db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
             "businessKnowledge": db.execute(
-                "SELECT count(*) FROM functional_knowledge WHERE status='ACTIVE'"
+                "SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'"
             ).fetchone()[0],
             "requirements": db.execute("SELECT count(*) FROM requirement").fetchone()[0],
         }
@@ -161,9 +162,7 @@ def main() -> None:
     elif args.command == "baseline-refresh":
         from .knowledge_update.baseline_service import BaselineKnowledgeService
         service = BaselineKnowledgeService(connect(args.db), project_config=args.config)
-        print(json.dumps(service.refresh(
-            use_model=not args.no_model,
-        ), ensure_ascii=False, indent=2))
+        print(json.dumps(service.refresh(parser=args.parser), ensure_ascii=False, indent=2))
     elif args.command == "ingest-requirement":
         builder = RequirementBuilder(connect(args.db))
         if Path(args.path).suffix.lower() == ".json":
@@ -243,7 +242,7 @@ def _print_analysis(result: dict, as_json: bool) -> None:
     print(f"仓库：{overview['files']} 文件，{overview['symbols']} Symbol，{overview['facts']} Fact，解析错误 {overview['parse_errors']}")
     print("模块：" + "，".join(f"{name}({count})" for name, count in overview["modules"].items()))
     knowledge = overview["knowledge_sources"]
-    print(f"知识源：需求 {knowledge['requirements']}，功能知识 {knowledge['business_functions']}（均为可选增强）")
+    print(f"知识源：需求 {knowledge['requirements']}，业务知识 {knowledge['business_knowledge']}（均为可选增强）")
     print("字段候选：")
     if not result["candidates"]:
         print("  暂无读写/校验活动；可加 --include-declared 查看纯声明字段")
@@ -270,8 +269,8 @@ def _print_explanation(result: dict, as_json: bool) -> None:
             print("  未发现")
     if result["requirements"]:
         print("需求：" + "，".join(result["requirements"]))
-    if result["business_functions"]:
-        print("功能知识：" + "，".join(result["business_functions"]))
+    if result["business_knowledge"]:
+        print("业务知识：" + "，".join(result["business_knowledge"]))
     for gap in result["gaps"]:
         print(f"缺口：{gap}")
 
@@ -284,7 +283,7 @@ def _warn_model_configuration() -> None:
     try:
         environment_config = model_config_from_environment()
     except ValueError as exc:
-        print(f"[WARN] 模型环境配置无效：{exc}；将使用 FALLBACK。", file=sys.stderr)
+        print(f"[WARN] 模型环境配置无效：{exc}；模型增强不可用。", file=sys.stderr)
         return
 
     configurations = (
@@ -301,7 +300,7 @@ def _warn_model_configuration() -> None:
     for variable in sorted(missing):
         print(
             f"[WARN] 模型已启用，但环境变量 {variable} 未设置；"
-            "业务基线结构化 / 问答 Agent 将使用安全回退模式。",
+            "业务基线结构化 / 问答 Agent 将使用本地确定性流程。",
             file=sys.stderr,
         )
 

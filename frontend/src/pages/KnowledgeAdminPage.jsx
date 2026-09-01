@@ -42,7 +42,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
     try {
       const result = await request("/api/knowledge/baselines/refresh", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ useModel: true }),
+        body: JSON.stringify({ parser: "model" }),
       });
       setSummary(result); await load();
     } catch (reason) { handleAdminError(reason); }

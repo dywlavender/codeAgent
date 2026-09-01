@@ -100,9 +100,9 @@ def _business_terms(text: str) -> tuple[list[str], list[str], list[str], list[st
     """Bounded lexical extraction used by the requirement digest.
 
     This intentionally returns lightweight hints, not a second business
-    knowledge record.  The governance agent is the only writer of business
-    functions; requirement parsing merely supplies candidate terms for later
-    relation matching.
+    knowledge record.  Requirement parsing only supplies candidate terms for
+    later relation matching; the canonical business baseline remains the
+    single business-knowledge source.
     """
     objects: list[str] = []
     for value in ("项目编号", "订单编号", "申请编号", "合同编号", "客户编号", "流水号"):

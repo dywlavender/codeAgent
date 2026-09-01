@@ -19,7 +19,6 @@ from .models import (
 from .observability import QueryRunRecorder
 from .retriever import QueryRetriever
 from .understanding import QuestionUnderstandingService
-from .langchain_adapter import QueryModelInvocationError
 
 
 logger = logging.getLogger(__name__)
@@ -139,20 +138,16 @@ class BusinessCodeQueryAgent:
             if state.evidence_status is EvidenceStatus.INSUFFICIENT:
                 state.unknowns = list(dict.fromkeys([*state.unknowns, *[gap.question for gap in state.evidence_gaps]]))
             answer = self.answer_builder.build(state)
-            answer_mode = "FALLBACK"
+            answer_mode = "DETERMINISTIC"
             if self.answer_composer:
-                try:
-                    composed = self.answer_composer.compose(
-                        question, evidence_status=state.evidence_status.value,
-                        facts=answer["facts"], unknowns=answer["unknowns"], conflicts=answer["conflicts"],
-                    )
-                    answer["conclusion"] = composed["conclusion"]
-                    answer["suggestedFollowUps"] = composed.get("suggestedFollowUps", [])
-                    answer_mode = "MODEL"
-                    recorder.step("SYNTHESIZE", state.iteration, {}, {"claims": len(composed.get("claims", []))}, self._evidence_count(state), 0.0)
-                except QueryModelInvocationError:
-                    logger.warning("回答归纳模型调用失败，第 %s 轮降级为确定性合成", state.iteration)
-                    recorder.step("SYNTHESIZE_FALLBACK", state.iteration, {}, {"reason": "model_unavailable"}, self._evidence_count(state), 0.0)
+                composed = self.answer_composer.compose(
+                    question, evidence_status=state.evidence_status.value,
+                    facts=answer["facts"], unknowns=answer["unknowns"], conflicts=answer["conflicts"],
+                )
+                answer["conclusion"] = composed["conclusion"]
+                answer["suggestedFollowUps"] = composed.get("suggestedFollowUps", [])
+                answer_mode = "MODEL"
+                recorder.step("SYNTHESIZE", state.iteration, {}, {"claims": len(composed.get("claims", []))}, self._evidence_count(state), 0.0)
             answer["answerMode"] = answer_mode
             answer["resolvedQuestion"] = " ".join(state.search_terms)
             answer["entities"] = list(dict.fromkeys([
@@ -187,14 +182,10 @@ class BusinessCodeQueryAgent:
         deterministic = self.understander.understand(deterministic_question)
         if not self.query_analyzer:
             logger.info("未配置理解模型，问题理解使用确定性流程")
-            return QueryAgentState.from_understanding(question, deterministic), "FALLBACK"
-        try:
-            semantic = self.query_analyzer.understand(question, history)
-            merged = _merge_understanding(deterministic, semantic)
-            return QueryAgentState.from_understanding(question, merged), "MODEL"
-        except QueryModelInvocationError:
-            logger.warning("理解模型调用失败，降级为确定性解析")
-            return QueryAgentState.from_understanding(question, deterministic), "FALLBACK"
+            return QueryAgentState.from_understanding(question, deterministic), "DETERMINISTIC"
+        semantic = self.query_analyzer.understand(question, history)
+        merged = _merge_understanding(deterministic, semantic)
+        return QueryAgentState.from_understanding(question, merged), "MODEL"
 
     @staticmethod
     def _apply_candidates(state, result):

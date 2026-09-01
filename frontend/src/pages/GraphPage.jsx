@@ -6,13 +6,8 @@ import {
 import { request } from "../lib/api.js";
 
 const TYPE_STYLE = {
-  FUNCTION: { glyph: "功", color: "#1a7f4e", soft: "#e7f4ee" },
   PROJECT: { glyph: "工", color: "#0b6a63", soft: "#e6f2f1" },
   ENTRY_ANCHOR: { glyph: "入", color: "#8d5a1f", soft: "#fbf1e4" },
-  CODE: { glyph: "{}", color: "#57606a", soft: "#f0f2f4" },
-  TABLE: { glyph: "表", color: "#9a6700", soft: "#fcf3e3" },
-  TAG: { glyph: "#", color: "#8d8d88", soft: "#f4f4f2" },
-  BUSINESS: { glyph: "业", color: "#0b6a63", soft: "#e6f2f1" },
   SYSTEM: { glyph: "系", color: "#0b6a63", soft: "#e6f2f1" },
   BUSINESS_TERM: { glyph: "词", color: "#7c4d9b", soft: "#f3ebf7" },
   CAPABILITY: { glyph: "能", color: "#1a7f4e", soft: "#e7f4ee" },
@@ -27,7 +22,6 @@ const TYPE_OPTIONS = [
   { label: "流程", value: "FLOW", countKey: "flows" },
   { label: "规则", value: "RULE", countKey: "rules" },
   { label: "入口", value: "ENTRY_ANCHOR", countKey: "entryAnchors" },
-  { label: "代码", value: "CODE", countKey: "code" },
 ];
 
 export function GraphPage({ workspace }) {
@@ -92,7 +86,7 @@ export function GraphPage({ workspace }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onPressEnter={() => load()}
-            placeholder="搜索业务术语、关系或代码符号…"
+            placeholder="搜索业务术语、关系或入口名称…"
             prefix={<MagnifyingGlass size={15} style={{ color: "#a3a29c" }} />}
             style={{ width: 300 }}
             allowClear
@@ -146,7 +140,7 @@ export function GraphPage({ workspace }) {
 }
 
 function GraphRow({ node, active, onSelect }) {
-  const style = TYPE_STYLE[node.type] || TYPE_STYLE.TAG;
+  const style = TYPE_STYLE[node.type] || TYPE_STYLE.BUSINESS_TERM;
   return (
     <button className={`r-row ${active ? "on" : ""}`} onClick={onSelect}>
       <span className="r-glyph" style={{ color: style.color, borderColor: `${style.color}55`, background: style.soft }}>{style.glyph}</span>
@@ -165,10 +159,6 @@ const VB = { w: 1000, h: 720 };
 /* 画布上的代码节点用短名（类.方法），全限定名放进悬浮提示，避免标签互相压盖 */
 function canvasLabel(node) {
   const label = String(node.label || "");
-  if ((node.type === "CODE" || node.type === "MYBATIS_STATEMENT") && label.includes(".")) {
-    const parts = label.split(".");
-    return parts.slice(-2).join(".");
-  }
   return label;
 }
 
@@ -280,7 +270,7 @@ function GraphCanvas({ nodes, edges, selectedId, onSelect }) {
           {nodes.map((node) => {
             const p = positions[node.id];
             if (!p) return null;
-            const style = TYPE_STYLE[node.type] || TYPE_STYLE.TAG;
+            const style = TYPE_STYLE[node.type] || TYPE_STYLE.BUSINESS_TERM;
             const isSel = node.id === selectedId;
             const r = 9 + Math.min((degreeOf[node.id] || 0) * 2.2, 13) + (isSel ? 3 : 0);
             return (
@@ -303,7 +293,7 @@ function GraphCanvas({ nodes, edges, selectedId, onSelect }) {
 }
 
 function NodeInspector({ node, neighbors, onSelect }) {
-  const style = TYPE_STYLE[node.type] || TYPE_STYLE.TAG;
+  const style = TYPE_STYLE[node.type] || TYPE_STYLE.BUSINESS_TERM;
   return (
     <Card size="small" styles={{ body: { padding: "16px 18px" } }}>
       <Flex gap={8} align="center" style={{ marginBottom: 6 }}>
@@ -314,11 +304,7 @@ function NodeInspector({ node, neighbors, onSelect }) {
       </Flex>
       <Typography.Title level={5} style={{ marginTop: 2, marginBottom: 4, wordBreak: "break-all" }}>{node.label}</Typography.Title>
       {node.subtitle && <Typography.Paragraph type="secondary" style={{ fontSize: 11.5, fontFamily: "monospace", marginBottom: 8 }}>{node.subtitle}</Typography.Paragraph>}
-      {node.description && (
-        node.type === "CODE"
-          ? <pre className="ev-pre" style={{ maxHeight: 140 }}>{node.description}</pre>
-          : <Typography.Paragraph style={{ fontSize: 12.5, lineHeight: 1.75 }}>{node.description}</Typography.Paragraph>
-      )}
+      {node.description && <Typography.Paragraph style={{ fontSize: 12.5, lineHeight: 1.75 }}>{node.description}</Typography.Paragraph>}
       <Typography.Text type="secondary" style={{ fontSize: 11 }}>
         Evidence {node.evidenceCount ?? 0} 条{node.sourceId ? ` · ID ${node.sourceId}` : ""}
       </Typography.Text>

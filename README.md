@@ -6,7 +6,7 @@
 
 ```text
 自然语言业务基线
-  ↓  模型结构化（未配置模型时使用保守解析）
+  ↓  模型结构化（也可显式选择 Markdown 解析）
 System / BusinessTerm / Capability / Flow / Relation / Rule
   ↓
 FLOW / CAPABILITY 的 Entry Anchor（可选）
@@ -46,6 +46,8 @@ chmod +x start-mac.sh
 ```
 
 根目录存在 `project.config.json` 时会自动使用，不需要额外传 `--project-config`。启动器会准备 Python 环境、同步 Git 仓库、增量索引代码、构建前端并启动工作台。
+
+重复启动时会先停止监听目标端口的现有进程，再启动工作台并复用原端口。
 
 ### Windows / Linux 离线部署
 
@@ -131,16 +133,16 @@ BUSINESS_CODE_MODEL_TIMEOUT=60
 BUSINESS_CODE_MODEL_MAX_RETRIES=2
 ```
 
-模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文。实体名称、别名、`codeHints`、流程步骤和其他属性值必须能在引用所在的 Markdown 小节中逐字找到，不能借用同文档其他功能段落的内容。关系两端及“触发、属于、依赖、产生、负责处理”等关系语义必须在同一个引用片段中明确出现。模型自行补充的检索提示会被过滤，定义的语义改写会回退到引用片段中的原句。
+模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文。实体名称、别名、`codeHints`、流程步骤和其他属性值必须能在引用所在的 Markdown 小节中逐字找到，不能借用同文档其他业务段落的内容。关系两端及“触发、属于、依赖、产生、负责处理”等关系语义必须在同一个引用片段中明确出现。模型初始化或结构化失败会直接报告错误，不会静默切换到另一套知识体系。
 
-未配置模型时仍然可以：
+未配置模型时仍然可以同步和索引代码，并使用确定性 Query Agent 回答有证据的问题。若需要导入业务基线，可在命令行明确指定本地解析器：
 
-- 同步和索引代码；
-- 从明确的 Markdown 标题和原句安全提取知识；
-- 搜索当前代码并从入口实时调查；
-- 使用确定性 Query Agent 回答有证据的问题。
-
-保守解析不会猜测业务规则或代码类名。
+```bash
+python3 -m business_code_agent.cli baseline-refresh \
+  --config project.config.json \
+  --db .data/knowledge.db \
+  --parser markdown
+```
 
 ## 编写业务基线
 
@@ -182,7 +184,7 @@ BUSINESS_CODE_MODEL_MAX_RETRIES=2
 4. 进入“业务知识维护”，点击“导入业务基线”。
 5. 查看六类知识、原文来源、业务关系和调查入口。
 6. 在问答页面提问；Agent 会优先解析入口，再基于当前代码实时调查。
-7. 入口失效时，Agent 自动退化到当前代码的普通搜索，不修改业务知识。
+7. 入口失效时，Agent 会报告入口解析状态并停止该入口分支；只有问题本身明确提供代码线索时才会检索对应线索，不修改业务知识。
 
 命令行也可以执行：
 
@@ -192,16 +194,7 @@ python3 -m business_code_agent.cli baseline-refresh \
   --db .data/knowledge.db
 ```
 
-不调用模型：
-
-```bash
-python3 -m business_code_agent.cli baseline-refresh \
-  --config project.config.json \
-  --db .data/knowledge.db \
-  --no-model
-```
-
-未定位不是失败。问答会标记入口解析状态，并在当前代码索引中继续搜索；不会把不存在的类或方法写入知识。
+无模型导入使用 `--parser markdown`；该模式必须显式指定。入口未定位会标记解析状态并停止该入口分支，不会把不存在的类或方法写入知识，也不会自动扩大为全局代码搜索。
 
 ## 业务入口锚点
 

@@ -5,98 +5,20 @@ import re
 
 
 class BusinessTools:
-    """Read-only boundary for function-centred retrieval navigation."""
+    """Read-only boundary for baseline business knowledge retrieval."""
 
     def __init__(self, db, **_ignored):
         self.db = db
 
     def search_business_knowledge(self, query: str) -> list[dict]:
-        if self.db.execute("SELECT 1 FROM business_entity WHERE status!='DEPRECATED' LIMIT 1").fetchone():
-            return self._search_baseline(query)
-        needle = query.strip().casefold()
-        terms = _search_terms(query)
-        values = []
-        for row in self.db.execute("SELECT * FROM functional_knowledge WHERE status='ACTIVE' ORDER BY name"):
-            analysis = self.db.execute("SELECT * FROM functional_analysis WHERE function_id=?", (row["id"],)).fetchone()
-            flow = json.loads(analysis["flow_json"]) if analysis else []
-            rules = json.loads(analysis["rules_json"]) if analysis else []
-            document = {
-                "name": row["name"], "aliases": json.loads(row["aliases_json"]),
-                "tags": json.loads(row["tags_json"]), "summary": row["summary"],
-                "scenarios": json.loads(row["scenarios_json"]),
-            }
-            anchors = [dict(item) for item in self.db.execute(
-                "SELECT project_name,entry_type,class_name FROM functional_entry_anchor WHERE function_id=?",
-                (row["id"],),
-            )]
-            links = [dict(item) for item in self.db.execute(
-                "SELECT source_id,target_id,relation_type FROM functional_retrieval_link WHERE function_id=?",
-                (row["id"],),
-            )]
-            tables = [dict(item) for item in self.db.execute(
-                "SELECT table_name,purpose FROM functional_key_table WHERE function_id=?", (row["id"],)
-            )]
-            haystack = json.dumps([document, anchors, links, tables], ensure_ascii=False).casefold()
-            if needle and needle not in haystack and not any(term in haystack for term in terms):
-                continue
-            statement = _statement(document, flow, rules)
-            evidence_id = self.db.execute(
-                """SELECT evidence_id FROM functional_retrieval_link
-                    WHERE function_id=? AND evidence_id IS NOT NULL ORDER BY relation_type LIMIT 1""",
-                (row["id"],),
-            ).fetchone()
-            values.append({
-                "id": row["id"], "title": row["name"], "statement": statement,
-                "status": "CONFIRMED",
-                "knowledge_type": "FUNCTION_NAVIGATION", "version": 1,
-                "evidence_id": evidence_id["evidence_id"] if evidence_id else None,
-            })
-            if len(values) >= 20:
-                break
-        return values
+        return self._search_baseline(query)
 
     def get_business_knowledge(self, knowledge_id: str) -> dict:
         if self.db.execute("SELECT 1 FROM business_entity WHERE id=?", (knowledge_id,)).fetchone():
             return self._get_baseline_entity(knowledge_id)
         if self.db.execute("SELECT 1 FROM business_relation_v2 WHERE id=?", (knowledge_id,)).fetchone():
             return self._get_baseline_relation(knowledge_id)
-        row = self.db.execute("SELECT * FROM functional_knowledge WHERE id=? AND status='ACTIVE'", (knowledge_id,)).fetchone()
-        if not row:
-            raise KeyError(knowledge_id)
-        analysis = self.db.execute("SELECT * FROM functional_analysis WHERE function_id=?", (knowledge_id,)).fetchone()
-        flow = json.loads(analysis["flow_json"]) if analysis else []
-        rules = json.loads(analysis["rules_json"]) if analysis else []
-        document = {
-            "name": row["name"], "aliases": json.loads(row["aliases_json"]),
-            "tags": json.loads(row["tags_json"]), "summary": row["summary"],
-            "scenarios": json.loads(row["scenarios_json"]),
-        }
-        links = [dict(item) for item in self.db.execute(
-            "SELECT * FROM functional_retrieval_link WHERE function_id=?", (knowledge_id,)
-        )]
-        relations = [{
-            "id": item["id"], "source_type": "BUSINESS", "source_id": knowledge_id,
-            "relation_type": item["relation_type"], "target_type": item["target_type"],
-            "target_id": item["target_id"], "status": "DERIVED",
-            "confidence": 1.0 if item.get("evidence_id") else 0.8,
-            "evidence_ids": [item["evidence_id"]] if item.get("evidence_id") else [],
-        } for item in links if item["target_type"] == "CODE_SYMBOL"]
-        evidence_ids = list(dict.fromkeys(item["evidence_id"] for item in links if item.get("evidence_id")))
-        evidence = []
-        if evidence_ids:
-            marks = ",".join("?" for _ in evidence_ids)
-            evidence = [dict(item) for item in self.db.execute(
-                f"SELECT * FROM evidence WHERE id IN ({marks})", tuple(evidence_ids)
-            )]
-        return {
-            "knowledge": {
-                "id": knowledge_id, "title": row["name"], "statement": _statement(document, flow, rules),
-                "status": "CONFIRMED",
-                "knowledge_type": "FUNCTION_NAVIGATION", "version": 1,
-                "evidence_id": evidence_ids[0] if evidence_ids else None,
-            },
-            "relations": relations, "evidence": evidence, "reviews": [],
-        }
+        raise KeyError(knowledge_id)
 
     def find_related_code(self, knowledge_id: str) -> list[dict]:
         return self.get_business_knowledge(knowledge_id)["relations"]
@@ -199,19 +121,6 @@ class BusinessTools:
         return [dict(item) for item in self.db.execute(
             f"SELECT * FROM evidence WHERE id IN ({marks})", tuple(values)
         )]
-
-
-def _statement(document: dict, flow: list[dict], rules: list[dict]) -> str:
-    parts = [document["summary"]]
-    if document["tags"]:
-        parts.append("标签：" + "；".join(document["tags"]))
-    if document["scenarios"]:
-        parts.append("业务场景：" + "；".join(document["scenarios"]))
-    if flow:
-        parts.append("检索导航流程：" + "；".join(item["statement"] for item in flow))
-    if rules:
-        parts.append("待代码核实规则：" + "；".join(item["statement"] for item in rules))
-    return "\n".join(parts)
 
 
 def _entity_statement(row) -> str:

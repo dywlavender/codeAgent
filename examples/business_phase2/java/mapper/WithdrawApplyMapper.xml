@@ -1,8 +1,0 @@
-<mapper namespace="demo.mapper.WithdrawApplyMapper">
-  <insert id="create">
-    insert into withdraw_apply(project_no) values(#{projectNo})
-  </insert>
-  <select id="find">
-    select project_no from withdraw_apply where apply_id=#{applyId}
-  </select>
-</mapper>

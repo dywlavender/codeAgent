@@ -36,14 +36,14 @@ start-windows.bat
 
 1. 检查 Python 和 Node.js 版本。
 2. 创建 `.venv-windows` 虚拟环境。
-3. 安装 Python 包；Tree-sitter 不可用时自动退回保守解析器。
+3. 安装 Python 包；Tree-sitter 未安装时使用内置 Java 解析器。
 4. 用 `npm ci` 按锁文件安装并构建前端。
 5. 按当前模式或 `project.config.json` 幂等初始化/同步知识库。
 6. 启动工作台并打开配置中的地址；当前验证配置为 `http://127.0.0.1:8083/`。
 
 关闭启动窗口或按 `Ctrl+C` 会停止服务。
 
-每次执行启动脚本，检测到同一项目的工作台已经运行时会先停止旧进程，再启动新进程，避免旧代码或旧配置继续生效。
+每次执行启动脚本，发现目标端口已被占用时会直接停止占用进程，再启动工作台并复用原端口。
 
 ### 索引真实代码库
 
@@ -95,7 +95,7 @@ start-windows.bat -Mode Empty -Database ".data\company.db"
 
 ```
 
-把功能文档放入 `project.config.json` 中 `knowledge.root` 指定的目录。启动工作台后进入“功能知识”，点击“更新知识库”。
+把业务基线 Markdown 放入 `project.config.json` 中 `knowledge.baselineRoot` 指定的目录。启动工作台后进入“业务知识维护”，点击“导入业务基线”。
 
 导入后再次运行：
 
@@ -120,11 +120,7 @@ start-windows.bat -Mode Empty -Database ".data\company.db" -SkipInstall -SkipFro
 -NoBrowser
 ```
 
-例如端口被占用时：
-
-```bat
-start-windows.bat -Port 9082
-```
+端口冲突不需要额外参数，启动器会自动停止占用进程后重启。
 
 默认只监听本机。只有明确需要局域网访问时才使用：
 
@@ -145,11 +141,11 @@ start-windows.bat -HostAddress 0.0.0.0
 
 ### 业务知识闭环
 
-1. 在 `knowledge.root` 中编写简化功能文档。
-2. 打开“功能知识”，点击“更新知识库”。
-3. 检查工程入口是否已定位，多个候选或未找到时修正文档。
-4. 查看关键表的代码读写位置、业务流程摘要和核心规则摘要。
-5. 打开“知识图谱”查看功能、工程、入口代码、关键表和标签。
+1. 在 `knowledge.baselineRoot` 中编写少量业务基线 Markdown。
+2. 打开“业务知识维护”，点击“导入业务基线”。
+3. 检查调查入口是否已定位，多个候选或未找到时修正文档。
+4. 查看业务实体、关系、原文证据和调查入口。
+5. 打开“知识图谱”查看业务实体、关系、应用和入口。
 6. Query Agent 使用这些内容制定检索计划，最终仍读取当前代码和业务文档。
 
 ## 停止、重启与升级
@@ -175,7 +171,7 @@ start-windows.bat -HostAddress 0.0.0.0
 
 ### 端口已占用
 
-使用 `-Port 9082`，或停止占用 8082 的旧服务。
+端口被占用时启动器会自动停止占用进程；如果系统无法取得 PID 或进程拒绝结束，错误信息会提示手工处理。
 
 ### 工作台提示未构建
 
@@ -187,8 +183,8 @@ start-windows.bat -HostAddress 0.0.0.0
 
 ### 知识更新提示缺少模型凭据
 
-检查根目录 `.env` 中的 `BUSINESS_CODE_MODEL_ENABLED` 和 `BUSINESS_CODE_MODEL_API_KEY`。如果暂时不使用模型，将 `BUSINESS_CODE_MODEL_ENABLED` 设为 `false`；系统仍会建立入口和关键表索引，但不会生成流程与规则。
+检查根目录 `.env` 中的 `BUSINESS_CODE_MODEL_ENABLED` 和 `BUSINESS_CODE_MODEL_API_KEY`。业务基线导入默认需要模型；不使用模型时只能在命令行显式传入 `--parser markdown`，不会自动切换解析方式。
 
 ### 更新知识库要求管理员口令
 
-检查 `project.config.json` 中的 `admin.apiTokenEnv`，在启动前设置对应环境变量。进入“功能知识”后输入同一口令解锁；口令仅保留在当前浏览器标签会话中。知识图谱查询是只读的，不需要管理员口令。
+检查 `project.config.json` 中的 `admin.apiTokenEnv`，在启动前设置对应环境变量。进入“业务知识维护”后输入同一口令解锁；口令仅保留在当前浏览器标签会话中。知识图谱查询是只读的，不需要管理员口令。

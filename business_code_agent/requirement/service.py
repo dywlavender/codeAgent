@@ -91,7 +91,10 @@ class RequirementService:
         old = [row["statement"] for row in previous]
         change = diff_rules(old, current)
         previous_id = f"{requirement_id}-V{version - 1}"
-        affected_knowledge = [row["target_id"] for row in self.db.execute("SELECT target_id FROM requirement_relation WHERE requirement_version_id=? AND target_type='FUNCTION'", (previous_id,))]
+        # Requirement relations now point only to code targets.  The former
+        # function-centred knowledge relation was removed with that schema;
+        # keep the version-change field for the stable public response shape.
+        affected_knowledge: list[str] = []
         affected_code = [row["target_id"] for row in self.db.execute("SELECT target_id FROM requirement_relation WHERE requirement_version_id=? AND target_type IN ('METHOD','API','FIELD','TABLE','COLUMN')", (previous_id,))]
         now = datetime.now(timezone.utc).isoformat()
         change_id = stable_id("RDIFF", requirement_id, previous_id, version_id)

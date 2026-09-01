@@ -93,12 +93,12 @@ def _structured_sections(paragraphs: list[tuple[str, int | None]]) -> list[Parse
     return sections or [ParsedSection(["正文"], [text for text, _ in paragraphs], 1, len(paragraphs))]
 
 
-def _markdown_or_text(original: str, fallback_title: str) -> tuple[str, list[ParsedSection]]:
+def _markdown_or_text(original: str, default_title: str) -> tuple[str, list[ParsedSection]]:
     paragraphs = []
     for value in [item.strip() for item in re.split(r"\n\s*\n", original) if item.strip()]:
         match = re.match(r"^(#{1,6})\s+(.+)$", value)
         paragraphs.append((match.group(2), len(match.group(1))) if match else (value, _heading_level("", value)))
-    title = next((text for text, level in paragraphs if level == 1), fallback_title)
+    title = next((text for text, level in paragraphs if level == 1), default_title)
     return title, _structured_sections(paragraphs)
 
 
