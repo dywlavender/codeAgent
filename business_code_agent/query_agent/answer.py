@@ -6,7 +6,7 @@ from .conflicts import ConflictDetector
 from .models import AnswerType
 
 
-ANSWER_KEYS = ("conclusion", "businessFlow", "technicalFlow", "facts", "inferences", "unknowns", "conflicts")
+ANSWER_KEYS = ("conclusion", "businessFlow", "technicalFlow", "facts", "inferences", "unknowns", "conflicts", "sourceReferences")
 
 
 def _get(value: Any, *names: str, default: Any = None) -> Any:

@@ -45,7 +45,11 @@ export function AgentPage(props) {
           </Typography.Text>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
           {result && <StatusTag status={result.evidenceStatus} />}
-          {result && <Typography.Text type="secondary" style={{ fontSize: 11.5 }}>{result.iterations} 轮证据扩展</Typography.Text>}
+          {result && <Typography.Text type="secondary" style={{ fontSize: 11.5 }}>
+            {String(result.answerMode || "").toUpperCase() === "MODEL_AGENT"
+              ? `${result.metrics?.sourceReadCount || result.sourceReferences?.length || 0} 次源码阅读`
+              : `${result.iterations} 轮证据扩展`}
+          </Typography.Text>}
         </div>
       </header>
 
@@ -165,7 +169,7 @@ function Welcome({ submit }) {
         今天想弄清楚什么？
       </Typography.Title>
       <Typography.Paragraph type="secondary" style={{ maxWidth: 430, marginInline: "auto", lineHeight: 1.85, fontSize: 13.5 }}>
-        我会同时检索代码事实、已发布的业务知识和需求原文。每个结论都带证据编号，没有证据的部分会明确留空。
+        我会先用业务知识和代码索引定位，再实际读取源码。回答中的代码结论都会带本次源码引用；没有读到的部分会明确留空。
       </Typography.Paragraph>
       <Flex gap={10} justify="center" wrap="wrap" style={{ marginTop: 24 }}>
         {EXAMPLES.map((item) => (
@@ -734,7 +738,7 @@ function Composer({ composerRef, question, setQuestion, submit, stopQuery, statu
       />
       <Flex align="center" style={{ marginTop: 6 }}>
         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          检索代码 · 业务知识 · 需求三源证据　按 / 聚焦
+          检索业务上下文 · 代码索引 · 实际源码　按 / 聚焦
         </Typography.Text>
         {loading
           ? <Button shape="circle" icon={<Stop size={13} weight="bold" />} onClick={stopQuery} danger style={{ marginLeft: "auto" }} />

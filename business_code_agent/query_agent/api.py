@@ -47,6 +47,8 @@ def _user_facing_internal_error(exc: Exception) -> str:
         return "模型调用失败：API Key 无效或没有权限，请检查 .env 中的 BUSINESS_CODE_MODEL_API_KEY。"
     if "timeout" in detail or "timed out" in detail:
         return "模型调用失败：请求模型超时，请检查网络或增大 BUSINESS_CODE_MODEL_TIMEOUT。"
+    if "source investigation" in detail or "query investigator" in detail:
+        return "模型调查失败：模型未返回可引用的结构化源码回答，请重试并检查模型配置。"
     return "internal query service error"
 
 

@@ -31,6 +31,7 @@ export function answerModeLabel(value) {
   if (!value) return "";
   const labels = {
     MODEL: "模型归纳",
+    MODEL_AGENT: "Agent 直接分析",
     DIRECT: "直接回答",
     CONTEXTUAL: "上下文回答",
     CLARIFICATION: "需要澄清",
@@ -71,6 +72,7 @@ export function stepSummary(step) {
     if (output.answerType) return `${answerTypeLabel(output.answerType)}${output.reason ? ` · ${synthesisSkippedReasonLabel(output.reason)}` : ""}`;
     if (output.gaps !== undefined) return `${output.gaps} 个证据缺口`;
     if (output.calls !== undefined) return `${output.calls} 次工具调用`;
+    if (output.sourceReads !== undefined) return `${output.sourceReads} 次源码阅读`;
     if (output.count !== undefined) return `读取 ${output.count} 条证据`;
     if (output.intent) return `识别为 ${intentLabel(output.intent)}`;
     if (output.facts !== undefined) return `${output.facts} 条确定事实`;
@@ -111,6 +113,8 @@ export function stepLabel(name) {
     EXPAND_EVIDENCE: "扩展证据",
     EXPAND_EVIDENCE_TOOLS: "调用扩展工具",
     READ_RAW_EVIDENCE: "读取原始证据",
+    AGENT_INVESTIGATION: "Agent 源码调查",
+    AGENT_INVESTIGATION_RESULT: "调查结果",
     ANSWER_DECISION: "回答决策",
     BUILD_ANSWER: "生成回答",
   })[name] || name;

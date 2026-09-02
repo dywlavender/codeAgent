@@ -137,7 +137,10 @@ class EvidenceTools:
                 row["application_names"], row["system_names"],
             )).lower()
             if any(term in haystack for term in terms):
-                results.append(dict(row))
+                item = dict(row)
+                item["symbolId"] = item.get("id")
+                item["qualifiedName"] = item.get("qualified_name")
+                results.append(item)
         return results[:limit]
 
     def get_repo_map(self) -> list[dict]:
@@ -149,9 +152,18 @@ class EvidenceTools:
 
     def read_source(self, symbol_id: str) -> dict:
         row = self.db.execute(
-            """SELECT cs.qualified_name, cs.line_start, cs.line_end, cf.path, r.root_path
+            """SELECT cs.id symbol_id, cs.qualified_name, cs.name, cs.kind,
+                              cs.line_start, cs.line_end, cf.path, r.root_path,
+                              a.id application_id, a.name application_name,
+                              (SELECT cf2.evidence_id FROM code_fact cf2
+                                WHERE cf2.symbol_id=cs.id
+                                ORDER BY CASE WHEN cf2.fact_type='CODE_DECLARATION' THEN 1 ELSE 0 END,
+                                         cf2.evidence_id LIMIT 1) evidence_id
                  FROM code_symbol cs JOIN code_file cf ON cf.id=cs.file_id
-                 JOIN repository r ON r.id=cf.repository_id WHERE cs.id=?""",
+                 JOIN repository r ON r.id=cf.repository_id
+                 LEFT JOIN application_code_file acf ON acf.file_id=cf.id
+                 LEFT JOIN application a ON a.id=acf.application_id
+                WHERE cs.id=?""",
             (symbol_id,),
         ).fetchone()
         if not row:
@@ -159,6 +171,75 @@ class EvidenceTools:
         from pathlib import Path
         lines = (Path(row["root_path"]) / row["path"]).read_text(encoding="utf-8").splitlines()
         return {**dict(row), "content": "\n".join(lines[row["line_start"] - 1:row["line_end"]])}
+
+    def find_references(self, symbol_id: str) -> list[dict]:
+        """Find indexed callers of a symbol without treating the edge as proof.
+
+        ``code_fact`` stores the caller-side CALL observation.  The result is
+        therefore navigation metadata; the caller still has to be opened with
+        ``read_source`` before an answer can rely on its implementation.
+        """
+        target = self.db.execute(
+            "SELECT id,name,qualified_name FROM code_symbol WHERE id=?", (symbol_id,)
+        ).fetchone()
+        if not target:
+            raise KeyError(symbol_id)
+        rows = self.db.execute(
+            """SELECT DISTINCT caller.id caller_symbol_id, caller.kind caller_kind,
+                              caller.name caller_name, caller.qualified_name caller_qualified_name,
+                              caller.line_start caller_line_start, caller.line_end caller_line_end,
+                              f.fact_type, f.subject, f.target, f.evidence_id,
+                              e.locator, e.line_start, e.line_end,
+                              a.id application_id, a.name application_name
+                 FROM code_fact f
+                 JOIN code_symbol caller ON caller.id=f.symbol_id
+                 JOIN evidence e ON e.id=f.evidence_id
+                 LEFT JOIN application_code_file acf ON acf.file_id=caller.file_id
+                 LEFT JOIN application a ON a.id=acf.application_id
+                WHERE f.fact_type IN ('CALL','UI_EVENT')
+                  AND (lower(f.subject)=lower(?) OR lower(f.target)=lower(?)
+                       OR lower(f.subject)=lower(?) OR lower(f.target)=lower(?))
+                ORDER BY caller.qualified_name,e.line_start""",
+            (target["name"], target["name"], target["qualified_name"], target["qualified_name"]),
+        )
+        return [
+            {
+                **dict(row),
+                "symbolId": row["caller_symbol_id"],
+                "qualifiedName": row["caller_qualified_name"],
+                "file": row["locator"],
+                "lineStart": row["line_start"],
+                "lineEnd": row["line_end"],
+                "evidenceId": row["evidence_id"],
+            }
+            for row in rows
+        ]
+
+    def follow_call(self, symbol_id: str, method_name: str = "") -> list[dict]:
+        """Resolve unique in-application CALL targets from one symbol."""
+        values = self.resolve_local_calls(symbol_id)
+        method_name = str(method_name or "").strip().casefold()
+        if method_name:
+            values = [
+                item for item in values
+                if method_name in {
+                    str(item.get("call_target") or "").casefold(),
+                    str(item.get("target_qualified_name") or "").casefold(),
+                    str(item.get("target_symbol_id") or "").casefold(),
+                }
+            ]
+        return [
+            {
+                **item,
+                "symbolId": item.get("target_symbol_id") or item.get("id"),
+                "qualifiedName": item.get("target_qualified_name") or item.get("qualified_name"),
+            }
+            for item in values
+        ]
+
+    def follow_integration(self, symbol_id: str, max_hops: int = 6) -> list[dict]:
+        """Public name used by the Query Agent for cross-application hops."""
+        return self.follow_integration_flow(symbol_id, max_hops=max_hops)
 
     def get_symbol_relations(self, symbol_id: str) -> list[dict]:
         return [dict(row) for row in self.db.execute(

@@ -11,11 +11,11 @@ System / BusinessTerm / Capability / Flow / Relation / Rule
   ↓
 FLOW / CAPABILITY 的 Entry Anchor（可选）
   ↓
-Runtime Agent 解析当前代码入口
+Query Agent：业务上下文 / Entry Anchor / Code Index 定位
   ↓
-实时调查 Method / Call / HTTP / RPC / MQ / DB
+自主 Tool Calling：search → read_source → 按问题继续调查
   ↓
-Runtime Evidence → Answer
+直接回答 + 本次实际读取的源码引用
 ```
 
 长期保存、可重建索引和单次运行数据分开：
@@ -24,7 +24,9 @@ Runtime Evidence → Answer
 - Project Context：系统、应用、仓库及代码归属；
 - Entry Anchor：应用 + 页面/类/Job/Consumer 名称，仅作为调查起点。
 
-代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）可以重建；业务与代码之间不保存普通映射，Query Agent 只通过入口锚点定位起点，再基于当前索引实时调查。
+代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）可以重建；它们只负责导航，不直接作为业务结论。Query Agent 通过入口锚点定位起点，再由模型主动读取当前源码并回答；业务与代码之间不保存普通映射。
+
+模型调查工具固定为六类：`search_business`、`search_code`、`read_source`、`find_references`、`follow_call`、`follow_integration`。其中只有 `read_source` 会创建本次查询的 `SRC-*` 源码引用；其余工具只返回下一步导航信息。
 
 技术拓扑同样单独保存。`software_system` / `application` 表示部署与代码归属，不会混入人工维护的业务 `SYSTEM` 知识。
 
@@ -195,8 +197,8 @@ python3 -m business_code_agent.cli baseline-refresh \
 3. 把一份或多份自然语言 Markdown 放入基线目录。
 4. 进入“业务知识维护”，选择“模型结构化”或“Markdown 规则解析（无需模型）”，再点击“导入业务基线”。
 5. 查看六类知识、原文来源、业务关系和调查入口。
-6. 在问答页面提问；Agent 会优先解析入口，再基于当前代码实时调查。
-7. 入口失效时，Agent 会报告入口解析状态；仍有入口成功时继续沿成功入口调查，入口全部失效或尚未维护入口时最多进行一次当前索引搜索，不修改业务知识。
+6. 在问答页面提问；Agent 会优先利用业务知识和入口，再按问题主动 `search_code`、`read_source`、`follow_call`、`find_references` 或 `follow_integration`。
+7. 入口失效时，Agent 会报告入口解析状态；入口只是调查起点，模型仍可根据问题选择其他当前索引入口，不修改业务知识。
 
 命令行也可以执行：
 
@@ -238,17 +240,19 @@ FLOW/CAPABILITY 的 Markdown 小节可以补充入口列表：
 
 ### Query 终态
 
-一次调查完成后，`status` 表示 Agent 是否正常结束，`evidenceStatus` 表示证据状态，`answerType` 表示回答方式：
+一次调查完成后，`status` 表示 Agent 是否正常结束，`evidenceStatus` 表示调查结果状态，`answerType` 表示回答范围：
 
 ```text
-SUFFICIENT   + 已验证事实 → FULL      （可选用 Model Composer 组织表达）
-INSUFFICIENT + 已验证事实 → PARTIAL   （确定性回答，列出已确认/未确认）
-INSUFFICIENT + 无事实     → UNKNOWN   （确定性回答，不猜测）
-CONFLICT                  → CONFLICT  （确定性回答，展示冲突双方）
+SUFFICIENT   + 已读取源码 → FULL      （模型直接回答）
+INSUFFICIENT + 已读取源码 → PARTIAL   （列出已确认/未确认）
+INSUFFICIENT + 无可引用源码 → UNKNOWN（不猜测）
+CONFLICT                  → CONFLICT  （展示冲突双方）
 执行异常                  → ERROR     （HTTP 500）
 ```
 
-`PARTIAL`、`UNKNOWN` 和 `CONFLICT` 都是正常完成的查询，接口仍返回 HTTP 200；只有 `answerType=FULL` 且存在已验证事实、没有冲突时才会调用回答模型。未调用模型时，`synthesisSkippedReason` 会说明原因，例如 `INSUFFICIENT_EVIDENCE`、`NO_VERIFIED_FACTS`、`EVIDENCE_CONFLICT` 或 `NO_MODEL`。
+模型调查结果中的代码 claim 必须引用本次 `read_source` 返回的 `SRC-*`；`search_code`、入口解析、调用关系和跨应用边只能帮助导航，不能单独成为回答事实。`sourceReferences` 只持久化 Symbol、文件和行范围，源码正文在回答证据卡片中按当前索引重新读取。
+
+未配置模型时仍保留旧的确定性兼容路径，便于离线环境验证索引；启用模型后主链使用 `LangChainQueryInvestigator`，不再要求先把源码转换为 `StructuredFact`，也不由固定证据规则决定模型是否已经查够。
 
 管理员写操作可通过 `admin.apiTokenEnv` 配置的口令保护；读取接口保持只读。
 

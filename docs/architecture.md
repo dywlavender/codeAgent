@@ -14,11 +14,14 @@ Question Agent
   ├─ Project Context（系统 / 应用 / 仓库）
   └─ Entry Anchor（可选调查起点）
           ↓
-    Runtime Investigation
+    Query Agent 调查循环
+      ├─ search_business（理解语义）
+      ├─ search_code（导航索引）
+      ├─ read_source（读取最终事实）
+      ├─ find_references / follow_call / follow_integration
+      └─ 按当前问题继续或停止
           ↓
-    当前 Code Fact / 源码 / 跨应用边
-          ↓
-    Runtime Evidence → Answer
+    Answer + 本次源码引用
 ```
 
 ## 数据分层
@@ -52,7 +55,7 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 
 ### 单次运行数据
 
-`query_agent_run`、checkpoint、工具调用、源码片段和 Runtime Evidence 只服务于当前问答与回放。普通实现细节不会自动升格为 Business Knowledge 或 Entry Anchor。
+`query_agent_run`、checkpoint、工具调用、源码引用和 Runtime Evidence 只服务于当前问答与回放。源码正文只在模型调查期间进入上下文；持久化的 `sourceReferences` 仅保留 `sourceId`、文件和行范围，普通实现细节不会自动升格为 Business Knowledge 或 Entry Anchor。
 
 ## Baseline 导入
 
@@ -66,24 +69,29 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 
 基线刷新不调用 `CodeMatcher`，也不生成业务—代码持久关联。业务知识只保存入口锚点；入口之后的代码关联全部由 Query Agent 基于当前索引实时调查。
 
-## Query Agent 检索顺序
+## Query Agent 调查循环
 
 ```text
 理解问题
-→ 搜索 Business Knowledge
-→ 读取 FLOW/CAPABILITY 的 Entry Anchor
-→ 按 application + entryName 解析当前 Symbol
-→ 实时读取入口源码和 Code Fact
-→ 沿本地调用、HTTP/RPC 和 cross_application_edge 调查
-→ 证据不足时按明确的字段、表、Symbol 或关系目标继续调查
-→ 输出事实、链路、冲突和未知项
+→ Business Knowledge / Entry Anchor 定位起点
+→ search_code 找候选 Symbol
+→ read_source 读取真实源码
+→ 根据源码和当前问题选择 follow_call / find_references / follow_integration
+→ 再 search / read，直到模型判断已经足够
+→ 输出直接回答和源码引用
 ```
 
-调查结束后由 `AnswerPolicy` 统一收口：`SUFFICIENT` 且有已验证事实、无冲突时为 `FULL`，允许可选的 Model Composer；`INSUFFICIENT` 有事实为 `PARTIAL`，无事实为 `UNKNOWN`；`CONFLICT` 为 `CONFLICT`。后三类仍是正常完成的查询，由确定性回答和渲染分支处理，不转换成异常；只有 Agent 执行异常才进入 `ERROR`。
+代码索引（`code_file`、`code_symbol`、`code_fact`、`cross_application_edge`）只负责导航，不直接成为回答事实。只有模型实际调用 `read_source` 后，系统才创建本次查询的 `SRC-*` 引用；代码 claim 必须引用该引用。`find_references`、`follow_call` 和 `follow_integration` 返回的只是下一步导航信息，模型需要继续读取相关源码后才能下结论。
+
+模型可用的第一版工具只有六类：`search_business`（业务卡片、关系和入口提示）、`search_code`（Symbol/Fact 导航摘要）、`read_source`（真实文件行范围）、`find_references`（调用方）、`follow_call`（应用内调用目标）和 `follow_integration`（HTTP/RPC/MQ 跨应用边）。工具结果不会把索引摘要伪装成源码事实。
+
+启用模型时，`LangChainQueryInvestigator` 负责自主 Tool Calling 循环，直接根据用户问题、业务上下文和已读取源码组织答案；不再要求先把源码转换成 `StructuredFact`，也不由固定 `EvidenceSufficiencyEvaluator` 决定调查是否完成。`StructuredFact`、Evaluator 和旧 `AnswerPolicy` 仍保留给无模型/兼容路径，避免离线部署和历史调用立即失效。
+
+回答的 `answerType` 由调查结果表达为 `FULL`、`PARTIAL`、`CONFLICT` 或 `UNKNOWN`。引用校验是硬边界：未被 `read_source` 返回的源码引用会被拒绝；模型可以把无法确认的内容放入 `unknowns`，但不能根据类名、方法名或调用关系猜测实现。
 
 Anchor 是调查起点，不是可直接采信的实现结论。一个流程可以有多个入口，Planner 根据问题选择；只要仍有入口解析成功，就不会扩大到全局搜索；入口全部失效、同名冲突或尚未维护时会明确报告，并允许一次当前索引搜索作为恢复路径。
 
-`businessFlow` 只承载业务基线证据，`technicalFlow` 只承载当前代码证据。代码候选没有加载并验证 Evidence 前，不能成为回答事实。
+`businessFlow` 只承载业务知识 claim，`technicalFlow` 只承载源码调查 claim。需要链路时调查 integration，需要逻辑时重点读取条件、分支、计算和异常，不再对所有问题强行闭合完整调用链。
 
 ## 管理端与用户端
 

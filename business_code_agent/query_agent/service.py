@@ -8,7 +8,7 @@ from pathlib import Path
 from ..knowledge_update.langchain_adapter import model_config_from_environment
 from ..schema import connect
 from .agent import BusinessCodeQueryAgent
-from .langchain_adapter import LangChainQueryAnalyzer, LangChainQueryComposer
+from .langchain_adapter import LangChainQueryAnalyzer, LangChainQueryInvestigator
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ class QueryService:
         self.agent = BusinessCodeQueryAgent(
             db, connection_factory=connection_factory,
             query_analyzer=analyzer, answer_composer=composer,
+            query_investigator=composer if callable(getattr(composer, "investigate", None)) else None,
         )
 
     def query(self, question: str, *, conversation_id: str | None = None, history=()) -> dict:
@@ -57,7 +58,7 @@ class QueryService:
         if not isinstance(config, dict) or not config.get("enabled", True):
             return None, None
         analyzer = LangChainQueryAnalyzer.from_config(config)
-        return analyzer, LangChainQueryComposer(analyzer.model)
+        return analyzer, LangChainQueryInvestigator(analyzer.model)
 
     def _conversation_history(self, conversation_id):
         rows = self.db.execute(
@@ -103,6 +104,7 @@ class QueryService:
             if "synthesisSkippedReason" in value["answer"]
             else value["state"].get("synthesisSkippedReason")
         )
+        value["sourceReferences"] = value["answer"].get("sourceReferences") or value["state"].get("sourceReferences", [])
         value["steps"] = [dict(row) for row in self.db.execute(
             "SELECT * FROM query_agent_step WHERE run_id=? ORDER BY created_at,id", (run_id,)
         )]
@@ -135,6 +137,10 @@ class QueryService:
         return {"id": feedback_id, "runId": run_id, "rating": rating}
 
     def evidence_for_answer(self, answer: dict) -> list[dict]:
+        direct_refs = [
+            item for item in (answer.get("sourceReferences") or answer.get("source_references") or [])
+            if isinstance(item, dict) and (item.get("referenceId") or item.get("reference_id"))
+        ]
         evidence_ids = list(dict.fromkeys(
             evidence_id
             for section in ("facts", "inferences")
@@ -144,11 +150,13 @@ class QueryService:
         for conflict in answer.get("conflicts", []):
             evidence_ids.extend(conflict.get("evidenceIds", []))
         values = []
+        seen_ids = set()
         for evidence_id in dict.fromkeys(evidence_ids):
             row = self.db.execute("SELECT * FROM evidence WHERE id=?", (evidence_id,)).fetchone()
             if not row:
                 continue
             item = dict(row)
+            seen_ids.add(str(item["id"]))
             source_type = "BUSINESS" if item["source_type"] == "MANUAL" else item["source_type"]
             location = {"locator": item["locator"]}
             if source_type == "CODE":
@@ -172,6 +180,38 @@ class QueryService:
                 "symbol": code_fact["qualified_name"] if code_fact else None,
                 "relationType": code_fact["fact_type"] if code_fact else None,
             })
+        # Source-led investigations use query-local SRC-* references rather
+        # than manufacturing durable ``evidence`` rows.  Re-open the indexed
+        # symbol for the API/evidence pane; the persisted answer retains only
+        # the symbol and line range metadata.
+        from ..tools import EvidenceTools
+        code_tools = EvidenceTools(self.db)
+        for reference in direct_refs:
+            reference_id = str(reference.get("referenceId") or reference.get("reference_id"))
+            if reference_id in seen_ids:
+                continue
+            source_id = str(reference.get("sourceId") or reference.get("source_id") or "")
+            content = str(reference.get("content") or "")
+            source = None
+            if source_id and not content:
+                try:
+                    source = code_tools.read_source(source_id)
+                    content = str(source.get("content") or "")
+                except (KeyError, OSError, UnicodeError):
+                    source = None
+            location = {
+                "file": reference.get("file") or (source or {}).get("path") or "",
+                "startLine": reference.get("startLine") or (source or {}).get("line_start"),
+                "endLine": reference.get("endLine") or (source or {}).get("line_end"),
+            }
+            values.append({
+                "evidenceId": reference_id, "sourceType": "CODE", "sourceId": source_id,
+                "sourceVersion": str(reference.get("sourceVersion") or "INDEXED"),
+                "location": location, "content": content, "contentHash": reference.get("contentHash") or "",
+                "status": "DIRECT", "symbol": reference.get("qualifiedName") or (source or {}).get("qualified_name"),
+                "relationType": "SOURCE_READ",
+            })
+            seen_ids.add(reference_id)
         values.sort(key=lambda item: (
             {"CODE": 0, "BUSINESS": 1, "REQUIREMENT": 2}.get(item["sourceType"], 3),
             int(item["location"].get("endLine") or 0) - int(item["location"].get("startLine") or 0),

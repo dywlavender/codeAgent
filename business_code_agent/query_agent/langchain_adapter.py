@@ -65,7 +65,13 @@ class LangChainQueryAnalyzer:
 
 
 class LangChainQueryComposer:
-    """Structured answer synthesis over already verified facts only."""
+    """Model adapter used by both the legacy and source-led query paths.
+
+    ``compose`` remains available for historical callers that already have a
+    verified-fact catalog.  New query runs call ``investigate`` instead: the
+    model receives navigation context, can call source tools, and writes an
+    answer whose claims cite references created by those reads.
+    """
 
     def __init__(self, model: Any, *, agent_factory: Callable[..., Any] | None = None):
         self.model = model
@@ -95,6 +101,59 @@ class LangChainQueryComposer:
             raise
         except Exception as exc:
             raise QueryModelInvocationError("answer synthesis failed") from exc
+
+    def investigate(
+        self,
+        question: str,
+        *,
+        context: Mapping[str, Any] | None = None,
+        tools=(),
+        ledger=None,
+        max_tool_calls: int = 48,
+    ) -> dict:
+        """Run the autonomous source investigation loop.
+
+        LangChain's agent owns the loop: a tool result is fed back to the
+        model, which may search, read another symbol, or finish.  The adapter
+        validates only the citation boundary (every cited reference must have
+        been returned by a tool in this run); it does not attempt to interpret
+        the semantics of the source code itself.
+        """
+        schema = _investigation_schema()
+        analyzer = LangChainQueryAnalyzer(self.model, agent_factory=self._agent_factory, tools=tools)
+        agent = analyzer._build(schema, _INVESTIGATION_PROMPT)
+        payload = {
+            "question": question,
+            "navigation_context": context or {},
+            "constraints": {
+                "source_is_final_authority": True,
+                "code_claims_require_read_source_reference": True,
+                "do_not_complete_a_call_chain_unless_question_requires_it": True,
+                "max_tool_calls": max(1, int(max_tool_calls)),
+            },
+        }
+        try:
+            result = _invoke_with_recursion_limit(agent, payload, max_tool_calls)
+            structured = result.get("structured_response") if isinstance(result, Mapping) else None
+            if structured is None:
+                raise ValueError("query investigator did not return structured_response")
+            value = structured.model_dump(mode="python") if hasattr(structured, "model_dump") else structured
+            return _validate_investigation(value, ledger=ledger)
+        except QueryModelInvocationError:
+            raise
+        except Exception as exc:
+            raise QueryModelInvocationError("source investigation failed") from exc
+
+
+class LangChainQueryInvestigator(LangChainQueryComposer):
+    """Named adapter for the source-led query path.
+
+    It intentionally inherits the legacy ``compose`` compatibility method so
+    deployments can roll forward without a database migration; new services
+    use only :meth:`investigate`.
+    """
+
+    pass
 
 
 def _understanding_schema():
@@ -133,6 +192,158 @@ def _answer_schema():
         suggested_follow_ups: list[str] = Field(default_factory=list)
 
     return Answer
+
+
+_INVESTIGATION_PROMPT = """你是一个基于真实代码仓库调查业务问题的 Code Agent。
+
+你的目标不是复述索引中的调用链，而是回答用户真正提出的业务或技术问题。
+业务知识用于理解术语和定位入口；代码索引用于找到候选类、方法和接口；最终代码结论必须以本次通过 read_source 实际读取的源码为依据。
+
+调查循环：
+1. 先判断用户真正想知道的是链路、逻辑、条件、计算、状态、数据来源还是跨系统关系；
+2. 优先利用 navigation_context，也可以调用 search_business 和 search_code 找到入口；
+3. 找到候选后必须调用 read_source，不能根据类名、方法名、索引摘要猜测实现；
+4. 读到关键方法调用、条件分支、数据来源或跨系统调用时，只在当前问题需要时调用 follow_call、find_references 或 follow_integration；
+5. 判断已经足以回答后立即结束，不要为了补齐完整调用链而无休止追踪；
+6. 不确定的内容放入 unknowns，不能把未读取的代码写成确定事实；
+7. 每一条 claim 至少填写一个 reference_ids。代码 claim 必须引用 read_source 返回的 SRC-* referenceId；业务说明可以引用 search_business 返回的 evidenceId；
+8. 结论要直接回答问题，claims 写具体的条件、判断、分支、计算、状态、返回或调用，不要只写“调用了某方法”。
+
+最终只返回结构化结果，不要在结构化字段之外添加自由文本。"""
+
+
+def _investigation_schema():
+    from pydantic import BaseModel, ConfigDict, Field
+
+    class Claim(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        statement: str = Field(min_length=1)
+        reference_ids: list[str] = Field(default_factory=list)
+        source_type: str = ""
+
+    class Investigation(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        conclusion: str = Field(min_length=1)
+        claims: list[Claim] = Field(default_factory=list)
+        answer_type: str = "FULL"
+        source_reference_ids: list[str] = Field(default_factory=list)
+        business_evidence_ids: list[str] = Field(default_factory=list)
+        unknowns: list[str] = Field(default_factory=list)
+        conflicts: list[str] = Field(default_factory=list)
+        suggested_follow_ups: list[str] = Field(default_factory=list)
+
+    return Investigation
+
+
+def _invoke_with_recursion_limit(agent, payload: dict[str, Any], max_tool_calls: int):
+    """Give real agents a bounded graph budget while keeping tiny fakes usable."""
+    config = {"recursion_limit": max(8, min(128, int(max_tool_calls) * 2 + 4))}
+    try:
+        return agent.invoke({"messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}, config)
+    except TypeError as exc:
+        # Small test adapters and third-party wrappers often expose only
+        # ``invoke(input)``.  Retry that contract without hiding real model
+        # errors raised after invocation begins.
+        if "positional" not in str(exc) and "argument" not in str(exc):
+            raise
+        return agent.invoke({"messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]})
+
+
+def _validate_investigation(payload: Any, *, ledger=None) -> dict:
+    """Validate citations, then return a provider-independent answer payload."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("query investigation response is invalid")
+
+    read_refs = {}
+    business_ids: set[str] = set()
+    if ledger is not None:
+        read_refs = {
+            str(item.get("referenceId")): dict(item)
+            for item in ledger.metadata()
+            if item.get("referenceId")
+        }
+        business_ids = set(ledger.business_evidence_ids)
+    else:
+        # The adapter is also useful in isolation.  Production always passes a
+        # ledger; without it we can still reject empty references while the
+        # caller owns the persistence boundary.
+        read_refs = {
+            str(item): {"referenceId": str(item), "sourceType": "CODE"}
+            for item in _string_list(payload.get("source_reference_ids", payload.get("sourceReferenceIds", [])))
+        }
+        business_ids = set(_string_list(payload.get("business_evidence_ids", payload.get("businessEvidenceIds", []))))
+
+    allowed = set(read_refs) | business_ids
+    top_source_ids = _string_list(payload.get("source_reference_ids", payload.get("sourceReferenceIds", [])))
+    top_business_ids = _string_list(payload.get("business_evidence_ids", payload.get("businessEvidenceIds", [])))
+    for reference_id in [*top_source_ids, *top_business_ids]:
+        if reference_id not in allowed:
+            raise ValueError(f"query investigation cited an unread or unavailable reference: {reference_id}")
+
+    raw_claims = payload.get("claims", []) or []
+    if isinstance(raw_claims, Mapping):
+        raw_claims = [raw_claims]
+    claims: list[dict[str, Any]] = []
+    for raw in raw_claims:
+        if not isinstance(raw, Mapping):
+            raise ValueError("query investigation claim is invalid")
+        statement = str(raw.get("statement") or raw.get("claim") or "").strip()
+        if not statement:
+            raise ValueError("query investigation claim is empty")
+        reference_ids = _string_list(raw.get("reference_ids", raw.get("referenceIds", raw.get("evidence_ids", raw.get("evidenceIds", [])))))
+        if not reference_ids:
+            reference_ids = list(dict.fromkeys([*top_source_ids, *top_business_ids]))
+        if not reference_ids:
+            raise ValueError("query investigation claim requires reference_ids")
+        invalid = [item for item in reference_ids if item not in allowed]
+        if invalid:
+            raise ValueError(f"query investigation cited an unread or unavailable reference: {invalid[0]}")
+        source_type = str(raw.get("source_type", raw.get("sourceType", "")) or "").upper()
+        if not source_type:
+            source_type = "CODE" if any(item in read_refs for item in reference_ids) else "BUSINESS"
+        if source_type == "CODE" and not any(item in read_refs for item in reference_ids):
+            raise ValueError("code investigation claim must cite a read_source reference")
+        claims.append({
+            "statement": statement,
+            "referenceIds": reference_ids,
+            "sourceType": source_type,
+        })
+
+    conclusion = str(payload.get("conclusion") or "").strip()
+    if not conclusion:
+        raise ValueError("query investigation conclusion is empty")
+    unknowns = _string_list(payload.get("unknowns", []))
+    conflicts = _string_list(payload.get("conflicts", []))
+    answer_type = str(payload.get("answer_type", payload.get("answerType", "")) or "").upper()
+    if answer_type not in {"FULL", "PARTIAL", "CONFLICT", "UNKNOWN"}:
+        answer_type = "CONFLICT" if conflicts else "PARTIAL" if claims and unknowns else "FULL" if claims else "UNKNOWN"
+    if answer_type == "FULL" and not claims:
+        answer_type = "UNKNOWN"
+    if answer_type in {"FULL", "PARTIAL"} and not claims:
+        answer_type = "UNKNOWN"
+
+    return {
+        "conclusion": conclusion,
+        "claims": claims,
+        "answerType": answer_type,
+        "sourceReferenceIds": list(dict.fromkeys(top_source_ids)),
+        "businessEvidenceIds": list(dict.fromkeys(top_business_ids)),
+        "unknowns": unknowns,
+        "conflicts": [{"reason": value, "evidenceIds": list(dict.fromkeys([*top_source_ids, *top_business_ids]))} for value in conflicts],
+        "suggestedFollowUps": _string_list(payload.get("suggested_follow_ups", payload.get("suggestedFollowUps", [])))[:4],
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        value = [value]
+    try:
+        values = list(value)
+    except TypeError:
+        values = [value]
+    return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))[:48]
 
 
 def _understanding_from_payload(payload: Any, question: str) -> QuestionUnderstanding:

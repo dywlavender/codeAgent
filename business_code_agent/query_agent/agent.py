@@ -13,6 +13,7 @@ from .answer_policy import AnswerPolicy
 from .conflicts import ConflictDetector
 from .evaluator import EvidenceSufficiencyEvaluator
 from .evidence import EvidenceAssembler
+from .investigation import SourceReadLedger
 from .models import (
     AnswerType, EvidenceConflict, EvidenceRef, EvidenceRole, EvidenceStatus,
     QueryAgentState, SourceType, StructuredFact,
@@ -25,10 +26,10 @@ from .understanding import QuestionUnderstandingService
 logger = logging.getLogger(__name__)
 
 class BusinessCodeQueryAgent:
-    """One bounded agent. Tools retrieve; deterministic nodes decide proof gaps."""
+    """Bounded Query Agent with a source-led model path and legacy fallback."""
 
     def __init__(self, db, *, connection_factory=None, max_iterations: int = 3, query_analyzer=None,
-                 answer_composer=None, answer_policy=None):
+                 answer_composer=None, answer_policy=None, query_investigator=None):
         if max_iterations < 1 or max_iterations > 3:
             raise ValueError("max_iterations must be between 1 and 3")
         self.db = db
@@ -36,6 +37,9 @@ class BusinessCodeQueryAgent:
         self.understander = QuestionUnderstandingService()
         self.query_analyzer = query_analyzer
         self.answer_composer = answer_composer
+        self.query_investigator = query_investigator or (
+            answer_composer if callable(getattr(answer_composer, "investigate", None)) else None
+        )
         self.answer_policy = answer_policy or AnswerPolicy()
         self.retriever = QueryRetriever(db, connection_factory=connection_factory)
         self.assembler = EvidenceAssembler(db)
@@ -97,6 +101,271 @@ class BusinessCodeQueryAgent:
             resolve_entry_anchor, search_requirements, follow_integration_edge,
         ]
 
+    def _investigation_tools(self, ledger: SourceReadLedger):
+        """Expose navigation plus real source reads to the model agent."""
+        try:
+            from langchain.tools import tool
+        except ImportError:
+            return []
+
+        def call(name, tool_input, operation):
+            try:
+                result = operation()
+            except (KeyError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
+                result = {"error": str(exc)}
+            ledger.record_tool(name, tool_input, result)
+            return result
+
+        @tool
+        def search_business(query: str) -> list[dict]:
+            """Search human-maintained business knowledge and return context IDs."""
+            rows = call(
+                "search_business", {"query": query},
+                lambda: self._read_only_call(lambda tools: [
+                    {
+                        **row,
+                        "entryAnchors": tools.code.get_business_entry_anchors(str(row.get("id")))
+                        if row.get("knowledge_type") in {"FLOW", "CAPABILITY"} else [],
+                    }
+                    for row in tools.business.search_business(query)[:12]
+                ]),
+            )
+            if not isinstance(rows, list):
+                return rows
+            ledger.register_business_results(rows)
+            return [
+                {
+                    **row,
+                    "evidenceId": row.get("evidence_id") or row.get("evidenceId"),
+                    "referenceId": row.get("evidence_id") or row.get("evidenceId"),
+                }
+                for row in rows
+                if isinstance(row, dict)
+            ]
+
+        @tool
+        def search_code(query: str) -> list[dict]:
+            """Search the navigation index; this never returns source text."""
+            return call(
+                "search_code", {"query": query},
+                lambda: self._read_only_call(lambda tools: tools.code.search_code(query, 16)),
+            )
+
+        @tool
+        def read_source(symbol_id: str) -> dict:
+            """Read the actual source for a symbol and return its SRC reference."""
+            try:
+                source = self._read_only_call(lambda tools: tools.code.read_source(symbol_id))
+                reference = ledger.record_source(source, symbol_id)
+                result = {
+                    "referenceId": reference["referenceId"],
+                    "sourceId": reference["sourceId"],
+                    "qualifiedName": reference["qualifiedName"],
+                    "file": reference["file"],
+                    "startLine": reference["startLine"],
+                    "endLine": reference["endLine"],
+                    "content": reference["content"],
+                }
+            except (KeyError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
+                result = {"error": str(exc)}
+            ledger.record_tool("read_source", {"symbolId": symbol_id}, result)
+            return result
+
+        @tool
+        def find_references(symbol_id: str) -> list[dict]:
+            """Find indexed callers of a symbol; read callers before citing them."""
+            return call(
+                "find_references", {"symbolId": symbol_id},
+                lambda: self._read_only_call(lambda tools: tools.code.find_references(symbol_id)),
+            )
+
+        @tool
+        def follow_call(symbol_id: str, method_name: str = "") -> list[dict]:
+            """Resolve a unique local call target from an already located symbol."""
+            return call(
+                "follow_call", {"symbolId": symbol_id, "methodName": method_name},
+                lambda: self._read_only_call(lambda tools: tools.code.follow_call(symbol_id, method_name)),
+            )
+
+        @tool
+        def follow_integration(symbol_id: str, max_hops: int = 6) -> list[dict]:
+            """Follow verified HTTP/RPC/MQ edges across applications."""
+            return call(
+                "follow_integration", {"symbolId": symbol_id, "maxHops": max_hops},
+                lambda: self._read_only_call(lambda tools: tools.code.follow_integration(symbol_id, max_hops)),
+            )
+
+        return [search_business, search_code, read_source, find_references, follow_call, follow_integration]
+
+    def _run_source_investigation(self, recorder, state: QueryAgentState, initial: dict) -> dict:
+        """Run the model-led loop and convert its citations to the public API."""
+        ledger = SourceReadLedger()
+        ledger.register_business_results(initial.get("business_candidates", []))
+        tools = self._investigation_tools(ledger)
+        started = time.perf_counter()
+        step_id = recorder.step(
+            "AGENT_INVESTIGATION", 0,
+            {"questionProvided": bool(state.question), "initialCandidates": {
+                "business": len(initial.get("business_candidates", [])),
+                "code": len(initial.get("code_candidates", [])),
+            }},
+            {"phase": "model_source_investigation"}, 0, 0.0,
+        )
+        context = {
+            "business": initial.get("business_candidates", []),
+            "code": initial.get("code_candidates", []),
+            "requirements": initial.get("requirement_candidates", []),
+            "understanding": state.to_reference_dict(),
+        }
+        try:
+            model_answer = self.query_investigator.investigate(
+                state.question,
+                context=context,
+                tools=tools,
+                ledger=ledger,
+                max_tool_calls=ledger.max_tool_calls,
+            )
+        except TypeError as exc:
+            # Permit small custom investigator adapters that implement the
+            # public method before the optional keyword arguments were added.
+            if "unexpected keyword" not in str(exc):
+                raise
+            model_answer = self.query_investigator.investigate(state.question, context=context, tools=tools)
+
+        duration = (time.perf_counter() - started) * 1000
+        for call in ledger.tool_calls:
+            recorder.tool_call(step_id, call["tool"], call["input"], call["resultCount"], 0, 0.0)
+        answer = self._source_answer(model_answer, ledger)
+        state.iteration = min(ledger.max_tool_calls, len(ledger.tool_calls))
+        state.evidence_status = _status_for_answer_type(answer["answerType"])
+        state.unknowns = list(answer.get("unknowns", []))
+        state.conflicts = []
+        source_refs = ledger.metadata()
+        answer["sourceReferences"] = source_refs
+        answer["answerMode"] = "MODEL_AGENT"
+        answer["synthesisSkippedReason"] = None
+        state.final_answer = answer
+        recorder.step(
+            "AGENT_INVESTIGATION_RESULT", state.iteration,
+            {"toolCalls": len(ledger.tool_calls), "sourceReads": len(source_refs)},
+            {"answerType": answer["answerType"], "claims": len(answer["facts"]), "unknowns": len(answer["unknowns"])},
+            len(source_refs), duration,
+        )
+        reference_state = state.to_reference_dict()
+        reference_state.update({
+            "answerType": answer["answerType"],
+            "answerMode": "MODEL_AGENT",
+            "sourceReferences": source_refs,
+        })
+        recorder.checkpoint("AGENT_INVESTIGATION", reference_state)
+        recorder.step(
+            "BUILD_ANSWER", state.iteration, {},
+            {"facts": len(answer["facts"]), "sourceReferences": len(source_refs)},
+            len(source_refs), 0.0,
+        )
+        recorder.finish(reference_state, answer, state.evidence_status.value, ledger.source_characters)
+        return {
+            "runId": recorder.run_id, "status": "completed", "intent": state.intent.value,
+            "evidenceStatus": state.evidence_status.value, "iterations": state.iteration,
+            "answer": answer, "renderedAnswer": self.renderer.render(answer),
+            "evidence": ledger.runtime_references(), "sourceReferences": source_refs,
+            "metrics": {
+                "sourceCoverage": ["CODE"] if source_refs else [],
+                "sourceCharacters": ledger.source_characters,
+                "sourceReadCount": len(source_refs),
+                "toolCallCount": len(ledger.tool_calls),
+                "unknownCount": len(answer["unknowns"]), "conflictCount": 0,
+            },
+            "understandingMode": "MODEL" if self.query_analyzer else "DETERMINISTIC",
+            "resolvedQuestion": " ".join(state.search_terms),
+            "entities": list(dict.fromkeys([
+                *state.business_objects, *state.processes, *state.systems,
+                *state.field_hints, *state.table_hints, *state.code_hints,
+            ]))[:24],
+            "businessCandidates": initial.get("business_candidates", []),
+            "codeCandidates": initial.get("code_candidates", []),
+            "answerType": answer["answerType"],
+            "answerMode": "MODEL_AGENT",
+            "synthesisSkippedReason": None,
+        }
+
+    @staticmethod
+    def _source_answer(model_answer: dict, ledger: SourceReadLedger) -> dict:
+        """Map direct investigator output to the existing answer envelope."""
+        if not isinstance(model_answer, dict):
+            raise ValueError("source investigation answer must be an object")
+        source_ids = {item["referenceId"] for item in ledger.metadata()}
+        business_ids = ledger.business_evidence_ids
+        valid_ids = source_ids | business_ids
+        raw_claims = model_answer.get("claims", []) or []
+        if isinstance(raw_claims, dict):
+            raw_claims = [raw_claims]
+        facts = []
+        for claim in raw_claims:
+            if not isinstance(claim, dict):
+                raise ValueError("source investigation claim must be an object")
+            statement = str(claim.get("statement") or claim.get("claim") or "").strip()
+            if not statement:
+                raise ValueError("source investigation claim is empty")
+            evidence_ids = _reference_ids(
+                claim.get("referenceIds") or claim.get("reference_ids")
+                or claim.get("evidenceIds") or claim.get("evidence_ids")
+            )
+            if not evidence_ids:
+                raise ValueError("source investigation claim requires a source reference")
+            source_type = str(claim.get("sourceType") or claim.get("source_type") or "").upper()
+            if not source_type:
+                source_type = "CODE" if any(item in source_ids for item in evidence_ids) else "BUSINESS"
+            item = {"statement": statement, "sourceType": source_type, "evidenceIds": evidence_ids}
+            facts.append(item)
+        for fact in facts:
+            ids = fact["evidenceIds"]
+            invalid = [item for item in ids if item not in valid_ids]
+            if invalid:
+                raise ValueError(f"source investigation cited an unread or unavailable reference: {invalid[0]}")
+            if fact["sourceType"] == "CODE" and not any(item in source_ids for item in ids):
+                if any(item in business_ids for item in ids):
+                    fact["sourceType"] = "BUSINESS"
+                else:
+                    raise ValueError("source investigation code claim must cite a read_source reference")
+        technical = [{"statement": item["statement"], "evidenceIds": item["evidenceIds"]} for item in facts if item["sourceType"] == "CODE"]
+        business = [{"statement": item["statement"], "evidenceIds": item["evidenceIds"]} for item in facts if item["sourceType"] == "BUSINESS"]
+        conflicts = []
+        raw_conflicts = model_answer.get("conflicts", []) or []
+        if isinstance(raw_conflicts, dict):
+            raw_conflicts = [raw_conflicts]
+        for raw_conflict in raw_conflicts:
+            if isinstance(raw_conflict, dict):
+                conflict = dict(raw_conflict)
+                reason = str(conflict.get("reason") or conflict.get("description") or "").strip()
+                ids = _reference_ids(conflict.get("evidenceIds") or conflict.get("evidence_ids"))
+            else:
+                reason, ids = str(raw_conflict).strip(), []
+            if not reason and not ids:
+                continue
+            invalid = [item for item in ids if item not in valid_ids]
+            if invalid:
+                raise ValueError(f"source investigation conflict cited an unread or unavailable reference: {invalid[0]}")
+            conflict = {**(conflict if isinstance(raw_conflict, dict) else {}), "reason": reason,
+                        "evidenceIds": ids, "status": "CONFLICT"}
+            conflicts.append(conflict)
+        answer_type = str(model_answer.get("answerType") or model_answer.get("answer_type") or "UNKNOWN").upper()
+        if answer_type not in {"FULL", "PARTIAL", "CONFLICT", "UNKNOWN"}:
+            answer_type = "FULL" if facts else "UNKNOWN"
+        if conflicts:
+            answer_type = "CONFLICT"
+        return {
+            "conclusion": str(model_answer.get("conclusion") or "当前没有足够源码证据支持确定结论。"),
+            "businessFlow": business,
+            "technicalFlow": technical,
+            "facts": facts,
+            "inferences": [],
+            "unknowns": list(dict.fromkeys(str(item) for item in (model_answer.get("unknowns") or []) if str(item).strip())),
+            "conflicts": conflicts,
+            "suggestedFollowUps": list(dict.fromkeys(str(item) for item in (model_answer.get("suggestedFollowUps") or model_answer.get("suggested_follow_ups") or []) if str(item).strip()))[:4],
+            "answerType": answer_type,
+        }
+
     def _read_only_call(self, operation):
         """Run a model-requested read on a connection owned by that worker.
 
@@ -130,6 +399,14 @@ class BusinessCodeQueryAgent:
             self._expand_code_from_knowledge(state)
             self._record_tools(recorder, initial.get("tool_calls", []), 0, "INITIAL_SEARCH")
             recorder.checkpoint("INITIAL_SEARCH", state.to_reference_dict())
+
+            # A configured source investigator owns the query loop.  The
+            # legacy evaluator/StructuredFact path below remains available
+            # for deterministic/offline deployments and old integrations, but
+            # it is not allowed to decide when a model-led investigation is
+            # complete.
+            if self.query_investigator is not None:
+                return self._run_source_investigation(recorder, state, initial)
 
             # LOAD_SUMMARY is deliberately a no-raw transition.
             self._timed_node(recorder, "LOAD_SUMMARY", 0, {}, lambda: {"rawEvidenceLoaded": False})
@@ -522,6 +799,18 @@ def _candidate_richness(item):
     return sum(1 for key in ("fact_type", "factType", "evidence_id", "evidenceId", "subject", "target", "digest", "status") if item.get(key))
 
 
+def _reference_ids(value):
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        value = [value]
+    try:
+        values = list(value)
+    except TypeError:
+        values = [value]
+    return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
 def _strategy(text):
     lowered = text.lower()
     if any(term in lowered for term in ("实时查询", "重新查询", "realtime", "live query")):
@@ -570,3 +859,12 @@ def _merge_understanding(primary, semantic):
     # The model may classify a phrase semantically, but it cannot invent a new
     # intent outside the finite domain.
     return type(primary)(intent=semantic.intent, **values)
+
+
+def _status_for_answer_type(answer_type: str) -> EvidenceStatus:
+    value = str(answer_type or "UNKNOWN").upper()
+    if value == "CONFLICT":
+        return EvidenceStatus.CONFLICT
+    if value == "FULL":
+        return EvidenceStatus.SUFFICIENT
+    return EvidenceStatus.INSUFFICIENT

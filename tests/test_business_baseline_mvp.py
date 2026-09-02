@@ -27,6 +27,38 @@ BASELINE = """# 提款业务基线
 """
 
 
+SIX_KINDS_BASELINE = """# 贷款申请生命周期
+
+## 贷款申请系统
+
+贷款申请系统负责创建申请、确定还款方式并保存申请数据。提款服务和清算任务属于同一贷款申请生命周期，但承担不同职责。
+
+## 还款方式
+
+还款方式是在创建贷款申请时确定的业务属性，代码中一般用 repayType 表示。普通客户使用 A，VIP 客户可以使用 B。
+
+## 提款结果处理能力
+
+提款阶段读取申请时已经保存的还款方式，校验通过后继续处理提款，不允许在提款阶段重新生成还款方式。代码中的入口通常包含 Withdrawal。
+
+## 申请与提款主流程
+
+1. 申请服务创建贷款申请。
+2. 产品策略确定还款方式。
+3. 申请服务保存申请及还款方式。
+4. 提款服务读取申请快照。
+5. 提款服务校验还款方式并继续提款。
+
+## 提款沿用申请数据规则
+
+提款是申请生命周期的后续阶段。申请创建后，提款处理需要读取并校验申请阶段确定的还款方式，不能重新选择还款方式。
+
+## 申请与提款关系
+
+申请创建后，提款处理通过贷款申请记录读取还款方式。申请服务和提款服务之间没有直接方法调用。
+"""
+
+
 class _Extractor:
     def extract(self, *, source_path: str, text: str):
         return {
@@ -54,11 +86,18 @@ class _Extractor:
 
 class BusinessBaselineMvpTest(unittest.TestCase):
     def test_explicit_markdown_parser_imports_the_six_mvp_knowledge_kinds(self):
-        with tempfile.NamedTemporaryFile(suffix=".db") as handle:
-            db = connect(handle.name)
-            result = BaselineKnowledgeService(
-                db, project_config=ROOT / "project.config.example.json"
-            ).refresh(parser="markdown")
+        # Keep parser coverage independent from the production knowledge
+        # directory, whose examples are intentionally free to evolve or be
+        # removed without breaking the test contract.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline_root = root / "baseline"
+            baseline_root.mkdir()
+            (baseline_root / "six-kinds.md").write_text(SIX_KINDS_BASELINE, encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            db = connect(str(root / "knowledge.db"))
+            result = BaselineKnowledgeService(db, project_config=config).refresh(parser="markdown")
             self.assertEqual({
                 "BUSINESS_TERM": 1, "CAPABILITY": 1, "FLOW": 1,
                 "RELATION": 1, "RULE": 1, "SYSTEM": 1,
