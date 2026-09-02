@@ -9,11 +9,12 @@ from datetime import datetime, timezone
 from ..schema import connect
 from ..util import stable_id
 from .answer import AnswerBuilder, AnswerRenderer
+from .answer_policy import AnswerPolicy
 from .conflicts import ConflictDetector
 from .evaluator import EvidenceSufficiencyEvaluator
 from .evidence import EvidenceAssembler
 from .models import (
-    EvidenceConflict, EvidenceRef, EvidenceRole, EvidenceStatus,
+    AnswerType, EvidenceConflict, EvidenceRef, EvidenceRole, EvidenceStatus,
     QueryAgentState, SourceType, StructuredFact,
 )
 from .observability import QueryRunRecorder
@@ -26,7 +27,8 @@ logger = logging.getLogger(__name__)
 class BusinessCodeQueryAgent:
     """One bounded agent. Tools retrieve; deterministic nodes decide proof gaps."""
 
-    def __init__(self, db, *, connection_factory=None, max_iterations: int = 3, query_analyzer=None, answer_composer=None):
+    def __init__(self, db, *, connection_factory=None, max_iterations: int = 3, query_analyzer=None,
+                 answer_composer=None, answer_policy=None):
         if max_iterations < 1 or max_iterations > 3:
             raise ValueError("max_iterations must be between 1 and 3")
         self.db = db
@@ -34,6 +36,7 @@ class BusinessCodeQueryAgent:
         self.understander = QuestionUnderstandingService()
         self.query_analyzer = query_analyzer
         self.answer_composer = answer_composer
+        self.answer_policy = answer_policy or AnswerPolicy()
         self.retriever = QueryRetriever(db, connection_factory=connection_factory)
         self.assembler = EvidenceAssembler(db)
         self.evaluator = EvidenceSufficiencyEvaluator()
@@ -163,8 +166,26 @@ class BusinessCodeQueryAgent:
             if state.evidence_status is EvidenceStatus.INSUFFICIENT:
                 state.unknowns = list(dict.fromkeys([*state.unknowns, *[gap.question for gap in state.evidence_gaps]]))
             answer = self.answer_builder.build(state)
+            decision = self.answer_policy.decide(
+                evidence_status=state.evidence_status,
+                facts=answer["facts"],
+                conflicts=answer["conflicts"],
+                unknowns=answer["unknowns"],
+                model_available=self.answer_composer is not None,
+            )
+            if decision.answer_type is AnswerType.CONFLICT:
+                # AnswerBuilder can detect a conflict from verified facts even
+                # when an upstream evaluator supplied an inconsistent status.
+                # Keep the public run status aligned with the final answer.
+                state.evidence_status = EvidenceStatus.CONFLICT
             answer_mode = "DETERMINISTIC"
-            if self.answer_composer:
+            recorder.step(
+                "ANSWER_DECISION", state.iteration,
+                {"evidenceStatus": state.evidence_status.value, "modelAvailable": bool(self.answer_composer)},
+                {"answerType": decision.answer_type.value, "useModel": decision.use_model, "reason": decision.reason},
+                self._evidence_count(state), 0.0,
+            )
+            if decision.use_model:
                 composed = self.answer_composer.compose(
                     question, evidence_status=state.evidence_status.value,
                     facts=answer["facts"], unknowns=answer["unknowns"], conflicts=answer["conflicts"],
@@ -173,6 +194,13 @@ class BusinessCodeQueryAgent:
                 answer["suggestedFollowUps"] = composed.get("suggestedFollowUps", [])
                 answer_mode = "MODEL"
                 recorder.step("SYNTHESIZE", state.iteration, {}, {"claims": len(composed.get("claims", []))}, self._evidence_count(state), 0.0)
+            else:
+                logger.info(
+                    "answer synthesis skipped: answerType=%s evidenceStatus=%s reason=%s",
+                    decision.answer_type.value, state.evidence_status.value, decision.reason,
+                )
+            answer["answerType"] = decision.answer_type.value
+            answer["synthesisSkippedReason"] = decision.reason or None
             answer["answerMode"] = answer_mode
             answer["resolvedQuestion"] = " ".join(state.search_terms)
             answer["entities"] = list(dict.fromkeys([
@@ -181,8 +209,13 @@ class BusinessCodeQueryAgent:
             ]))[:24]
             state.final_answer = answer
             reference_state = state.to_reference_dict()
+            reference_state.update({
+                "answerType": decision.answer_type.value,
+                "answerMode": answer_mode,
+                "synthesisSkippedReason": decision.reason or None,
+            })
             recorder.step("BUILD_ANSWER", state.iteration, {}, {"facts": len(answer["facts"]), "conflicts": len(answer["conflicts"])}, self._evidence_count(state), 0.0)
-            recorder.finish(state.to_reference_dict(), answer, state.evidence_status.value, self.assembler.last_stats["sourceCharacters"])
+            recorder.finish(reference_state, answer, state.evidence_status.value, self.assembler.last_stats["sourceCharacters"])
             return {
                 "runId": run_id, "status": "completed", "intent": state.intent.value,
                 "evidenceStatus": state.evidence_status.value, "iterations": state.iteration,
@@ -197,6 +230,8 @@ class BusinessCodeQueryAgent:
                 # or durable business-to-code associations.
                 "businessCandidates": reference_state.get("business_candidates", []),
                 "codeCandidates": reference_state.get("code_candidates", []),
+                "answerType": decision.answer_type.value,
+                "synthesisSkippedReason": decision.reason or None,
             }
         except Exception as exc:
             recorder.fail(type(exc).__name__, state.to_reference_dict() if state else None)

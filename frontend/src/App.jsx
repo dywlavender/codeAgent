@@ -133,6 +133,8 @@ export default function App() {
         evidenceStatus: detail.evidence_status, iterations: detail.iterations,
         answer: detail.answer || null, evidence: evidenceList,
         answerMode: detail.answerMode || detail.answer_mode || detail.state?.answerMode || detail.state?.answer_mode,
+        answerType: detail.answerType || detail.answer_type || detail.answer?.answerType || detail.answer?.answer_type || detail.state?.answerType || detail.state?.answer_type,
+        synthesisSkippedReason: detail.synthesisSkippedReason || detail.synthesis_skipped_reason || detail.answer?.synthesisSkippedReason || detail.answer?.synthesis_skipped_reason || detail.state?.synthesisSkippedReason || detail.state?.synthesis_skipped_reason,
         resolvedQuestion: detail.resolvedQuestion || detail.resolved_question || detail.state?.resolvedQuestion || detail.state?.resolved_question || detail.state?.search_terms?.join(" "),
         suggestedFollowUps: detail.suggestedFollowUps || detail.suggested_follow_ups || detail.answer?.suggestedFollowUps || [],
         entities: detail.entities || detail.resolvedEntities || detail.state?.entities || detail.state?.resolved_entities || [],

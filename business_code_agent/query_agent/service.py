@@ -93,6 +93,16 @@ class QueryService:
         # gracefully instead of failing the whole replay endpoint.
         value["answer"] = _safe_json_loads(value.pop("answer_json"))
         value["state"] = _safe_json_loads(value.pop("state_json"))
+        # Answer decision metadata is stored inside the JSON payload so old
+        # SQLite databases need no schema migration.  Promote it here for API
+        # clients that load a historical run directly.
+        value["answerType"] = value["answer"].get("answerType") or value["state"].get("answerType")
+        value["answerMode"] = value["answer"].get("answerMode") or value["state"].get("answerMode")
+        value["synthesisSkippedReason"] = (
+            value["answer"].get("synthesisSkippedReason")
+            if "synthesisSkippedReason" in value["answer"]
+            else value["state"].get("synthesisSkippedReason")
+        )
         value["steps"] = [dict(row) for row in self.db.execute(
             "SELECT * FROM query_agent_step WHERE run_id=? ORDER BY created_at,id", (run_id,)
         )]
@@ -171,12 +181,21 @@ class QueryService:
 
     def list_runs(self, limit: int = 30) -> list[dict]:
         limit = max(1, min(int(limit), 100))
-        return [dict(row) for row in self.db.execute(
+        rows = self.db.execute(
             """SELECT id,question,intent,status,evidence_status,iterations,
-                      source_characters,created_at,completed_at
+                      source_characters,answer_json,created_at,completed_at
                  FROM query_agent_run ORDER BY created_at DESC LIMIT ?""",
             (limit,),
-        )]
+        ).fetchall()
+        values = []
+        for row in rows:
+            item = dict(row)
+            answer = _safe_json_loads(item.pop("answer_json"))
+            item["answerType"] = answer.get("answerType")
+            item["answerMode"] = answer.get("answerMode")
+            item["synthesisSkippedReason"] = answer.get("synthesisSkippedReason")
+            values.append(item)
+        return values
 
     def workspace_summary(self) -> dict:
         raw_repositories = [dict(row) for row in self.db.execute(

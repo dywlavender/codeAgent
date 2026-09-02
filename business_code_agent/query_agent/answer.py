@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from .conflicts import ConflictDetector
+from .models import AnswerType
 
 
 ANSWER_KEYS = ("conclusion", "businessFlow", "technicalFlow", "facts", "inferences", "unknowns", "conflicts")
@@ -178,7 +179,17 @@ class AnswerBuilder:
         result: list[dict[str, Any]] = []
         seen: set[tuple[str, ...]] = set()
         for value in [*supplied, *detected]:
-            item = dict(value) if isinstance(value, Mapping) else {"reason": str(value)}
+            if isinstance(value, Mapping):
+                item = dict(value)
+            else:
+                code_ids = _unique_strings(_as_list(_get(value, "code_fact_ids", "codeFactIds", default=[])))
+                business_ids = _unique_strings(_as_list(_get(value, "business_fact_ids", "businessFactIds", default=[])))
+                requirement_ids = _unique_strings(_as_list(_get(value, "requirement_fact_ids", "requirementFactIds", default=[])))
+                item = {
+                    "conflictKey": _get(value, "topic", "conflict_key", "conflictKey", default=""),
+                    "reason": _get(value, "description", "reason", default=str(value)),
+                    "evidenceIds": [*code_ids, *business_ids, *requirement_ids],
+                }
             item["status"] = "CONFLICT"
             ids = _unique_strings(_as_list(item.get("evidenceIds", item.get("evidence_ids", []))))
             if ids:
@@ -194,12 +205,35 @@ class AnswerRenderer:
     """Render an answer for people while leaving the structured result intact."""
 
     def render(self, answer: Mapping[str, Any]) -> str:
-        lines = ["结论", str(answer.get("conclusion", ""))]
+        answer_type = _answer_type(answer)
+        heading = {
+            AnswerType.FULL: "结论",
+            AnswerType.PARTIAL: "部分结论",
+            AnswerType.CONFLICT: "发现证据冲突",
+            AnswerType.UNKNOWN: "当前证据不足",
+        }[answer_type]
+        lines = [heading, str(answer.get("conclusion", ""))]
+        if answer_type is AnswerType.PARTIAL:
+            lines.extend(("回答范围", "当前结论基于部分证据，下面分别列出已确认和未确认内容。"))
+        elif answer_type is AnswerType.CONFLICT:
+            lines.extend(("回答范围", "不同来源的证据存在冲突，当前不能合并为单一确定结论。"))
+        elif answer_type is AnswerType.UNKNOWN:
+            lines.extend(("回答范围", "当前没有足够的已验证证据支持确定结论。"))
         self._section(lines, "业务链路", answer.get("businessFlow", []), self._flow_text)
         self._section(lines, "技术链路", answer.get("technicalFlow", []), self._flow_text)
-        self._section(lines, "确定事实", answer.get("facts", []), self._fact_text)
+        self._section(
+            lines,
+            "已确认" if answer_type is AnswerType.PARTIAL else "确定事实",
+            answer.get("facts", []),
+            self._fact_text,
+        )
         self._section(lines, "推断", answer.get("inferences", []), self._inference_text)
-        self._section(lines, "未确认", answer.get("unknowns", []), str)
+        self._section(
+            lines,
+            "未确认" if answer_type in {AnswerType.PARTIAL, AnswerType.UNKNOWN} else "待确认",
+            answer.get("unknowns", []),
+            str,
+        )
         self._section(lines, "冲突", answer.get("conflicts", []), self._conflict_text)
         self._section(lines, "建议追问", answer.get("suggestedFollowUps", []), str)
         return "\n\n".join(lines)
@@ -229,6 +263,19 @@ class AnswerRenderer:
     def _conflict_text(value: Mapping[str, Any]) -> str:
         sources = "；".join(f"{name.upper()}: {value.get(name)}" for name in ("business", "requirement", "code") if value.get(name))
         return f"CONFLICT {value.get('reason', '')}" + (f"（{sources}）" if sources else "")
+
+
+def _answer_type(answer: Mapping[str, Any]) -> AnswerType:
+    """Read the explicit type, with a compatibility inference for old runs."""
+    raw = answer.get("answerType") or answer.get("answer_type")
+    try:
+        return AnswerType(str(raw).upper())
+    except ValueError:
+        if answer.get("conflicts"):
+            return AnswerType.CONFLICT
+        if answer.get("facts"):
+            return AnswerType.PARTIAL if answer.get("unknowns") else AnswerType.FULL
+        return AnswerType.UNKNOWN
 
 
 def build_answer(state: Any) -> dict[str, Any]:

@@ -40,6 +40,26 @@ export function answerModeLabel(value) {
   return labels[String(value).toUpperCase()] || String(value);
 }
 
+export function answerTypeLabel(value) {
+  if (!value) return "";
+  return ({
+    FULL: "完整结论",
+    PARTIAL: "部分结论",
+    CONFLICT: "证据冲突",
+    UNKNOWN: "无法确认",
+  })[String(value).toUpperCase()] || String(value);
+}
+
+export function synthesisSkippedReasonLabel(value) {
+  if (!value) return "";
+  return ({
+    NO_MODEL: "未配置回答模型",
+    INSUFFICIENT_EVIDENCE: "证据不足",
+    EVIDENCE_CONFLICT: "存在证据冲突",
+    NO_VERIFIED_FACTS: "没有已验证事实",
+  })[String(value).toUpperCase()] || String(value);
+}
+
 export function normalizeSteps(detail) {
   if (!detail?.steps) return [];
   return detail.steps.map((step) => ({ ...step, tools: detail.toolCalls?.filter((tool) => tool.step_id === step.id) || [] }));
@@ -48,6 +68,7 @@ export function normalizeSteps(detail) {
 export function stepSummary(step) {
   try {
     const output = JSON.parse(step.output_summary_json || "{}");
+    if (output.answerType) return `${answerTypeLabel(output.answerType)}${output.reason ? ` · ${synthesisSkippedReasonLabel(output.reason)}` : ""}`;
     if (output.gaps !== undefined) return `${output.gaps} 个证据缺口`;
     if (output.calls !== undefined) return `${output.calls} 次工具调用`;
     if (output.count !== undefined) return `读取 ${output.count} 条证据`;
@@ -90,6 +111,7 @@ export function stepLabel(name) {
     EXPAND_EVIDENCE: "扩展证据",
     EXPAND_EVIDENCE_TOOLS: "调用扩展工具",
     READ_RAW_EVIDENCE: "读取原始证据",
+    ANSWER_DECISION: "回答决策",
     BUILD_ANSWER: "生成回答",
   })[name] || name;
 }

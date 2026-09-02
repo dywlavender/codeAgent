@@ -27,6 +27,24 @@ class EvidenceStatus(StrEnum):
     CONFLICT = "CONFLICT"
 
 
+class AnswerType(StrEnum):
+    """How a completed investigation can be presented to the user."""
+
+    FULL = "FULL"
+    PARTIAL = "PARTIAL"
+    CONFLICT = "CONFLICT"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class AnswerDecision:
+    """The deterministic hand-off between evidence evaluation and rendering."""
+
+    answer_type: AnswerType
+    use_model: bool
+    reason: str = ""
+
+
 class SourceType(StrEnum):
     CODE = "CODE"
     BUSINESS = "BUSINESS"

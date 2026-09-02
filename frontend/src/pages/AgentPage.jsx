@@ -9,8 +9,9 @@ import {
 import { request } from "../lib/api.js";
 import { palette, sourceMeta } from "../theme.js";
 import {
-  answerModeLabel, formatLocation, groupEvidence,
+  answerModeLabel, answerTypeLabel, formatLocation, groupEvidence,
   intentLabel, normalizeSteps, sourceLabel, statusLabel, stepLabel, stepSummary,
+  synthesisSkippedReasonLabel,
 } from "../lib/format.js";
 
 const EXAMPLES = [
@@ -189,7 +190,11 @@ function TurnBlock({ turn, submit, viewMode, setViewMode, setDrawerEv }) {
             {turn.status === "success" && (
               <>
                 <Typography.Text type="secondary" style={{ fontSize: 11.5 }}>
-                  {[intentLabel(turn.result.intent), answerModeLabel(turn.result.answerMode || turn.result.answer_mode)].filter(Boolean).join(" · ")}
+                  {[
+                    intentLabel(turn.result.intent),
+                    answerTypeLabel(turn.result.answerType || turn.result.answer_type || turn.result.answer?.answerType),
+                    answerModeLabel(turn.result.answerMode || turn.result.answer_mode),
+                  ].filter(Boolean).join(" · ")}
                 </Typography.Text>
                 <Segmented
                   size="small"
@@ -231,6 +236,14 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
   const flowList = Array.isArray(answer.businessFlow) ? answer.businessFlow : [];
   const technicalFlowList = Array.isArray(answer.technicalFlow) ? answer.technicalFlow : [];
   const inferenceList = Array.isArray(answer.inferences) ? answer.inferences : [];
+  const answerType = String(
+    result.answerType || result.answer_type || answer.answerType || answer.answer_type
+      || detail?.answerType || detail?.answer_type || detail?.state?.answerType || detail?.state?.answer_type
+      || (conflictList.length ? "CONFLICT" : factsList.length ? (unknownList.length ? "PARTIAL" : "FULL") : "UNKNOWN")
+  ).toUpperCase();
+  const synthesisSkippedReason = result.synthesisSkippedReason || result.synthesis_skipped_reason
+    || answer.synthesisSkippedReason || answer.synthesis_skipped_reason
+    || detail?.synthesisSkippedReason || detail?.synthesis_skipped_reason;
   const evidenceById = useMemo(() => {
     const map = {};
     (Array.isArray(result.evidence) ? result.evidence : []).forEach((item) => { if (item && item.evidenceId) map[item.evidenceId] = item; });
@@ -319,7 +332,7 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
         </DocSection>
       )}
 
-      <DocSection label={`已确认事实${allFacts.length ? ` · ${allFacts.length}` : ""}`}>
+      <DocSection label={`${answerType === "PARTIAL" ? "已确认" : "已确认事实"}${allFacts.length ? ` · ${allFacts.length}` : ""}`}>
         {allFacts.length ? allFacts.map((fact, index) => (
           <FactRow key={`${fact.statement}-${index}`} fact={fact} humanize={humanize} evidenceById={evidenceById} setDrawerEv={setDrawerEv} />
         )) : <EmptyText text="当前没有已确认事实。" />}
@@ -333,7 +346,7 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
         </DocSection>
       )}
 
-      <DocSection label="待确认" last>
+      <DocSection label={answerType === "PARTIAL" || answerType === "UNKNOWN" ? "未确认" : "待确认"} last>
         {conflictList.map((item, index) => (
           <Alert key={`c-${index}`} type="error" showIcon title="证据冲突" description={item.reason || "不同来源给出了不一致的结论。"} style={{ marginBottom: 8 }} />
         ))}
@@ -353,6 +366,7 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
 
   return (
     <div>
+      <AnswerTypeBanner answerType={answerType} reason={synthesisSkippedReason} />
       {resolvedQuestion && (
         <div className="resolved-q"><span>检索词</span><p>{resolvedQuestion}</p></div>
       )}
@@ -388,6 +402,42 @@ function AnswerDocument({ result, detail, submit, viewMode, setViewMode, setDraw
         </Flex>
       )}
     </div>
+  );
+}
+
+function AnswerTypeBanner({ answerType, reason }) {
+  const reasonText = synthesisSkippedReasonLabel(reason);
+  if (answerType === "FULL") return null;
+  if (answerType === "PARTIAL") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="当前结论基于部分证据"
+        description={`下面分别列出已确认和未确认内容${reasonText ? `（回答模型未调用：${reasonText}）` : "。"}`}
+        style={{ margin: "14px 18px 0" }}
+      />
+    );
+  }
+  if (answerType === "CONFLICT") {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        title="发现证据冲突"
+        description={`不同来源给出了不一致的结论，当前不能合并为单一答案${reasonText ? `（${reasonText}）` : "。"}`}
+        style={{ margin: "14px 18px 0" }}
+      />
+    );
+  }
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      title="当前证据不足，无法确认"
+      description={reasonText || "当前没有足够的已验证证据支持确定结论。"}
+      style={{ margin: "14px 18px 0" }}
+    />
   );
 }
 

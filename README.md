@@ -236,6 +236,20 @@ FLOW/CAPABILITY 的 Markdown 小节可以补充入口列表：
 - `GET /api/knowledge-graph`：查看业务知识、业务关系、应用和入口投影；
 - `POST /api/query`：执行问答。
 
+### Query 终态
+
+一次调查完成后，`status` 表示 Agent 是否正常结束，`evidenceStatus` 表示证据状态，`answerType` 表示回答方式：
+
+```text
+SUFFICIENT   + 已验证事实 → FULL      （可选用 Model Composer 组织表达）
+INSUFFICIENT + 已验证事实 → PARTIAL   （确定性回答，列出已确认/未确认）
+INSUFFICIENT + 无事实     → UNKNOWN   （确定性回答，不猜测）
+CONFLICT                  → CONFLICT  （确定性回答，展示冲突双方）
+执行异常                  → ERROR     （HTTP 500）
+```
+
+`PARTIAL`、`UNKNOWN` 和 `CONFLICT` 都是正常完成的查询，接口仍返回 HTTP 200；只有 `answerType=FULL` 且存在已验证事实、没有冲突时才会调用回答模型。未调用模型时，`synthesisSkippedReason` 会说明原因，例如 `INSUFFICIENT_EVIDENCE`、`NO_VERIFIED_FACTS`、`EVIDENCE_CONFLICT` 或 `NO_MODEL`。
+
 管理员写操作可通过 `admin.apiTokenEnv` 配置的口令保护；读取接口保持只读。
 
 ## 验证

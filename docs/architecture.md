@@ -79,6 +79,8 @@ Entry Anchor 不保存 `symbol_id`、限定类名、方法、文件、行号或�
 → 输出事实、链路、冲突和未知项
 ```
 
+调查结束后由 `AnswerPolicy` 统一收口：`SUFFICIENT` 且有已验证事实、无冲突时为 `FULL`，允许可选的 Model Composer；`INSUFFICIENT` 有事实为 `PARTIAL`，无事实为 `UNKNOWN`；`CONFLICT` 为 `CONFLICT`。后三类仍是正常完成的查询，由确定性回答和渲染分支处理，不转换成异常；只有 Agent 执行异常才进入 `ERROR`。
+
 Anchor 是调查起点，不是可直接采信的实现结论。一个流程可以有多个入口，Planner 根据问题选择；只要仍有入口解析成功，就不会扩大到全局搜索；入口全部失效、同名冲突或尚未维护时会明确报告，并允许一次当前索引搜索作为恢复路径。
 
 `businessFlow` 只承载业务基线证据，`technicalFlow` 只承载当前代码证据。代码候选没有加载并验证 Evidence 前，不能成为回答事实。

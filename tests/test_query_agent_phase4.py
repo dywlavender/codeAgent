@@ -7,11 +7,15 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import Request, urlopen
+from unittest.mock import patch
 
 from business_code_agent.cli import load_demo
 from business_code_agent.query_agent.agent import BusinessCodeQueryAgent
 from business_code_agent.query_agent.api import make_server
-from business_code_agent.query_agent.models import EvidenceRole, SourceType, StructuredFact
+from business_code_agent.query_agent.models import (
+    EvidenceConflict, EvidenceRole, EvidenceStatus, SourceType, StructuredFact,
+    SufficiencyResult,
+)
 from business_code_agent.query_agent.conflicts import ConflictDetector
 from business_code_agent.query_agent.evidence import EvidenceAssembler, EvidenceBudget
 from business_code_agent.query_agent.langchain_adapter import LangChainQueryAnalyzer, LangChainQueryComposer, QueryModelInvocationError
@@ -51,6 +55,9 @@ class QueryAgentPhase4Test(unittest.TestCase):
     def test_rule_reason_runs_three_source_evidence_loop(self):
         result = self.agent.run("提款的时候为什么要校验 repayType，这个字段在哪里生成？")
         self.assertEqual(("RULE_REASON", "SUFFICIENT"), (result["intent"], result["evidenceStatus"]))
+        self.assertEqual("FULL", result["answerType"])
+        self.assertEqual("NO_MODEL", result["synthesisSkippedReason"])
+        self.assertEqual("FULL", result["answer"]["answerType"])
         self.assertLessEqual(result["iterations"], 3)
         self.assertEqual({"CODE", "BUSINESS", "REQUIREMENT"}, set(result["metrics"]["sourceCoverage"]))
         self.assertFalse(result["answer"]["unknowns"])
@@ -77,10 +84,81 @@ class QueryAgentPhase4Test(unittest.TestCase):
     def test_unknown_stops_without_guessing(self):
         result = self.agent.run("missingFlag 字段在哪里生成和校验？")
         self.assertEqual("INSUFFICIENT", result["evidenceStatus"])
+        self.assertEqual("UNKNOWN", result["answerType"])
+        self.assertEqual("NO_VERIFIED_FACTS", result["synthesisSkippedReason"])
         self.assertEqual(3, result["iterations"])
         self.assertTrue(result["answer"]["unknowns"])
         self.assertNotIn("一定", result["answer"]["conclusion"])
         self.assertFalse(result["answer"]["facts"])
+
+    def test_model_composer_is_skipped_without_sufficient_evidence(self):
+        calls = []
+
+        class Composer:
+            def compose(self, **kwargs):
+                calls.append(kwargs)
+                raise AssertionError("insufficient evidence must not reach the model composer")
+
+        agent = BusinessCodeQueryAgent(self.db, answer_composer=Composer())
+        result = agent.run("missingFlag 字段在哪里生成和校验？")
+        self.assertEqual("INSUFFICIENT", result["evidenceStatus"])
+        self.assertEqual("DETERMINISTIC", result["answerMode"])
+        self.assertEqual([], calls)
+
+    def test_partial_evidence_is_completed_without_model_composer(self):
+        calls = []
+
+        class Composer:
+            def compose(self, *args, **kwargs):
+                calls.append((args, kwargs))
+                raise AssertionError("partial answers must not call the model composer")
+
+        result = BusinessCodeQueryAgent(self.db, answer_composer=Composer()).run(
+            "申请阶段和提款阶段是否存在直接 CALL？它们是什么关系？"
+        )
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("INSUFFICIENT", result["evidenceStatus"])
+        self.assertEqual("PARTIAL", result["answerType"])
+        self.assertEqual("DETERMINISTIC", result["answerMode"])
+        self.assertEqual("INSUFFICIENT_EVIDENCE", result["synthesisSkippedReason"])
+        self.assertTrue(result["answer"]["facts"])
+        self.assertTrue(result["answer"]["unknowns"])
+        self.assertEqual([], calls)
+
+    def test_conflict_evidence_is_completed_without_model_composer(self):
+        calls = []
+
+        class Composer:
+            def compose(self, *args, **kwargs):
+                calls.append((args, kwargs))
+                raise AssertionError("conflicting evidence must not call the model composer")
+
+        agent = BusinessCodeQueryAgent(self.db, answer_composer=Composer())
+        conflict = EvidenceConflict(
+            "tax_authorization", ["EV-CODE"], ["EV-BUSINESS"], [], "业务规则与当前代码行为不一致",
+        )
+
+        def evaluate_as_conflict(state):
+            state.conflicts = [conflict]
+            state.evidence_status = EvidenceStatus.CONFLICT
+            return SufficiencyResult(False, EvidenceStatus.CONFLICT, [], [], [], [conflict])
+
+        answer = {
+            "conclusion": "当前存在证据冲突。",
+            "businessFlow": [], "technicalFlow": [],
+            "facts": [{"statement": "当前代码未校验 taxAuthorizationId", "sourceType": "CODE", "evidenceIds": ["EV-CODE"]}],
+            "inferences": [], "unknowns": [],
+            "conflicts": [{"reason": "业务规则与当前代码行为不一致", "evidenceIds": ["EV-CODE", "EV-BUSINESS"]}],
+        }
+        with patch.object(agent.evaluator, "apply", side_effect=evaluate_as_conflict), \
+             patch.object(agent.answer_builder, "build", return_value=answer):
+            result = agent.run("提款申请前必须完成纳税授权吗？")
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("CONFLICT", result["evidenceStatus"])
+        self.assertEqual("CONFLICT", result["answerType"])
+        self.assertEqual("DETERMINISTIC", result["answerMode"])
+        self.assertEqual("EVIDENCE_CONFLICT", result["synthesisSkippedReason"])
+        self.assertEqual([], calls)
 
     def test_conflict_detector_does_not_choose_a_source(self):
         facts = [
@@ -150,8 +228,15 @@ class QueryAgentPhase4Test(unittest.TestCase):
             request = Request(base + "/api/query", method="POST", data=json.dumps({"question": "repayType 字段在哪里生成和校验？"}).encode(), headers={"Content-Type": "application/json"})
             result = json.loads(urlopen(request).read())
             self.assertEqual("SUFFICIENT", result["evidenceStatus"])
+            self.assertEqual("FULL", result["answerType"])
+            self.assertEqual("NO_MODEL", result["synthesisSkippedReason"])
             detail = json.loads(urlopen(base + f"/api/query/{result['runId']}").read())
             self.assertEqual(result["runId"], detail["id"])
+            self.assertEqual("FULL", detail["answerType"])
+            self.assertEqual("NO_MODEL", detail["synthesisSkippedReason"])
+            self.assertEqual("FULL", detail["answer"]["answerType"])
+            self.assertEqual("FULL", detail["state"]["answerType"])
+            self.assertEqual("DETERMINISTIC", detail["state"]["answerMode"])
             self.assertTrue(detail["toolCalls"])
             self.assertTrue(detail["evidence"])
             self.assertEqual(result["evidence"], detail["evidence"])
@@ -162,10 +247,37 @@ class QueryAgentPhase4Test(unittest.TestCase):
             self.assertNotIn("root_path", workspace["repositories"][0])
             history = json.loads(urlopen(base + "/api/runs?limit=5").read())
             self.assertTrue(history["items"])
+            self.assertEqual("FULL", history["items"][0]["answerType"])
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_http_partial_evidence_returns_completed_200(self):
+        class Composer:
+            def compose(self, *args, **kwargs):
+                raise AssertionError("partial answers must not call the model composer")
+
+        # Inject a configured-but-never-used composer to exercise the same
+        # production path as a model-enabled deployment without network calls.
+        with patch.object(QueryService, "_model_stages", return_value=(None, Composer())):
+            server = make_server(str(self.db_path), port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            request = Request(
+                base + "/api/query", method="POST",
+                data=json.dumps({"question": "申请阶段和提款阶段是否存在直接 CALL？它们是什么关系？"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            result = json.loads(urlopen(request).read())
+            self.assertEqual("completed", result["status"])
+            self.assertEqual("INSUFFICIENT", result["evidenceStatus"])
+            self.assertEqual("PARTIAL", result["answerType"])
+            self.assertEqual("INSUFFICIENT_EVIDENCE", result["synthesisSkippedReason"])
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=2)
 
     def test_representative_twenty_case_fixture_passes(self):
         cases = Path(__file__).resolve().parent.parent / "examples" / "demo" / "query_validation" / "cases.json"
