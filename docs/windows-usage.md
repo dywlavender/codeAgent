@@ -81,6 +81,8 @@ Copy-Item .env.example .env
 
 也可以继续在当前 PowerShell 会话中直接设置同名 `BUSINESS_CODE_MODEL_*` 环境变量；如果 `.env` 存在，文件值优先。模型供应商、模型名、兼容接口地址和重试参数也都在 `.env` 中配置，不写入 JSON。项目和仓库配置示例见根目录 `project.config.example.json`。
 
+如果 `BUSINESS_CODE_MODEL_BASE_URL` 指向 `api.deepseek.com`，适配器默认关闭 DeepSeek 思考模式，以兼容 Query Agent 的结构化工具调用；如需显式指定，可增加 `BUSINESS_CODE_MODEL_THINKING=disabled`。修改后请重启启动脚本。
+
 ### 使用空知识库
 
 ```bat
@@ -98,6 +100,8 @@ start-windows.bat -Mode Empty -Database ".data\company.db"
 ```
 
 把业务基线 Markdown 放入 `project.config.json` 中 `knowledge.baselineRoot` 指定的目录。启动工作台后进入“业务知识维护”，点击“导入业务基线”。
+
+管理页默认使用模型结构化；如果模型账号没有额度，可在按钮左侧选择“Markdown 规则解析（无需模型）”后再导入。这是人工选择的解析模式，不会在模型失败时自动切换。
 
 导入后再次运行：
 

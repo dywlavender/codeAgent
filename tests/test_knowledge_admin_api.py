@@ -9,11 +9,42 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from business_code_agent.query_agent.api import make_server
+from business_code_agent.query_agent.api import _user_facing_internal_error, make_server
 from business_code_agent.schema import connect
 
 
 class KnowledgeAdminApiTest(unittest.TestCase):
+    def test_model_quota_error_is_actionable_without_exposing_provider_response(self):
+        message = _user_facing_internal_error(
+            RuntimeError("Error code: 403 insufficient_quota: Free quota exhausted")
+        )
+        self.assertIn("额度已用尽", message)
+        self.assertNotIn("insufficient_quota", message)
+
+    def test_wrapped_model_access_error_is_actionable(self):
+        cause = PermissionError("AccessDenied.Unpurchased")
+        error = RuntimeError("query understanding failed")
+        error.__cause__ = cause
+        message = _user_facing_internal_error(error)
+        self.assertIn("未开通所选模型", message)
+        self.assertNotIn("AccessDenied.Unpurchased", message)
+
+    def test_wrapped_deepseek_thinking_tool_choice_error_is_actionable(self):
+        cause = RuntimeError("Thinking mode does not support this tool_choice")
+        error = RuntimeError("query understanding failed")
+        error.__cause__ = cause
+        message = _user_facing_internal_error(error)
+        self.assertIn("思考模式不支持", message)
+        self.assertIn("BUSINESS_CODE_MODEL_THINKING=disabled", message)
+        self.assertNotIn("tool_choice", message)
+
+    def test_wrapped_sqlite_thread_error_is_actionable(self):
+        cause = RuntimeError("SQLite objects created in a thread can only be used in that same thread")
+        error = RuntimeError("query understanding failed")
+        error.__cause__ = cause
+        message = _user_facing_internal_error(error)
+        self.assertIn("数据库连接发生跨线程使用", message)
+
     def test_natural_baseline_refresh_and_entity_read_http_flow(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

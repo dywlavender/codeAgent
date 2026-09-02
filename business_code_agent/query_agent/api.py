@@ -16,6 +16,40 @@ from .service import QueryService
 logger = logging.getLogger(__name__)
 
 
+def _user_facing_internal_error(exc: Exception) -> str:
+    """Turn common model failures into an actionable UI message.
+
+    The raw provider response stays in the server log; the HTTP response only
+    exposes a short remediation hint and never silently changes the parser.
+    """
+    messages = []
+    current = exc
+    for _ in range(6):
+        if current is None:
+            break
+        messages.append(str(current or ""))
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+    detail = " ".join(messages).casefold()
+    if "insufficient_quota" in detail or "quota exhausted" in detail or "free quota" in detail:
+        return "模型调用失败：当前模型账号额度已用尽，请更换有额度的 API Key，或选择“Markdown 规则解析”。"
+    if "thinking mode" in detail and "tool_choice" in detail:
+        return "模型调用失败：当前模型的思考模式不支持 Agent 所需的工具选择。已为 DeepSeek OpenAI 兼容接口默认关闭思考模式；如果仍报错，请在 .env 设置 BUSINESS_CODE_MODEL_THINKING=disabled 后重启。"
+    if "sqlite objects created in a thread" in detail:
+        return "查询服务失败：数据库连接发生跨线程使用。请重启工作台后重试。"
+    if (
+        "accessdenied.unpurchased" in detail
+        or "access to model denied" in detail
+        or "model denied" in detail
+        or "permission denied" in detail
+    ):
+        return "模型调用失败：当前 API Key 未开通所选模型，请在模型服务控制台开通，或修改 BUSINESS_CODE_MODEL_NAME 为已授权模型。"
+    if "api key" in detail or "unauthorized" in detail or "401" in detail:
+        return "模型调用失败：API Key 无效或没有权限，请检查 .env 中的 BUSINESS_CODE_MODEL_API_KEY。"
+    if "timeout" in detail or "timed out" in detail:
+        return "模型调用失败：请求模型超时，请检查网络或增大 BUSINESS_CODE_MODEL_TIMEOUT。"
+    return "internal query service error"
+
+
 def make_server(
     db_path: str,
     host: str = "127.0.0.1",
@@ -95,7 +129,7 @@ def make_server(
                 self._json(400, {"error": str(exc)})
             except Exception as exc:
                 logger.exception("查询服务内部错误: %s", type(exc).__name__)
-                self._json(500, {"error": "internal query service error", "type": type(exc).__name__})
+                self._json(500, {"error": _user_facing_internal_error(exc), "type": type(exc).__name__})
             finally:
                 if service:
                     service.db.close()

@@ -7,6 +7,10 @@ const TYPES = [
   ["", "全部类型"], ["SYSTEM", "系统"], ["BUSINESS_TERM", "业务术语"],
   ["CAPABILITY", "业务能力"], ["FLOW", "业务流程"], ["RULE", "业务规则"],
 ];
+const PARSERS = [
+  { value: "model", label: "模型结构化" },
+  { value: "markdown", label: "Markdown 规则解析（无需模型）" },
+];
 
 export function KnowledgeAdminPage({ onRequireUnlock }) {
   const [items, setItems] = useState([]);
@@ -18,6 +22,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
   const [summary, setSummary] = useState(null);
+  const [parser, setParser] = useState("model");
 
   async function load(nextQuery = query, nextType = type) {
     setLoading(true); setError("");
@@ -42,7 +47,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
     try {
       const result = await request("/api/knowledge/baselines/refresh", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parser: "model" }),
+        body: JSON.stringify({ parser }),
       });
       setSummary(result); await load();
     } catch (reason) { handleAdminError(reason); }
@@ -63,6 +68,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
           <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>导入自然语言业务基线，维护业务语义、关系和少量调查入口。</Typography.Text>
         </div>
         <Space>
+          <Select value={parser} options={PARSERS} onChange={setParser} style={{ width: 190 }} />
           <Button type="primary" icon={<ArrowClockwise size={15} />} loading={running === "refresh"} onClick={refresh}>导入业务基线</Button>
         </Space>
       </Flex>

@@ -167,9 +167,13 @@ BUSINESS_CODE_MODEL_PROVIDER=openai
 BUSINESS_CODE_MODEL_NAME=company-model
 BUSINESS_CODE_MODEL_BASE_URL=http://model-gateway.company.local/v1
 BUSINESS_CODE_MODEL_API_KEY=internal-token
+# 直连 DeepSeek OpenAI 兼容接口时可显式关闭思考模式
+# BUSINESS_CODE_MODEL_THINKING=disabled
 ```
 
 启动器默认用配置的模型刷新业务基线；页面中的问答 Agent 是否调用模型仍由 `.env` 控制。模型初始化或结构化失败会直接报告错误，不会静默改用另一套知识体系。
+
+当 `BASE_URL` 使用 `api.deepseek.com` 时，适配器会默认发送 `thinking=disabled`，以兼容 Query Agent 的结构化工具调用；修改 `.env` 后需要重启启动器。
 
 ## 五、更新与排查
 

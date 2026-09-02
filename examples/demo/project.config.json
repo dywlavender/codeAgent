@@ -1,0 +1,35 @@
+{
+  "project": {
+    "id": "business-code-agent-demo",
+    "name": "Business Code Agent 内置演示"
+  },
+  "repositoryRoot": ".data/repositories",
+  "repositories": [
+    {
+      "id": "demo-repo",
+      "gitUrl": "unused",
+      "localPath": "java"
+    }
+  ],
+  "systems": [
+    {
+      "id": "demo-system",
+      "name": "贷款演示系统"
+    }
+  ],
+  "applications": [
+    {
+      "id": "demo-application",
+      "name": "提款演示服务",
+      "systemId": "demo-system",
+      "repositoryId": "demo-repo",
+      "sourceRoot": ".",
+      "type": "BACKEND",
+      "language": "java",
+      "framework": "plain-java"
+    }
+  ],
+  "knowledge": {
+    "baselineRoot": "knowledge/baseline"
+  }
+}

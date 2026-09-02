@@ -4,6 +4,7 @@ import json
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -17,6 +18,7 @@ from business_code_agent.query_agent.langchain_adapter import LangChainQueryAnal
 from business_code_agent.query_agent.models import QueryIntent, QuestionUnderstanding
 from business_code_agent.query_agent.service import QueryService
 from business_code_agent.query_agent.validation import run_validation
+from business_code_agent.schema import connect
 
 
 class QueryAgentPhase4Test(unittest.TestCase):
@@ -29,6 +31,22 @@ class QueryAgentPhase4Test(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         self.temp.cleanup()
+
+    def test_model_read_only_tools_use_worker_owned_sqlite_connection(self):
+        class Analyzer:
+            def bind_tools(self, tools):
+                self.tools = tools
+
+        analyzer = Analyzer()
+        BusinessCodeQueryAgent(
+            self.db,
+            connection_factory=lambda: connect(str(self.db_path)),
+            query_analyzer=analyzer,
+        )
+        search_business = next(item for item in analyzer.tools if item.name == "search_business_knowledge")
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = executor.submit(search_business.invoke, {"query": "repayType"}).result()
+        self.assertTrue(result)
 
     def test_rule_reason_runs_three_source_evidence_loop(self):
         result = self.agent.run("提款的时候为什么要校验 repayType，这个字段在哪里生成？")
@@ -191,6 +209,24 @@ class QueryLangChainAdapterTest(unittest.TestCase):
         self.assertEqual("repayType", value.field_hints[0])
         self.assertEqual([], captured["tools"])
         self.assertIn("recent_conversation", captured["input"]["messages"][0]["content"])
+
+    def test_structured_understanding_coerces_free_form_intent(self):
+        class Structured:
+            def model_dump(self, mode="python"):
+                return {
+                    "intent": "解释提款时校验REPAYTYPE的原因",
+                    "business_objects": ["提款"], "processes": [], "systems": [],
+                    "field_hints": ["REPAYTYPE"], "table_hints": [], "code_hints": [],
+                    "search_terms": ["REPAYTYPE"],
+                }
+
+        class Runnable:
+            def invoke(self, value):
+                return {"structured_response": Structured()}
+
+        analyzer = LangChainQueryAnalyzer(object(), agent_factory=lambda **kwargs: Runnable())
+        value = analyzer.understand("解释提款时校验REPAYTYPE的原因")
+        self.assertEqual(QueryIntent.RULE_REASON, value.intent)
 
     def test_composer_rejects_unloaded_or_unrelated_claims(self):
         class Structured:

@@ -52,37 +52,62 @@ class BusinessCodeQueryAgent:
         @tool
         def search_code_facts(query: str) -> list[dict]:
             """Search bounded Code Fact summaries. Never returns source text."""
-            return self.retriever.tools.code.search_code(query, 8)
+            return self._read_only_call(lambda tools: tools.code.search_code(query, 8))
 
         @tool
         def search_business_knowledge(query: str) -> list[dict]:
             """Search verified business entities and relations."""
-            return self.retriever.tools.business.search_business_knowledge(query)[:8]
+            return self._read_only_call(
+                lambda tools: tools.business.search_business_knowledge(query)[:8]
+            )
 
         @tool
         def get_business_entry_anchors(business_id: str) -> list[dict]:
             """Read durable FLOW/CAPABILITY entry hints; this never returns answer facts."""
-            return self.retriever.tools.code.get_business_entry_anchors(business_id)
+            return self._read_only_call(
+                lambda tools: tools.code.get_business_entry_anchors(business_id)
+            )
 
         @tool
         def resolve_entry_anchor(application_id: str, entry_name: str) -> dict:
             """Resolve one entry name against the current application code index."""
-            return self.retriever.tools.code.resolve_entry_anchor(application_id, entry_name)
+            return self._read_only_call(
+                lambda tools: tools.code.resolve_entry_anchor(application_id, entry_name)
+            )
 
         @tool
         def search_requirements(query: str) -> list[dict]:
             """Search requirement digests without loading original chunks."""
-            return self.retriever.tools.requirement.search_requirements(query)[:8]
+            return self._read_only_call(
+                lambda tools: tools.requirement.search_requirements(query)[:8]
+            )
 
         @tool
         def follow_integration_edge(symbol_id: str) -> list[dict]:
             """Follow verified HTTP/RPC edges from one indexed symbol."""
-            return self.retriever.tools.code.follow_integration_flow(symbol_id)[:24]
+            return self._read_only_call(
+                lambda tools: tools.code.follow_integration_flow(symbol_id)[:24]
+            )
 
         return [
             search_code_facts, search_business_knowledge, get_business_entry_anchors,
             resolve_entry_anchor, search_requirements, follow_integration_edge,
         ]
+
+    def _read_only_call(self, operation):
+        """Run a model-requested read on a connection owned by that worker.
+
+        LangGraph executes tool calls in a worker thread.  A ``QueryService``
+        created for a file database keeps its recorder connection in the HTTP
+        thread, so handing that same SQLite connection to a model tool raises
+        ``sqlite3.ProgrammingError``.  The retriever already has the correct
+        per-worker connection lifecycle for deterministic parallel retrieval;
+        reuse it for these model-facing tools as well.
+        """
+        if self.retriever.connection_factory is None:
+            return operation(self.retriever.tools)
+        with self.retriever._worker_bundle() as tools:
+            return operation(tools)
 
     def run(self, question: str, *, history=()) -> dict:
         run_id = stable_id("QRUN", question, datetime.now(timezone.utc).isoformat())

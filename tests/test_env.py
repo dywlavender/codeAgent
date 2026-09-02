@@ -7,7 +7,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from business_code_agent.env import EnvFileError, load_env_file
-from business_code_agent.knowledge_update.langchain_adapter import model_config_from_environment
+from business_code_agent.knowledge_update.langchain_adapter import (
+    ModelConfig,
+    init_configured_chat_model,
+    model_config_from_environment,
+)
 
 
 class EnvFileTest(unittest.TestCase):
@@ -69,6 +73,34 @@ TEST_CODE_ATLAS_EXISTING=from-file
     def test_model_environment_can_disable_model_calls(self):
         config = model_config_from_environment({"BUSINESS_CODE_MODEL_ENABLED": "false"})
         self.assertEqual(False, config["enabled"])
+
+    def test_deepseek_openai_compatible_endpoint_disables_thinking_by_default(self):
+        config = ModelConfig(
+            "openai", "deepseek-v4-flash", "https://api.deepseek.com", "TEST_MODEL_KEY"
+        )
+        with patch.dict(os.environ, {"TEST_MODEL_KEY": "secret"}, clear=False), \
+             patch("langchain.chat_models.init_chat_model", return_value="model") as init:
+            self.assertEqual("model", init_configured_chat_model(config))
+        self.assertEqual(
+            {"thinking": {"type": "disabled"}},
+            init.call_args.kwargs["extra_body"],
+        )
+
+    def test_deepseek_thinking_can_be_explicitly_enabled(self):
+        config = ModelConfig(
+            "openai", "deepseek-v4-flash", "https://api.deepseek.com", "TEST_MODEL_KEY", thinking="enabled"
+        )
+        with patch.dict(os.environ, {"TEST_MODEL_KEY": "secret"}, clear=False), \
+             patch("langchain.chat_models.init_chat_model", return_value="model") as init:
+            init_configured_chat_model(config)
+        self.assertEqual(
+            {"thinking": {"type": "enabled"}},
+            init.call_args.kwargs["extra_body"],
+        )
+
+    def test_model_thinking_mode_is_validated(self):
+        with self.assertRaisesRegex(ValueError, "model.thinking"):
+            ModelConfig.from_mapping({"provider": "openai", "name": "gpt-test", "thinking": "auto"})
 
 
 if __name__ == "__main__":

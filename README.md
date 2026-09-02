@@ -139,9 +139,13 @@ BUSINESS_CODE_MODEL_API_KEY=your-key
 BUSINESS_CODE_MODEL_TEMPERATURE=0
 BUSINESS_CODE_MODEL_TIMEOUT=60
 BUSINESS_CODE_MODEL_MAX_RETRIES=2
+# 直连 DeepSeek 的 OpenAI 兼容地址默认关闭思考模式；如需覆盖可填 enabled/disabled
+# BUSINESS_CODE_MODEL_THINKING=disabled
 ```
 
 模型用于把自然语言业务基线转换为六类知识，以及增强问答理解。所有生成的业务知识必须引用基线原文。实体名称、别名、`codeHints`、流程步骤和其他属性值必须能在引用所在的 Markdown 小节中逐字找到，不能借用同文档其他业务段落的内容。关系两端及“触发、属于、依赖、产生、负责处理”等关系语义必须在同一个引用片段中明确出现。模型初始化或结构化失败会直接报告错误，不会静默切换到另一套知识体系。
+
+如果 `BUSINESS_CODE_MODEL_BASE_URL` 指向 `https://api.deepseek.com` 这类 OpenAI 兼容地址，适配器会默认发送 `thinking=disabled`，因为 Query Agent 的结构化输出需要工具选择，而当前 OpenAI 兼容层不能安全保留 DeepSeek 的思考内容。也可以在 `.env` 中显式设置 `BUSINESS_CODE_MODEL_THINKING=disabled`；修改后请重启服务。
 
 未配置模型时仍然可以同步和索引代码，并使用确定性 Query Agent 回答有证据的问题。若需要导入业务基线，可在命令行明确指定本地解析器：
 
@@ -189,7 +193,7 @@ python3 -m business_code_agent.cli baseline-refresh \
 1. 配置 Git 仓库和 `knowledge.baselineRoot`。
 2. 启动工作台，等待代码同步和索引完成。
 3. 把一份或多份自然语言 Markdown 放入基线目录。
-4. 进入“业务知识维护”，点击“导入业务基线”。
+4. 进入“业务知识维护”，选择“模型结构化”或“Markdown 规则解析（无需模型）”，再点击“导入业务基线”。
 5. 查看六类知识、原文来源、业务关系和调查入口。
 6. 在问答页面提问；Agent 会优先解析入口，再基于当前代码实时调查。
 7. 入口失效时，Agent 会报告入口解析状态；仍有入口成功时继续沿成功入口调查，入口全部失效或尚未维护入口时最多进行一次当前索引搜索，不修改业务知识。
@@ -202,7 +206,7 @@ python3 -m business_code_agent.cli baseline-refresh \
   --db .data/knowledge.db
 ```
 
-无模型导入使用 `--parser markdown`；该模式必须显式指定。入口未定位会标记解析状态，不会把不存在的类或方法写入知识；入口全部失效或尚未维护入口时只允许一次当前索引搜索恢复调查。
+无模型导入使用 `--parser markdown`；该模式必须显式指定，不会在模型调用失败时静默降级。入口未定位会标记解析状态，不会把不存在的类或方法写入知识；入口全部失效或尚未维护入口时只允许一次当前索引搜索恢复调查。
 
 ## 业务入口锚点
 

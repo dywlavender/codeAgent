@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..knowledge_update.langchain_adapter import ModelConfig, init_configured_chat_model
 from .models import QueryIntent, QuestionUnderstanding
+from .understanding import QuestionUnderstandingService
 
 
 class QueryModelInvocationError(RuntimeError):
@@ -101,7 +102,12 @@ def _understanding_schema():
 
     class Understanding(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        intent: str
+        intent: str = Field(
+            description=(
+                "问题意图，只能填写 BUSINESS_LOGIC、DATA_TRACE、RULE_REASON 或 "
+                "CROSS_PROCESS；不要填写自然语言描述。"
+            )
+        )
         business_objects: list[str] = Field(default_factory=list)
         processes: list[str] = Field(default_factory=list)
         systems: list[str] = Field(default_factory=list)
@@ -132,7 +138,7 @@ def _answer_schema():
 def _understanding_from_payload(payload: Any, question: str) -> QuestionUnderstanding:
     if not isinstance(payload, Mapping):
         raise ValueError("query understanding response is invalid")
-    intent = QueryIntent(str(payload.get("intent", "BUSINESS_LOGIC")).upper())
+    intent = _coerce_intent(payload.get("intent"), question)
     values = {}
     for key in ("business_objects", "processes", "systems", "field_hints", "table_hints", "code_hints", "search_terms"):
         raw = payload.get(key, [])
@@ -140,6 +146,41 @@ def _understanding_from_payload(payload: Any, question: str) -> QuestionUndersta
     if not values["search_terms"]:
         values["search_terms"] = [question[:120]]
     return QuestionUnderstanding(intent=intent, **values)
+
+
+def _coerce_intent(value: Any, question: str) -> QueryIntent:
+    """Keep the model's intent inside the finite query-intent domain.
+
+    The structured response schema is intentionally kept string-compatible so
+    providers that return a semantically useful but malformed value do not
+    fail the whole understanding stage before this boundary is reached.  A
+    valid enum value is used as-is; common short aliases are normalized, and
+    a free-form value (for example, a Chinese explanation of the question)
+    falls back to the deterministic classifier.
+    """
+    raw = "" if value is None else str(value).strip()
+    normalized = raw.upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "BUSINESS": QueryIntent.BUSINESS_LOGIC,
+        "LOGIC": QueryIntent.BUSINESS_LOGIC,
+        "DATA": QueryIntent.DATA_TRACE,
+        "TRACE": QueryIntent.DATA_TRACE,
+        "RULE": QueryIntent.RULE_REASON,
+        "REASON": QueryIntent.RULE_REASON,
+        "CROSS": QueryIntent.CROSS_PROCESS,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    try:
+        return QueryIntent(normalized or QueryIntent.BUSINESS_LOGIC.value)
+    except ValueError:
+        # Intent is a retrieval hint, not a fact supplied by the model.  When
+        # the model returns a sentence instead of an enum, use the same local
+        # classifier as the deterministic understanding path.
+        try:
+            return QuestionUnderstandingService().understand(question).intent
+        except ValueError:
+            return QueryIntent.BUSINESS_LOGIC
 
 
 def _validate_composed(payload: Any, facts: list[dict]) -> dict:
