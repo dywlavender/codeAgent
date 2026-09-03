@@ -5,8 +5,8 @@ import {
 import {
   Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Typography,
 } from "antd";
-import { RequestAborted, request } from "./lib/api.js";
-import { buildQueryHistory, formatTime, intentLabel } from "./lib/format.js";
+import { RequestAborted, request, streamQuery } from "./lib/api.js";
+import { formatTime } from "./lib/format.js";
 import { AgentPage } from "./pages/AgentPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
 import { GraphPage } from "./pages/GraphPage.jsx";
@@ -67,9 +67,8 @@ export default function App() {
     const normalized = nextQuestion.trim();
     if (!normalized || status === "loading") return;
     const turnId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const history = buildQueryHistory(turns);
     setQuestion("");
-    setTurns((current) => [...current, { id: turnId, question: normalized, status: "loading" }]);
+    setTurns((current) => [...current, { id: turnId, question: normalized, status: "loading", events: [] }]);
     setActiveTurnId(turnId);
     setResult(null);
     setRunDetail(null);
@@ -79,16 +78,20 @@ export default function App() {
     const controller = new AbortController();
     queryAbortRef.current = controller;
     try {
-      const data = await request("/api/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: normalized, conversationId, history }),
-      }, controller.signal);
+      const data = await streamQuery("/api/query/stream", {
+        question: normalized,
+        conversationId,
+      }, {
+        signal: controller.signal,
+        onEvent: (event) => setTurns((current) => current.map((turn) => (
+          turn.id === turnId ? { ...turn, events: [...(turn.events || []), event] } : turn
+        ))),
+      });
       const detail = await request(`/api/query/${data.runId}`);
       setResult(data);
       setRunDetail(detail);
       setConversationId(data.conversationId || detail.conversationId || conversationId);
-      setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "success", result: data, detail } : turn));
+      setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "success", result: data, detail, events: data.events || turn.events || [] } : turn));
       setStatus("success");
       await refreshRuns();
     } catch (reason) {
@@ -127,22 +130,14 @@ export default function App() {
       const detail = await request(`/api/query/${run.id}`);
       setRunDetail(detail);
       setQuestion("");
-      const evidenceList = Array.isArray(detail.evidence) ? detail.evidence : [];
       const restoredResult = {
-        runId: detail.id, status: detail.status, intent: detail.intent,
-        evidenceStatus: detail.evidence_status, iterations: detail.iterations,
-        answer: detail.answer || null, evidence: evidenceList,
-        sourceReferences: detail.sourceReferences || detail.answer?.sourceReferences || detail.state?.sourceReferences || [],
-        answerMode: detail.answerMode || detail.answer_mode || detail.state?.answerMode || detail.state?.answer_mode,
-        answerType: detail.answerType || detail.answer_type || detail.answer?.answerType || detail.answer?.answer_type || detail.state?.answerType || detail.state?.answer_type,
-        synthesisSkippedReason: detail.synthesisSkippedReason || detail.synthesis_skipped_reason || detail.answer?.synthesisSkippedReason || detail.answer?.synthesis_skipped_reason || detail.state?.synthesisSkippedReason || detail.state?.synthesis_skipped_reason,
-        resolvedQuestion: detail.resolvedQuestion || detail.resolved_question || detail.state?.resolvedQuestion || detail.state?.resolved_question || detail.state?.search_terms?.join(" "),
-        suggestedFollowUps: detail.suggestedFollowUps || detail.suggested_follow_ups || detail.answer?.suggestedFollowUps || [],
-        entities: detail.entities || detail.resolvedEntities || detail.state?.entities || detail.state?.resolved_entities || [],
-        metrics: {
-          sourceCoverage: [...new Set(evidenceList.map((item) => item && item.sourceType).filter(Boolean))],
-          sourceReadCount: (detail.sourceReferences || detail.answer?.sourceReferences || []).length,
-        },
+        runId: detail.runId || detail.id,
+        conversationId: detail.conversationId,
+        runtime: detail.runtime,
+        sessionId: detail.sessionId,
+        status: detail.status,
+        answer: detail.answer || "",
+        events: detail.events || [],
       };
       setResult(restoredResult);
       setTurns([{ id: detail.id, question: detail.question, status: "success", result: restoredResult, detail }]);
@@ -197,7 +192,7 @@ export default function App() {
           <Avatar shape="square" size={30} style={{ background: "#211E1A", fontWeight: 700, fontFamily: "monospace", fontSize: 12, borderRadius: 8, color: "#F4F2ED" }}>{"{}"}</Avatar>
           <div>
             <Typography.Text strong style={{ fontSize: 13.5, display: "block", lineHeight: 1.3 }}>Code Atlas</Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 10.5 }}>证据优先的业务知识库</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 10.5 }}>Claude Code 业务代码问答</Typography.Text>
           </div>
         </div>
         <Button
@@ -206,7 +201,7 @@ export default function App() {
           onClick={newConversation}
           style={{ margin: "2px 14px 8px", width: "calc(100% - 28px)", borderRadius: 10, fontWeight: 550, boxShadow: "0 1px 2px rgba(30,28,20,.05)" }}
         >
-          开始新分析
+          开始新对话
         </Button>
         <Menu
           mode="inline"
@@ -235,10 +230,10 @@ export default function App() {
           )}
           {runs.slice(0, 12).map((run) => (
             <button key={run.id} className={`recent-item ${run.id === activeRunId ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
-              <span className={`rstate ${run.evidence_status?.toLowerCase() || ""}`} />
-              <span className="rcopy">
-                <span className="rq">{run.question}</span>
-                <small>{intentLabel(run.intent)} · {formatTime(run.created_at)}</small>
+          <span className={`rstate ${run.status === "completed" ? "sufficient" : run.status === "failed" ? "conflict" : "insufficient"}`} />
+          <span className="rcopy">
+            <span className="rq">{run.question}</span>
+            <small>{run.runtime || "CLAUDE_CODE"} · {formatTime(run.startedAt || run.created_at)}</small>
               </span>
             </button>
           ))}

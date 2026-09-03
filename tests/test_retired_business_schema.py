@@ -35,6 +35,16 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
         self.assertNotIn("functional_key_table", names)
         self.assertNotIn("functional_retrieval_link", names)
         self.assertNotIn("functional_analysis", names)
+        self.assertIn("query_conversation", names)
+        self.assertIn("query_run", names)
+        self.assertIn("query_event", names)
+        self.assertIn("query_message", names)
+        self.assertIn("query_feedback", names)
+        self.assertNotIn("agent_run", names)
+        self.assertNotIn("query_agent_run", names)
+        self.assertNotIn("query_agent_step", names)
+        self.assertNotIn("query_tool_call", names)
+        self.assertNotIn("query_checkpoint", names)
 
     def test_existing_retired_rows_are_removed_on_open(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -114,6 +124,45 @@ class RetiredBusinessSchemaTest(unittest.TestCase):
                 "functional_retrieval_link", "functional_analysis",
             ):
                 self.assertNotIn(table, names)
+            db.close()
+
+    def test_existing_query_agent_schema_is_migrated_to_runtime_tables(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "knowledge.db")
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE query_conversation (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+                CREATE TABLE query_agent_run (
+                  id TEXT PRIMARY KEY, question TEXT, intent TEXT, status TEXT,
+                  evidence_status TEXT, iterations INTEGER, source_characters INTEGER,
+                  answer_json TEXT, state_json TEXT, created_at TEXT, completed_at TEXT
+                );
+                CREATE TABLE query_agent_step (id TEXT PRIMARY KEY, run_id TEXT);
+                CREATE TABLE query_tool_call (id TEXT PRIMARY KEY, run_id TEXT);
+                CREATE TABLE query_checkpoint (run_id TEXT, sequence INTEGER);
+                CREATE TABLE agent_run (id TEXT PRIMARY KEY);
+                CREATE TABLE query_feedback (
+                  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
+                  comment TEXT NOT NULL, created_at TEXT NOT NULL,
+                  FOREIGN KEY(run_id) REFERENCES query_agent_run(id)
+                );
+                INSERT INTO query_agent_run VALUES
+                  ('OLD-RUN','旧问题','BUSINESS_LOGIC','completed','SUFFICIENT',1,0,'{"conclusion":"旧回答"}','{}','2026-01-01','2026-01-01');
+                INSERT INTO query_feedback VALUES ('OLD-FB','OLD-RUN','HELPFUL','ok','2026-01-01');
+                """
+            )
+            raw.commit()
+            raw.close()
+
+            db = connect(path)
+            names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ("agent_run", "query_agent_run", "query_agent_step", "query_tool_call", "query_checkpoint"):
+                self.assertNotIn(table, names)
+            migrated = db.execute("SELECT runtime,question,answer,status FROM query_run WHERE id='OLD-RUN'").fetchone()
+            self.assertEqual(("LEGACY_QUERY_AGENT", "旧问题", "旧回答", "completed"), tuple(migrated))
+            self.assertEqual("OLD-RUN", db.execute("SELECT run_id FROM query_feedback WHERE id='OLD-FB'").fetchone()[0])
+            self.assertEqual("LEGACY_QUERY_AGENT", db.execute("SELECT runtime FROM query_conversation WHERE id LIKE 'CONV-LEGACY-%'").fetchone()[0])
             db.close()
 
 

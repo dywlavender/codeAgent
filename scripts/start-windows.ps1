@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Demo", "Empty", "Repository")]
-    [string]$Mode = "Demo",
+    [ValidateSet("Empty", "Repository")]
+    [string]$Mode = "Empty",
 
     [string]$Database = ".data\knowledge.db",
     [string]$Repository,
@@ -192,9 +192,6 @@ if (-not [string]::IsNullOrWhiteSpace($ProjectConfig)) {
 }
 else {
     switch ($Mode) {
-        "Demo" {
-            Invoke-Checked $VenvPython @("-m", "business_code_agent.cli", "init-demo", "--db", $DatabasePath)
-        }
         "Empty" {
             Invoke-Checked $VenvPython @("-m", "business_code_agent.cli", "init-db", "--db", $DatabasePath)
         }

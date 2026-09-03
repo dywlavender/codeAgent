@@ -110,11 +110,6 @@ class EvidenceTools:
             if item.get("status") in {"ACTIVE", "VERIFIED"} and item.get("sourceType") == "HUMAN"
         ]
 
-    def resolve_entry_anchor(self, application_id: str, entry_name: str) -> dict:
-        from .query_agent.entry_resolver import EntryResolver
-
-        return EntryResolver(self.db).resolve(application_id, entry_name)
-
     def search_code(self, query: str, limit: int = 50) -> list[dict]:
         """Search indexed symbol/fact summaries without reading full source files."""
         terms = [term.lower() for term in tokens(query)]

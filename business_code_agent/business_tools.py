@@ -14,7 +14,7 @@ class BusinessTools:
         return self._search_baseline(query)
 
     def search_business(self, query: str) -> list[dict]:
-        """Short Query Agent tool name for the canonical business baseline."""
+        """Short helper name for the canonical business baseline."""
         return self._search_baseline(query)
 
     def get_business_knowledge(self, knowledge_id: str) -> dict:

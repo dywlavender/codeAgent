@@ -14,36 +14,25 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class WindowsLauncherTest(unittest.TestCase):
-    def test_init_db_and_demo_are_idempotent_product_commands(self):
+    def test_init_db_is_idempotent_product_command(self):
         with tempfile.TemporaryDirectory() as folder:
             empty = Path(folder) / "empty knowledge.db"
-            result = self._cli("init-db", "--db", str(empty))
-            self.assertEqual(("EMPTY", True), (result["mode"], result["initialized"]))
+            first = self._cli("init-db", "--db", str(empty))
+            second = self._cli("init-db", "--db", str(empty))
+            self.assertEqual(("EMPTY", True), (first["mode"], first["initialized"]))
+            self.assertEqual(first, second)
             db = connect(str(empty))
             self.assertEqual(0, db.execute("SELECT count(*) FROM repository").fetchone()[0])
-            db.close()
-
-            demo = Path(folder) / "demo knowledge.db"
-            first = self._cli("init-demo", "--db", str(demo))
-            second = self._cli("init-demo", "--db", str(demo))
-            self.assertEqual(first["symbols"], second["symbols"])
-            self.assertEqual(1, second["repositories"])
-            db = connect(str(demo))
-            self.assertEqual(1, db.execute("SELECT count(*) FROM requirement").fetchone()[0])
-            self.assertGreater(
-                db.execute("SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'").fetchone()[0],
-                0,
-            )
             db.close()
 
     def test_windows_entrypoints_have_safe_defaults_and_no_destructive_commands(self):
         batch = (ROOT / "start-windows.bat").read_text(encoding="utf-8")
         script = (ROOT / "scripts" / "start-windows.ps1").read_text(encoding="utf-8")
         self.assertIn("ExecutionPolicy Bypass", batch)
-        self.assertIn('ValidateSet("Demo", "Empty", "Repository")', script)
+        self.assertIn('ValidateSet("Empty", "Repository")', script)
         self.assertIn('$HostAddress = "127.0.0.1"', script)
         self.assertIn("npm.cmd", script)
-        self.assertIn("init-demo", script)
+        self.assertNotIn("init-demo", script)
         self.assertIn("init-db", script)
         self.assertIn("sync-project", script)
         self.assertIn("ProjectConfig", script)

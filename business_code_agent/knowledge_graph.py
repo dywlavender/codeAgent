@@ -10,7 +10,7 @@ class KnowledgeGraphService:
 
     The graph is deliberately a projection, not a second source of truth.
     Nodes point back to the baseline entity, relation or entry anchor that
-    produced them; code facts are investigated by the Query Agent at runtime
+    produced them; code facts are investigated by Claude Code at runtime
     and are intentionally not part of this projection.
     """
 
@@ -69,7 +69,7 @@ def _baseline_graph(db, query: str, node_type: str, limit: int) -> dict[str, Any
         add_edge(source, target, row["relation_type"], row["status"], [row["evidence_id"]])
     # Entry anchors are the only durable business-to-code navigation hints.
     # They intentionally stop at an application/name pair; the current symbol
-    # and all implementation facts are resolved by Query Agent at runtime.
+    # and all implementation facts are resolved by Claude Code at runtime.
     for row in db.execute(
         """SELECT ea.*,a.name application_name,ss.name system_name
              FROM business_entry_anchor ea

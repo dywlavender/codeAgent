@@ -9,7 +9,6 @@ PROJECT_CONFIG=""
 DATABASE=""
 HOST_ADDRESS="127.0.0.1"
 PORT=""
-DEMO=0
 BASELINE_PARSER="model"
 
 usage() {
@@ -24,7 +23,6 @@ Options:
   --database PATH         SQLite database (default: project startup.database)
   --host ADDRESS          Listen address (default: 127.0.0.1)
   --port PORT             Listen port (default: project startup.port)
-  --demo                  Ignore project config and initialize the built-in demo
   --baseline-parser MODE  Baseline parser: model (default) or markdown
   -h, --help              Show this help
 EOF
@@ -41,7 +39,6 @@ while [ "$#" -gt 0 ]; do
     --database) [ "$#" -ge 2 ] || fail "--database requires a path"; DATABASE="$2"; shift 2 ;;
     --host) [ "$#" -ge 2 ] || fail "--host requires an address"; HOST_ADDRESS="$2"; shift 2 ;;
     --port) [ "$#" -ge 2 ] || fail "--port requires a number"; PORT="$2"; shift 2 ;;
-    --demo) DEMO=1; shift ;;
     --baseline-parser) [ "$#" -ge 2 ] || fail "--baseline-parser requires model or markdown"; BASELINE_PARSER="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option: $1" ;;
@@ -67,8 +64,6 @@ DEPENDENCY_MODE="$($BOOTSTRAP_PYTHON "$PROJECT_ROOT/scripts/offline_runtime.py" 
   --metadata "$PROJECT_ROOT/offline/package-info.json" --field dependencyMode)"
 REPOSITORY_MODE="$($BOOTSTRAP_PYTHON "$PROJECT_ROOT/scripts/offline_runtime.py" metadata \
   --metadata "$PROJECT_ROOT/offline/package-info.json" --field repositoryMode)"
-PACKAGE_MODE="$($BOOTSTRAP_PYTHON "$PROJECT_ROOT/scripts/offline_runtime.py" metadata \
-  --metadata "$PROJECT_ROOT/offline/package-info.json" --field mode)"
 if [ -n "$REQUIRED_PYTHON" ] && command -v "python$REQUIRED_PYTHON" >/dev/null 2>&1; then
   PYTHON_LAUNCHER="$(command -v "python$REQUIRED_PYTHON")"
 else
@@ -82,30 +77,17 @@ if [ "$REPOSITORY_MODE" = "intranet-git" ] && ! command -v git >/dev/null 2>&1; 
   fail "Git was not found. Intranet Git mode requires Git on the deployment machine"
 fi
 
-if [ "$DEMO" -eq 0 ]; then
-  if [ -z "$PROJECT_CONFIG" ] && [ -f "$PROJECT_ROOT/project.config.json" ]; then
-    PROJECT_CONFIG="$PROJECT_ROOT/project.config.json"
-  fi
-  if [ -z "$PROJECT_CONFIG" ]; then
-    if [ "$PACKAGE_MODE" = "demo" ]; then
-      DEMO=1
-    else
-      fail "project.config.json was not found. Copy project.config.example.json and configure the intranet Git repositories, or start with --demo"
-    fi
-  fi
+if [ -z "$PROJECT_CONFIG" ] && [ -f "$PROJECT_ROOT/project.config.json" ]; then
+  PROJECT_CONFIG="$PROJECT_ROOT/project.config.json"
 fi
+[ -n "$PROJECT_CONFIG" ] || fail "project.config.json was not found. Copy project.config.example.json and configure the intranet Git repositories"
 
 BASELINE_EXISTS=0
-if [ "$DEMO" -eq 0 ]; then
-  [ -f "$PROJECT_CONFIG" ] || fail "Project config does not exist: $PROJECT_CONFIG"
-  DEFAULTS="$("$PYTHON_LAUNCHER" "$PROJECT_ROOT/scripts/offline_runtime.py" defaults --format tsv --config "$PROJECT_CONFIG")"
-  IFS=$'\t' read -r CONFIG_DATABASE CONFIG_PORT BASELINE_EXISTS <<< "$DEFAULTS"
-  [ -n "$DATABASE" ] || DATABASE="$CONFIG_DATABASE"
-  [ -n "$PORT" ] || PORT="$CONFIG_PORT"
-else
-  [ -n "$DATABASE" ] || DATABASE=".data/knowledge.db"
-  [ -n "$PORT" ] || PORT="8082"
-fi
+[ -f "$PROJECT_CONFIG" ] || fail "Project config does not exist: $PROJECT_CONFIG"
+DEFAULTS="$("$PYTHON_LAUNCHER" "$PROJECT_ROOT/scripts/offline_runtime.py" defaults --format tsv --config "$PROJECT_CONFIG")"
+IFS=$'\t' read -r CONFIG_DATABASE CONFIG_PORT BASELINE_EXISTS <<< "$DEFAULTS"
+[ -n "$DATABASE" ] || DATABASE="$CONFIG_DATABASE"
+[ -n "$PORT" ] || PORT="$CONFIG_PORT"
 
 case "$PORT" in ''|*[!0-9]*) fail "--port must be an integer" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || fail "--port must be between 1 and 65535"
@@ -136,17 +118,13 @@ case "$DATABASE" in /*) DATABASE_PATH="$DATABASE" ;; *) DATABASE_PATH="$PROJECT_
 mkdir -p "$(dirname "$DATABASE_PATH")"
 
 printf '\n==> Preparing offline knowledge database\n'
-if [ "$DEMO" -eq 1 ]; then
-  "$VENV_PYTHON" -m business_code_agent.cli init-demo --db "$DATABASE_PATH"
-else
-  "$VENV_PYTHON" -m business_code_agent.cli init-db --db "$DATABASE_PATH"
-  SYNC_ARGUMENTS=(-m business_code_agent.cli sync-project --config "$PROJECT_CONFIG" --db "$DATABASE_PATH")
-  [ "$REPOSITORY_MODE" = "bundled-snapshot" ] && SYNC_ARGUMENTS+=(--offline)
-  "$VENV_PYTHON" "${SYNC_ARGUMENTS[@]}"
-  if [ "$BASELINE_EXISTS" -eq 1 ]; then
-    BASELINE_ARGUMENTS=(-m business_code_agent.cli baseline-refresh --config "$PROJECT_CONFIG" --db "$DATABASE_PATH" --parser "$BASELINE_PARSER")
-    "$VENV_PYTHON" "${BASELINE_ARGUMENTS[@]}"
-  fi
+"$VENV_PYTHON" -m business_code_agent.cli init-db --db "$DATABASE_PATH"
+SYNC_ARGUMENTS=(-m business_code_agent.cli sync-project --config "$PROJECT_CONFIG" --db "$DATABASE_PATH")
+[ "$REPOSITORY_MODE" = "bundled-snapshot" ] && SYNC_ARGUMENTS+=(--offline)
+"$VENV_PYTHON" "${SYNC_ARGUMENTS[@]}"
+if [ "$BASELINE_EXISTS" -eq 1 ]; then
+  BASELINE_ARGUMENTS=(-m business_code_agent.cli baseline-refresh --config "$PROJECT_CONFIG" --db "$DATABASE_PATH" --parser "$BASELINE_PARSER")
+  "$VENV_PYTHON" "${BASELINE_ARGUMENTS[@]}"
 fi
 
 PROBE_HOST="$HOST_ADDRESS"
@@ -221,5 +199,5 @@ printf '\nWorkbench is starting: %s\n' "$URL"
 printf 'Press Control+C to stop the service.\n\n'
 
 SERVER_ARGUMENTS=(-m business_code_agent.cli serve-query --db "$DATABASE_PATH" --host "$HOST_ADDRESS" --port "$PORT")
-[ "$DEMO" -eq 1 ] || SERVER_ARGUMENTS+=(--project-config "$PROJECT_CONFIG")
+SERVER_ARGUMENTS+=(--project-config "$PROJECT_CONFIG")
 exec "$VENV_PYTHON" "${SERVER_ARGUMENTS[@]}"

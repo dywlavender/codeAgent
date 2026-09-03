@@ -5,7 +5,6 @@ param(
     [string]$HostAddress = "127.0.0.1",
     [ValidateRange(0, 65535)]
     [int]$Port = 0,
-    [switch]$Demo,
     [ValidateSet("model", "markdown")]
     [string]$BaselineParser = "model",
     [switch]$NoBrowser
@@ -42,43 +41,31 @@ $packageInfo = Get-Content $metadata -Raw | ConvertFrom-Json
 $launcher = Resolve-PythonLauncher ([string]$packageInfo.pythonMajorMinor)
 $repositoryMode = [string]$packageInfo.repositoryMode
 $dependencyMode = [string]$packageInfo.dependencyMode
-$packageMode = [string]$packageInfo.mode
 Invoke-Checked $launcher.Command (@($launcher.Prefix) + @($runtime, "validate", "--metadata", $metadata, "--target", "windows"))
 if ($repositoryMode -eq "intranet-git" -and -not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
     throw "Git was not found. Intranet Git mode requires Git on the deployment machine."
 }
 
-if (-not $Demo) {
-    if ([string]::IsNullOrWhiteSpace($ProjectConfig)) {
-        $defaultConfig = Join-Path $ProjectRoot "project.config.json"
-        if (Test-Path -PathType Leaf $defaultConfig) {
-            $ProjectConfig = $defaultConfig
-        }
-        elseif ($packageMode -eq "demo") {
-            $Demo = $true
-        }
-        else {
-            throw "project.config.json was not found. Copy project.config.example.json and configure the intranet Git repositories, or start with -Demo."
-        }
+if ([string]::IsNullOrWhiteSpace($ProjectConfig)) {
+    $defaultConfig = Join-Path $ProjectRoot "project.config.json"
+    if (Test-Path -PathType Leaf $defaultConfig) {
+        $ProjectConfig = $defaultConfig
+    }
+    else {
+        throw "project.config.json was not found. Copy project.config.example.json and configure the intranet Git repositories."
     }
 }
 
 $baselineExists = $false
-if (-not $Demo) {
-    $ProjectConfig = [System.IO.Path]::GetFullPath($ProjectConfig)
-    if (-not (Test-Path -PathType Leaf $ProjectConfig)) { throw "Project config does not exist: $ProjectConfig" }
-    $defaultArguments = @($launcher.Prefix) + @($runtime, "defaults", "--config", $ProjectConfig)
-    $defaultsJson = & $launcher.Command @defaultArguments
-    if ($LASTEXITCODE -ne 0) { throw "Project config cannot be read: $ProjectConfig" }
-    $defaults = $defaultsJson | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace($Database)) { $Database = [string]$defaults.database }
-    if ($Port -eq 0) { $Port = [int]$defaults.port }
-    $baselineExists = [bool]$defaults.baselineExists
-}
-else {
-    if ([string]::IsNullOrWhiteSpace($Database)) { $Database = ".data\knowledge.db" }
-    if ($Port -eq 0) { $Port = 8082 }
-}
+$ProjectConfig = [System.IO.Path]::GetFullPath($ProjectConfig)
+if (-not (Test-Path -PathType Leaf $ProjectConfig)) { throw "Project config does not exist: $ProjectConfig" }
+$defaultArguments = @($launcher.Prefix) + @($runtime, "defaults", "--config", $ProjectConfig)
+$defaultsJson = & $launcher.Command @defaultArguments
+if ($LASTEXITCODE -ne 0) { throw "Project config cannot be read: $ProjectConfig" }
+$defaults = $defaultsJson | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($Database)) { $Database = [string]$defaults.database }
+if ($Port -eq 0) { $Port = [int]$defaults.port }
+$baselineExists = [bool]$defaults.baselineExists
 
 $VenvRoot = Join-Path $ProjectRoot ".venv-offline"
 $VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
@@ -152,18 +139,13 @@ $DatabasePath = [System.IO.Path]::GetFullPath($DatabasePath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DatabasePath) | Out-Null
 
 Write-Host "`n==> Preparing offline knowledge database" -ForegroundColor Cyan
-if ($Demo) {
-    Invoke-Checked $VenvPython @("-m", "business_code_agent.cli", "init-demo", "--db", $DatabasePath)
-}
-else {
-    Invoke-Checked $VenvPython @("-m", "business_code_agent.cli", "init-db", "--db", $DatabasePath)
-    $syncArguments = @("-m", "business_code_agent.cli", "sync-project", "--config", $ProjectConfig, "--db", $DatabasePath)
-    if ($repositoryMode -eq "bundled-snapshot") { $syncArguments += "--offline" }
-    Invoke-Checked $VenvPython $syncArguments
-    if ($baselineExists) {
-        $baselineArguments = @("-m", "business_code_agent.cli", "baseline-refresh", "--config", $ProjectConfig, "--db", $DatabasePath, "--parser", $BaselineParser)
-        Invoke-Checked $VenvPython $baselineArguments
-    }
+Invoke-Checked $VenvPython @("-m", "business_code_agent.cli", "init-db", "--db", $DatabasePath)
+$syncArguments = @("-m", "business_code_agent.cli", "sync-project", "--config", $ProjectConfig, "--db", $DatabasePath)
+if ($repositoryMode -eq "bundled-snapshot") { $syncArguments += "--offline" }
+Invoke-Checked $VenvPython $syncArguments
+if ($baselineExists) {
+    $baselineArguments = @("-m", "business_code_agent.cli", "baseline-refresh", "--config", $ProjectConfig, "--db", $DatabasePath, "--parser", $BaselineParser)
+    Invoke-Checked $VenvPython $baselineArguments
 }
 
 if (Test-PortOpen $HostAddress $Port) {
@@ -177,8 +159,7 @@ $urlHost = if ($HostAddress -eq "0.0.0.0" -or $HostAddress -eq "::") { "127.0.0.
 $url = "http://$urlHost`:$Port/"
 $logPath = Join-Path (Split-Path -Parent $DatabasePath) "server.log"
 $errorLogPath = Join-Path (Split-Path -Parent $DatabasePath) "server-error.log"
-$serverArguments = @("-m", "business_code_agent.cli", "serve-query", "--db", ('"' + $DatabasePath + '"'), "--host", $HostAddress, "--port", "$Port")
-if (-not $Demo) { $serverArguments += @("--project-config", ('"' + $ProjectConfig + '"')) }
+$serverArguments = @("-m", "business_code_agent.cli", "serve-query", "--db", ('"' + $DatabasePath + '"'), "--host", $HostAddress, "--port", "$Port", "--project-config", ('"' + $ProjectConfig + '"'))
 
 $server = Start-Process -FilePath $VenvPython -ArgumentList $serverArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errorLogPath
 try {

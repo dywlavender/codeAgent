@@ -85,6 +85,8 @@ class OfflineDeploymentTest(unittest.TestCase):
             self.assertIn("wheelhouse", script)
             self.assertIn("dependencyMode", script.replace("DEPENDENCY_MODE", "dependencyMode"))
             self.assertIn("sync-project", script)
+            self.assertNotIn("init-demo", script)
+            self.assertNotIn("-Demo", script)
             self.assertNotIn("npm ci", script)
             self.assertNotIn("npm run", script)
         self.assertIn("port_is_open", linux)

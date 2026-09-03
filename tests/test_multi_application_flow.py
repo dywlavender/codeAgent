@@ -7,7 +7,6 @@ from pathlib import Path
 
 from business_code_agent.project_sync import sync_project
 from business_code_agent.knowledge_update.baseline_service import BaselineKnowledgeService
-from business_code_agent.query_agent.agent import BusinessCodeQueryAgent
 from business_code_agent.schema import connect
 from business_code_agent.tools import EvidenceTools
 
@@ -52,24 +51,6 @@ class MultiApplicationFlowTest(unittest.TestCase):
 
         evidence_ids = [item for row in edges for item in json.loads(row["evidence_ids_json"])]
         self.assertTrue(all(item["valid"] for item in EvidenceTools(self.db).validate_evidence_integrity(evidence_ids)))
-
-    def test_query_agent_follows_the_verified_application_flow(self):
-        result = BusinessCodeQueryAgent(self.db).run(
-            "H5 点击提款提交按钮以后，后端经过哪些应用，最终在哪里处理提款？"
-        )
-        facts = result["answer"]["facts"]
-        statements = "\n".join(item["statement"] for item in facts)
-        self.assertIn("提款 H5", statements)
-        self.assertIn("渠道服务", statements)
-        self.assertIn("贷款中台", statements)
-        self.assertIn("HTTP", statements)
-        self.assertIn("FEIGN", statements)
-        integration = [item for item in facts if "通过 HTTP" in item["statement"] or "通过 FEIGN" in item["statement"]]
-        self.assertEqual(2, len(integration))
-        self.assertTrue(all(len(item["evidenceIds"]) >= 2 for item in integration))
-        self.assertTrue(result["answer"]["businessFlow"])
-        self.assertGreaterEqual(len(result["answer"]["technicalFlow"]), 2)
-        self.assertTrue(all(item["evidenceIds"] for item in result["answer"]["technicalFlow"]))
 
 
 if __name__ == "__main__":

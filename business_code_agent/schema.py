@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 
@@ -142,36 +143,27 @@ CREATE TABLE IF NOT EXISTS requirement_chunk (
   id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
   content TEXT NOT NULL, evidence_id TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS agent_run (
-  id TEXT PRIMARY KEY, question TEXT NOT NULL, state_json TEXT NOT NULL,
-  evidence_status TEXT NOT NULL, iterations INTEGER NOT NULL, created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS query_agent_run (
-  id TEXT PRIMARY KEY, question TEXT NOT NULL, intent TEXT NOT NULL,
-  status TEXT NOT NULL, evidence_status TEXT NOT NULL, iterations INTEGER NOT NULL,
-  source_characters INTEGER NOT NULL, answer_json TEXT NOT NULL,
-  state_json TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
-);
-CREATE TABLE IF NOT EXISTS query_agent_step (
-  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_name TEXT NOT NULL,
-  iteration INTEGER NOT NULL, input_summary_json TEXT NOT NULL,
-  output_summary_json TEXT NOT NULL, evidence_count INTEGER NOT NULL,
-  duration_ms REAL NOT NULL, created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS query_tool_call (
-  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_id TEXT NOT NULL,
-  tool_name TEXT NOT NULL, tool_input_json TEXT NOT NULL,
-  result_count INTEGER NOT NULL, iteration INTEGER NOT NULL,
-  duration_ms REAL NOT NULL, created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS query_checkpoint (
-  run_id TEXT NOT NULL, sequence INTEGER NOT NULL, node_name TEXT NOT NULL,
-  state_json TEXT NOT NULL, created_at TEXT NOT NULL,
-  PRIMARY KEY(run_id, sequence)
-);
 CREATE TABLE IF NOT EXISTS query_conversation (
-  id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
+  runtime_session_id TEXT, workspace_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS query_run (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+  runtime TEXT NOT NULL, runtime_session_id TEXT,
+  question TEXT NOT NULL, status TEXT NOT NULL,
+  answer TEXT NOT NULL DEFAULT '', error TEXT,
+  usage_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL, completed_at TEXT, duration_ms REAL NOT NULL DEFAULT 0,
+  FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_run_conversation ON query_run(conversation_id, started_at);
+CREATE TABLE IF NOT EXISTS query_event (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(run_id, sequence), FOREIGN KEY(run_id) REFERENCES query_run(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_event_run ON query_event(run_id, sequence);
 CREATE TABLE IF NOT EXISTS query_message (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL,
   role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -181,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_query_message_conversation ON query_message(conve
 CREATE TABLE IF NOT EXISTS query_feedback (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
   comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-  FOREIGN KEY(run_id) REFERENCES query_agent_run(id)
+  FOREIGN KEY(run_id) REFERENCES query_run(id)
 );
 
 -- MVP business baseline. Human source, structured business knowledge and
@@ -249,6 +241,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
     _purge_legacy_function_governance(connection)
     _purge_legacy_mapping_schema(connection)
     _purge_legacy_functional_schema(connection)
+    _migrate_query_runtime(connection)
     additions = {
         "requirement": (
             ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
@@ -393,17 +386,143 @@ def _purge_retired_business_schema(connection: sqlite3.Connection) -> None:
             marks = ",".join("?" for _ in old_evidence)
             connection.execute(f"DELETE FROM evidence_lifecycle WHERE evidence_id IN ({marks})", old_evidence)
             connection.execute(f"DELETE FROM evidence WHERE id IN ({marks})", old_evidence)
-    _purge_retired_runs(connection)
 
 
-def _purge_retired_runs(connection: sqlite3.Connection) -> None:
-    rows = connection.execute(
-        "SELECT id FROM query_agent_run WHERE state_json LIKE '%BK-%' OR answer_json LIKE '%BK-%'"
-    ).fetchall()
-    run_ids = [row[0] for row in rows]
-    if not run_ids:
-        return
-    marks = ",".join("?" for _ in run_ids)
-    for table in ("query_feedback", "query_tool_call", "query_agent_step", "query_checkpoint", "query_message"):
-        connection.execute(f"DELETE FROM {table} WHERE run_id IN ({marks})", run_ids)
-    connection.execute(f"DELETE FROM query_agent_run WHERE id IN ({marks})", run_ids)
+def _migrate_query_runtime(connection: sqlite3.Connection) -> None:
+    """Replace the self-built query tables with the Claude runtime tables.
+
+    Existing local databases may contain the former ``query_agent_*`` tables.
+    Their run rows are copied as read-only ``LEGACY_QUERY_AGENT`` history when
+    possible, then the old tables are removed. Conversation and message rows
+    remain available for the UI; new requests use only ``query_run`` and
+    ``query_event``.
+    """
+    existing = {
+        row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+
+    if "query_conversation" in existing:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(query_conversation)")}
+        for name, declaration in (
+            ("runtime", "TEXT NOT NULL DEFAULT 'CLAUDE_CODE'"),
+            ("runtime_session_id", "TEXT"),
+            ("workspace_id", "TEXT"),
+        ):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE query_conversation ADD COLUMN {name} {declaration}")
+
+    # These explicit CREATE statements make the migration safe for a database
+    # created by an intermediate build that had not yet shipped the new schema.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS query_conversation (
+          id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
+          runtime_session_id TEXT, workspace_id TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS query_run (
+          id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+          runtime TEXT NOT NULL, runtime_session_id TEXT,
+          question TEXT NOT NULL, status TEXT NOT NULL,
+          answer TEXT NOT NULL DEFAULT '', error TEXT,
+          usage_json TEXT NOT NULL DEFAULT '{}',
+          started_at TEXT NOT NULL, completed_at TEXT,
+          duration_ms REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_query_run_conversation
+          ON query_run(conversation_id, started_at);
+        CREATE TABLE IF NOT EXISTS query_event (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+          event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
+          UNIQUE(run_id, sequence), FOREIGN KEY(run_id) REFERENCES query_run(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_query_event_run ON query_event(run_id, sequence);
+        """
+    )
+
+    old_run_rows = []
+    if "query_agent_run" in existing:
+        old_run_rows = connection.execute("SELECT * FROM query_agent_run").fetchall()
+        now = _migration_now()
+        for row in old_run_rows:
+            run_id = str(row["id"])
+            conversation_id = f"CONV-LEGACY-{run_id}"
+            connection.execute(
+                """INSERT OR IGNORE INTO query_conversation
+                   (id,runtime,runtime_session_id,workspace_id,created_at,updated_at)
+                   VALUES (?, 'LEGACY_QUERY_AGENT', NULL, NULL, ?, ?)""",
+                (conversation_id, row["created_at"] or now, row["completed_at"] or row["created_at"] or now),
+            )
+            answer = _legacy_answer_text(row["answer_json"])
+            status = str(row["status"] or "completed").lower()
+            status = status if status in {"running", "completed", "failed"} else "completed"
+            connection.execute(
+                """INSERT OR IGNORE INTO query_run
+                   (id,conversation_id,runtime,runtime_session_id,question,status,answer,error,
+                    usage_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, conversation_id, "LEGACY_QUERY_AGENT", None,
+                    row["question"], status, answer, None, "{}",
+                    row["created_at"] or now, row["completed_at"], 0,
+                ),
+            )
+
+    # The old feedback table points at query_agent_run. Recreate it so future
+    # inserts reference query_run while retaining feedback for migrated runs.
+    feedback_fk = []
+    if "query_feedback" in existing:
+        feedback_fk = connection.execute("PRAGMA foreign_key_list(query_feedback)").fetchall()
+    if feedback_fk and any(str(row["table"]) != "query_run" for row in feedback_fk):
+        feedback_rows = connection.execute("SELECT * FROM query_feedback").fetchall()
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute("DROP TABLE query_feedback")
+            connection.execute(
+                """CREATE TABLE query_feedback (
+                   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
+                   comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                   FOREIGN KEY(run_id) REFERENCES query_run(id)
+                )"""
+            )
+            for row in feedback_rows:
+                if connection.execute("SELECT 1 FROM query_run WHERE id=?", (row["run_id"],)).fetchone():
+                    connection.execute(
+                        "INSERT OR IGNORE INTO query_feedback(id,run_id,rating,comment,created_at) VALUES (?,?,?,?,?)",
+                        (row["id"], row["run_id"], row["rating"], row["comment"], row["created_at"]),
+                    )
+            connection.commit()
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in (
+            "query_tool_call", "query_agent_step", "query_checkpoint",
+            "query_agent_run", "agent_run",
+        ):
+            connection.execute(f'DROP TABLE IF EXISTS "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _legacy_answer_text(value: str) -> str:
+    try:
+        payload = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("conclusion") or payload.get("answer") or "")
+
+
+def _migration_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()

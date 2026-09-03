@@ -31,7 +31,10 @@ IGNORED_DIRECTORIES = {
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成 Windows/Linux 压缩部署包")
     parser.add_argument("--target", choices=("all", "linux", "windows"), default="all")
-    parser.add_argument("--mode", choices=("generic", "project", "demo"), default="generic")
+    parser.add_argument(
+        "--mode", choices=("generic", "project"), default="generic",
+        help="generic 不绑定项目；project 将指定的项目配置随包带上",
+    )
     parser.add_argument("--project-config", default=str(ROOT / "project.config.json"))
     parser.add_argument("--output-dir", default=str(ROOT / "offline-packages"))
     parser.add_argument("--wheelhouse", help="复用已经准备好的 wheel 目录，不再执行 pip download")

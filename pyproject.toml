@@ -10,7 +10,6 @@ dependencies = [
 
 [project.optional-dependencies]
 tree-sitter = ["tree-sitter>=0.25", "tree-sitter-java>=0.23"]
-langgraph = ["langgraph>=1.1.10,<1.2"]
 
 [project.scripts]
 business-code-agent = "business_code_agent.cli:main"

@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
 DEFAULT_PROJECT_CONFIG="$PROJECT_ROOT/project.config.json"
-MODE="Demo"
+MODE="Empty"
 MODE_EXPLICIT=0
 DATABASE=".data/knowledge.db"
 DATABASE_EXPLICIT=0
@@ -28,7 +28,7 @@ Usage:
   ./start-mac.sh [options]
 
 Options:
-  --mode Demo|Empty|Repository   Startup mode (default: Demo)
+  --mode Empty|Repository        Startup mode (default: Empty)
   --database PATH               SQLite database (default: project startup.database or .data/knowledge.db)
   --repository PATH             Java/MyBatis repository for Repository mode
   --repository-id ID            Repository identifier (default: repo-main)
@@ -41,7 +41,7 @@ Options:
   -h, --help                    Show this help
 
 Examples:
-  ./start-mac.sh
+  ./start-mac.sh --project-config project.config.json
   ./start-mac.sh --mode Empty
   ./start-mac.sh --mode Repository --repository "/Users/me/IdeaProjects/loan-system"
   ./start-mac.sh                # Uses project.config.json when it exists
@@ -126,10 +126,9 @@ if [ -z "$PROJECT_CONFIG" ] && [ "$MODE_EXPLICIT" -eq 0 ] && [ -z "$REPOSITORY" 
 fi
 
 case "$MODE" in
-  Demo|demo) MODE="Demo" ;;
   Empty|empty) MODE="Empty" ;;
   Repository|repository) MODE="Repository" ;;
-  *) fail "--mode must be Demo, Empty, or Repository" ;;
+  *) fail "--mode must be Empty or Repository" ;;
 esac
 
 if command -v python3 >/dev/null 2>&1; then
@@ -236,9 +235,6 @@ if [ -n "$PROJECT_CONFIG" ]; then
   "$VENV_PYTHON" -m business_code_agent.cli sync-project --config "$PROJECT_CONFIG" --db "$DATABASE_PATH"
 else
   case "$MODE" in
-    Demo)
-      "$VENV_PYTHON" -m business_code_agent.cli init-demo --db "$DATABASE_PATH"
-      ;;
     Empty)
       "$VENV_PYTHON" -m business_code_agent.cli init-db --db "$DATABASE_PATH"
       ;;

@@ -4,44 +4,15 @@ import argparse
 import logging
 import os
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from .application_topology import ApplicationTopologyStore, load_application_config
 from .code_intelligence import JavaIndexer
 from .env import EnvFileError, load_env_file
-from .integration_edges import IntegrationEdgeResolver
-from .orchestrator import Orchestrator
-from .project_sync import load_project_config
 from .requirements import RequirementBuilder
 from .schema import connect
-
-
-def load_demo(db_path: str):
-    """Load the shipped canonical demo without Git or a model call.
-
-    The demo is deliberately seeded through the same project topology,
-    baseline and requirement services used by a real deployment.  It does not
-    rely on retired storage.  It works for both file databases and
-    ``:memory:`` connections used by the CLI/tests.
-    """
-    root = Path(__file__).resolve().parent.parent / "examples" / "demo"
-    config_path = root / "project.config.json"
-    db = connect(db_path)
-    project, repositories = load_project_config(config_path)
-    indexer = JavaIndexer(db)
-    for repository in repositories:
-        indexer.ingest(str(repository.local_path), repository.repository_id)
-    systems, applications = load_application_config(
-        config_path, project, {item.repository_id for item in repositories},
-    )
-    ApplicationTopologyStore(db).replace(systems, applications)
-    IntegrationEdgeResolver(db).rebuild()
-    RequirementBuilder(db).ingest(str(root / "requirements" / "REQ-2026-001.json"))
-    from .knowledge_update.baseline_service import BaselineKnowledgeService
-    BaselineKnowledgeService(db, project_config=config_path).refresh(parser="markdown")
-    return db
 
 
 def _configure_logging() -> None:
@@ -58,13 +29,8 @@ def main() -> None:
     _configure_logging()
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
-    demo = sub.add_parser("demo")
-    demo.add_argument("--db", default=":memory:")
-    demo.add_argument("--question", default="为什么提款时要校验 repayType，这个值从哪里来，规则来源是什么？")
     init_db = sub.add_parser("init-db", help="创建或迁移知识库，不导入任何示例数据")
     init_db.add_argument("--db", required=True)
-    init_demo = sub.add_parser("init-demo", help="幂等初始化内置演示知识库")
-    init_demo.add_argument("--db", required=True)
     ingest = sub.add_parser("ingest-repo")
     ingest.add_argument("repo")
     ingest.add_argument("--db", required=True)
@@ -89,6 +55,7 @@ def main() -> None:
     ask = sub.add_parser("ask")
     ask.add_argument("question")
     ask.add_argument("--db", required=True)
+    ask.add_argument("--project-config")
     discover = sub.add_parser("discover")
     discover.add_argument("--db", required=True)
     discover.add_argument("--limit", type=int)
@@ -137,47 +104,26 @@ def main() -> None:
     query = sub.add_parser("query")
     query.add_argument("question")
     query.add_argument("--db", required=True)
+    query.add_argument("--project-config", help="项目和仓库配置，用于生成 Claude 工作区")
     query_run = sub.add_parser("query-run")
     query_run.add_argument("run_id")
     query_run.add_argument("--db", required=True)
-    query_validate = sub.add_parser("query-validate")
-    query_validate.add_argument("--db", default=":memory:")
-    query_validate.add_argument(
-        "--cases",
-        default=str(Path(__file__).resolve().parent.parent / "examples" / "demo" / "query_validation" / "cases.json"),
-    )
     serve_query = sub.add_parser("serve-query")
     serve_query.add_argument("--db", required=True)
     serve_query.add_argument("--host", default="127.0.0.1")
     serve_query.add_argument("--port", type=int, default=8082)
-    serve_query.add_argument("--project-config", help="Project and LangChain model configuration")
+    serve_query.add_argument("--project-config", help="项目和仓库配置，用于生成 Claude 工作区")
     args = parser.parse_args()
     try:
         load_env_file()
     except EnvFileError as exc:
         parser.error(str(exc))
     if args.command == "serve-query":
-        _warn_model_configuration()
-    if args.command == "demo":
-        state = Orchestrator(load_demo(args.db)).answer(args.question)
-        print(state.answer)
-    elif args.command == "init-db":
+        _warn_runtime_configuration()
+    if args.command == "init-db":
         db = connect(args.db)
         db.close()
         print(json.dumps({"db": str(Path(args.db).resolve()), "mode": "EMPTY", "initialized": True}, ensure_ascii=False))
-    elif args.command == "init-demo":
-        db = load_demo(args.db)
-        summary = {
-            "db": str(Path(args.db).resolve()), "mode": "DEMO", "initialized": True,
-            "repositories": db.execute("SELECT count(*) FROM repository").fetchone()[0],
-            "symbols": db.execute("SELECT count(*) FROM code_symbol").fetchone()[0],
-            "businessKnowledge": db.execute(
-                "SELECT count(*) FROM business_entity WHERE status!='DEPRECATED'"
-            ).fetchone()[0],
-            "requirements": db.execute("SELECT count(*) FROM requirement").fetchone()[0],
-        }
-        db.close()
-        print(json.dumps(summary, ensure_ascii=False))
     elif args.command == "ingest-repo":
         print(JavaIndexer(connect(args.db)).ingest(args.repo, args.repository_id))
     elif args.command == "sync-project":
@@ -203,7 +149,12 @@ def main() -> None:
         else:
             parser.error("非 JSON 需求原文必须提供 --id")
     elif args.command == "ask":
-        print(Orchestrator(connect(args.db)).answer(args.question).answer)
+        from .query_agent.service import QueryService
+        db = connect(args.db)
+        try:
+            print(json.dumps(QueryService(db, db_path=args.db, project_config=args.project_config).query(args.question), ensure_ascii=False, indent=2))
+        finally:
+            db.close()
     elif args.command == "discover":
         from .discovery import RepositoryAnalyzer
         result = RepositoryAnalyzer(connect(args.db)).discover(args.limit, include_declared=args.include_declared)
@@ -247,17 +198,20 @@ def main() -> None:
         serve(args.db, args.host, args.port)
     elif args.command == "query":
         from .query_agent.service import QueryService
-        print(json.dumps(QueryService(connect(args.db), db_path=args.db).query(args.question), ensure_ascii=False, indent=2))
+        db = connect(args.db)
+        try:
+            print(json.dumps(
+                QueryService(
+                    db, db_path=args.db, project_config=args.project_config,
+                ).query(args.question),
+                ensure_ascii=False,
+                indent=2,
+            ))
+        finally:
+            db.close()
     elif args.command == "query-run":
         from .query_agent.service import QueryService
         print(json.dumps(QueryService(connect(args.db), db_path=args.db).get_run(args.run_id), ensure_ascii=False, indent=2))
-    elif args.command == "query-validate":
-        from .query_agent.validation import run_validation
-        db = load_demo(args.db)
-        result = run_validation(db, args.cases)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        if not result["passed"]:
-            raise SystemExit(1)
     elif args.command == "serve-query":
         from .query_agent.api import serve
         serve(args.db, args.host, args.port, project_config=args.project_config)
@@ -304,32 +258,13 @@ def _print_explanation(result: dict, as_json: bool) -> None:
         print(f"缺口：{gap}")
 
 
-def _warn_model_configuration() -> None:
-    """Make an enabled-but-unconfigured model visible at server startup."""
-
-    from .knowledge_update.langchain_adapter import model_config_from_environment
-
-    try:
-        environment_config = model_config_from_environment()
-    except ValueError as exc:
-        print(f"[WARN] 模型环境配置无效：{exc}；模型增强不可用。", file=sys.stderr)
-        return
-
-    configurations = (
-        (environment_config,)
-        if environment_config and environment_config.get("enabled", True)
-        else ()
-    )
-
-    missing: set[str] = set()
-    for value in configurations:
-        variable = str(value.get("apiKeyEnv") or value.get("api_key_env") or "").strip()
-        if variable and not os.environ.get(variable):
-            missing.add(variable)
-    for variable in sorted(missing):
+def _warn_runtime_configuration() -> None:
+    """Make a missing Claude Code executable visible at server startup."""
+    command = os.environ.get("CLAUDE_CODE_COMMAND", "claude").strip() or "claude"
+    if not shutil.which(command) and not Path(command).is_file():
         print(
-            f"[WARN] 模型已启用，但环境变量 {variable} 未设置；"
-            "业务基线结构化 / 问答 Agent 将使用本地确定性流程。",
+            f"[WARN] 未找到 Claude Code CLI（{command}）；查询请求会失败。"
+            "请安装 Claude Code，或设置 CLAUDE_CODE_COMMAND。",
             file=sys.stderr,
         )
 

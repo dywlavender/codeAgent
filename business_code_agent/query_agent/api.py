@@ -1,8 +1,10 @@
+"""HTTP API for the Claude Code backed query workbench."""
+
 from __future__ import annotations
 
+import hmac
 import json
 import logging
-import hmac
 import mimetypes
 import os
 import re
@@ -11,17 +13,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..schema import connect
-from .service import QueryService
+from .service import QueryRuntimeError, QueryService
+
 
 logger = logging.getLogger(__name__)
 
 
 def _user_facing_internal_error(exc: Exception) -> str:
-    """Turn common model failures into an actionable UI message.
-
-    The raw provider response stays in the server log; the HTTP response only
-    exposes a short remediation hint and never silently changes the parser.
-    """
+    """Map runtime failures to short, actionable messages for the browser."""
     messages = []
     current = exc
     for _ in range(6):
@@ -31,25 +30,26 @@ def _user_facing_internal_error(exc: Exception) -> str:
         current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
     detail = " ".join(messages).casefold()
     if "insufficient_quota" in detail or "quota exhausted" in detail or "free quota" in detail:
-        return "模型调用失败：当前模型账号额度已用尽，请更换有额度的 API Key，或选择“Markdown 规则解析”。"
+        return "模型调用失败：当前模型账号额度已用尽，请更换有额度的 API Key，或检查 Claude Code 登录状态。"
     if "thinking mode" in detail and "tool_choice" in detail:
-        return "模型调用失败：当前模型的思考模式不支持 Agent 所需的工具选择。已为 DeepSeek OpenAI 兼容接口默认关闭思考模式；如果仍报错，请在 .env 设置 BUSINESS_CODE_MODEL_THINKING=disabled 后重启。"
+        return "模型调用失败：当前模型的思考模式不支持工具调用，请关闭思考模式后重试；如使用旧兼容接口，可设置 BUSINESS_CODE_MODEL_THINKING=disabled。"
     if "sqlite objects created in a thread" in detail:
         return "查询服务失败：数据库连接发生跨线程使用。请重启工作台后重试。"
-    if (
-        "accessdenied.unpurchased" in detail
-        or "access to model denied" in detail
-        or "model denied" in detail
-        or "permission denied" in detail
-    ):
-        return "模型调用失败：当前 API Key 未开通所选模型，请在模型服务控制台开通，或修改 BUSINESS_CODE_MODEL_NAME 为已授权模型。"
-    if "api key" in detail or "unauthorized" in detail or "401" in detail:
-        return "模型调用失败：API Key 无效或没有权限，请检查 .env 中的 BUSINESS_CODE_MODEL_API_KEY。"
-    if "timeout" in detail or "timed out" in detail:
-        return "模型调用失败：请求模型超时，请检查网络或增大 BUSINESS_CODE_MODEL_TIMEOUT。"
-    if "source investigation" in detail or "query investigator" in detail:
-        return "模型调查失败：模型未返回可引用的结构化源码回答，请重试并检查模型配置。"
-    return "internal query service error"
+    if "accessdenied.unpurchased" in detail or "access to model denied" in detail or "model denied" in detail:
+        return "模型调用失败：当前 API Key 未开通所选模型，请检查 Claude Code 的模型权限。"
+    if "没有找到 claude code cli" in detail or "no such file or directory" in detail:
+        return "查询服务未找到 Claude Code CLI，请先安装并确认 claude 命令在 PATH 中。"
+    if "workspace" in detail and ("不存在" in detail or "cannot" in detail or "无法" in detail):
+        return "查询服务无法准备项目工作区，请检查项目配置中的仓库和知识目录。"
+    if "timeout" in detail or "timed out" in detail or "超时" in detail:
+        return "模型调用失败：请求 Claude Code 超时，请检查网络或增大 CLAUDE_CODE_TIMEOUT。"
+    if "api key" in detail or "unauthorized" in detail or "401" in detail or "authentication" in detail:
+        return "模型调用失败：Claude Code 未通过认证，请运行 claude auth 或配置 API 凭据。"
+    if "permission" in detail or "access denied" in detail:
+        return "模型调用失败：Claude Code 没有访问当前工作区的权限，请检查登录状态和目录权限。"
+    if isinstance(exc, QueryRuntimeError):
+        return "查询服务失败：Claude Code 未能完成本次回答，请查看服务日志后重试。"
+    return "查询服务失败，请查看服务日志后重试。"
 
 
 def make_server(
@@ -69,9 +69,26 @@ def make_server(
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _start_sse(self):
+            # Each query is a finite stream. Explicitly close the HTTP/1.0
+            # response after the result so clients waiting for EOF do not hang.
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "close")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+        def _sse(self, event: str, payload):
+            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            self.wfile.write(f"event: {event}\ndata: {body}\n\n".encode("utf-8"))
+            self.wfile.flush()
 
         def _file(self, path: Path):
             if not path.is_file():
@@ -86,7 +103,11 @@ def make_server(
             self.wfile.write(body)
 
         def _body(self):
-            return json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
+            length = int(self.headers.get("Content-Length", "0"))
+            value = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(value, dict):
+                raise ValueError("请求体必须是 JSON 对象")
+            return value
 
         def _require_admin(self):
             expected = admin_access["token"]
@@ -101,6 +122,7 @@ def make_server(
 
         def do_POST(self):
             service = None
+            stream_started = False
             try:
                 path = urlparse(self.path).path
                 if path == "/api/knowledge/baselines/refresh":
@@ -111,6 +133,7 @@ def make_server(
                     body = self._body()
                     self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
                     return
+
                 feedback_match = re.fullmatch(r"/api/query/([^/]+)/feedback", path)
                 if feedback_match:
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
@@ -119,19 +142,51 @@ def make_server(
                         feedback_match.group(1), str(body.get("rating") or ""), str(body.get("comment") or "")
                     ))
                     return
-                if path != "/api/query":
+
+                if path not in {"/api/query", "/api/query/stream"}:
                     self._json(404, {"error": "not found"})
                     return
-                service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+
                 body = self._body()
-                self._json(200, service.query(
-                    body["question"], conversation_id=body.get("conversationId"), history=body.get("history", []),
-                ))
+                question = body.get("question")
+                conversation_id = body.get("conversationId")
+                service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                if path == "/api/query/stream":
+                    stream_started = True
+                    self._start_sse()
+                    try:
+                        result = service.query(
+                            question,
+                            conversation_id=conversation_id,
+                            event_callback=lambda event: self._sse("event", event),
+                        )
+                        self._sse("result", result)
+                    except Exception as exc:
+                        logger.exception("查询流内部错误: %s", type(exc).__name__)
+                        try:
+                            self._sse("error", {"error": _user_facing_internal_error(exc)})
+                        except (BrokenPipeError, ConnectionResetError, OSError):
+                            pass
+                    return
+
+                self._json(200, service.query(question, conversation_id=conversation_id))
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
-                self._json(400, {"error": str(exc)})
+                if stream_started:
+                    try:
+                        self._sse("error", {"error": str(exc)})
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                else:
+                    self._json(400, {"error": str(exc)})
             except Exception as exc:
                 logger.exception("查询服务内部错误: %s", type(exc).__name__)
-                self._json(500, {"error": _user_facing_internal_error(exc), "type": type(exc).__name__})
+                if stream_started:
+                    try:
+                        self._sse("error", {"error": _user_facing_internal_error(exc)})
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                else:
+                    self._json(500, {"error": _user_facing_internal_error(exc), "type": type(exc).__name__})
             finally:
                 if service:
                     service.db.close()
@@ -155,19 +210,11 @@ def make_server(
                     query = parse_qs(parsed.query).get("q", [""])[0]
                     self._json(200, {"items": EvidenceTools(service.db).search_code(query or "_", 50) if query else []})
                     return
-                if parsed.path == "/api/requirements":
-                    from ..requirement.service import RequirementService
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    query = parse_qs(parsed.query).get("q", [""])[0]
-                    self._json(200, {"items": RequirementService(service.db).search(query)})
-                    return
                 if parsed.path == "/api/knowledge-graph":
                     from ..knowledge_graph import KnowledgeGraphService
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                     params = parse_qs(parsed.query)
-                    query = params.get("q", [""])[0]
-                    node_type = params.get("type", [""])[0]
-                    self._json(200, KnowledgeGraphService(service.db).search(query, node_type))
+                    self._json(200, KnowledgeGraphService(service.db).search(params.get("q", [""])[0], params.get("type", [""])[0]))
                     return
                 if parsed.path == "/api/knowledge/entities":
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
@@ -175,25 +222,7 @@ def make_server(
                     params = parse_qs(parsed.query)
                     query = params.get("q", [""])[0]
                     entity_type = params.get("type", [""])[0]
-                    self._json(200, {
-                        "items": service.list_entities(query, entity_type),
-                        "relations": service.list_relations(query),
-                    })
-                    return
-                if parsed.path == "/api/knowledge/entry-anchors":
-                    from ..knowledge_update.entry_anchor_service import EntryAnchorService
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    params = parse_qs(parsed.query)
-                    business_id = params.get("businessId", params.get("business_id", [""]))[0]
-                    anchor_service = EntryAnchorService(service.db)
-                    if business_id:
-                        row = service.db.execute(
-                            "SELECT entity_type FROM business_entity WHERE id=?", (business_id,)
-                        ).fetchone()
-                        items = anchor_service.list_for_business(row["entity_type"], business_id) if row else []
-                    else:
-                        items = anchor_service.list_all()
-                    self._json(200, {"items": items})
+                    self._json(200, {"items": service.list_entities(query, entity_type), "relations": service.list_relations(query)})
                     return
                 entity_match = re.fullmatch(r"/api/knowledge/entities/([^/]+)", parsed.path)
                 if entity_match:
@@ -201,22 +230,16 @@ def make_server(
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     self._json(200, service.get_entity(entity_match.group(1)))
                     return
-                anchor_match = re.fullmatch(r"/api/knowledge/entry-anchors/([^/]+)", parsed.path)
-                if anchor_match:
-                    from ..knowledge_update.entry_anchor_service import EntryAnchorService
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    self._json(200, EntryAnchorService(service.db).get(anchor_match.group(1)))
-                    return
                 relation_match = re.fullmatch(r"/api/knowledge/relations/([^/]+)", parsed.path)
                 if relation_match:
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
                     self._json(200, service.get_relation(relation_match.group(1)))
                     return
-                match = re.fullmatch(r"/api/query/([^/]+)", parsed.path)
-                if match:
+                run_match = re.fullmatch(r"/api/query/([^/]+)", parsed.path)
+                if run_match:
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    self._json(200, service.get_run(match.group(1)))
+                    self._json(200, service.get_run(run_match.group(1)))
                     return
                 symbol_match = re.fullmatch(r"/api/code/symbol/([^/]+)", parsed.path)
                 if symbol_match:
@@ -234,7 +257,6 @@ def make_server(
                         target = static_root / "index.html"
                     self._file(target)
                     return
-                service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                 self._json(404, {"error": "not found"})
             except KeyError as exc:
                 self._json(404, {"error": str(exc)})
