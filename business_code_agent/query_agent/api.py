@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..schema import connect
-from .service import QueryRuntimeError, QueryService
+from .service import QueryBusyError, QueryRuntimeError, QueryService
 
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,11 @@ def make_server(
                     self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
                     return
 
+                cancel_match = re.fullmatch(r"/api/query/([^/]+)/cancel", path)
+                if cancel_match:
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    self._json(200, service.cancel_run(cancel_match.group(1)))
+                    return
                 feedback_match = re.fullmatch(r"/api/query/([^/]+)/feedback", path)
                 if feedback_match:
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
@@ -159,8 +164,11 @@ def make_server(
                             question,
                             conversation_id=conversation_id,
                             event_callback=lambda event: self._sse("event", event),
+                            run_callback=lambda value: self._sse("run", value),
                         )
                         self._sse("result", result)
+                    except QueryBusyError as exc:
+                        self._sse("error", {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
                     except Exception as exc:
                         logger.exception("查询流内部错误: %s", type(exc).__name__)
                         try:
@@ -170,6 +178,8 @@ def make_server(
                     return
 
                 self._json(200, service.query(question, conversation_id=conversation_id))
+            except QueryBusyError as exc:
+                self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
                 if stream_started:
                     try:
@@ -198,6 +208,16 @@ def make_server(
                 if parsed.path == "/api/workspace":
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                     self._json(200, {**service.workspace_summary(), "adminAuthRequired": admin_access["token"] is not None})
+                    return
+                if parsed.path == "/api/conversations":
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    params = parse_qs(parsed.query)
+                    self._json(200, service.list_conversations(int(params.get("limit", ["20"])[0]), params.get("cursor", [None])[0]))
+                    return
+                conversation_match = re.fullmatch(r"/api/conversations/([^/]+)", parsed.path)
+                if conversation_match:
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    self._json(200, service.get_conversation(conversation_match.group(1)))
                     return
                 if parsed.path == "/api/runs":
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)

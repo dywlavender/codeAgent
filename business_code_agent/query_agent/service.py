@@ -29,6 +29,12 @@ class QueryRuntimeError(RuntimeErrorBase):
     """A query could not be completed by the configured runtime."""
 
 
+class QueryBusyError(ValueError):
+    def __init__(self, run_id: str):
+        super().__init__("当前会话仍有任务在运行，请等待完成或先停止该任务。")
+        self.run_id = run_id
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -91,6 +97,7 @@ class QueryService:
         conversation_id: str | None = None,
         history=(),
         event_callback=None,
+        run_callback=None,
     ) -> dict[str, Any]:
         """Run one question and persist the complete runtime exchange.
 
@@ -103,53 +110,71 @@ class QueryService:
         if not question:
             raise ValueError("question is required")
 
+        logger.info("查询请求: conversation=%s question_characters=%s", conversation_id or "new", len(question))
         workspace = self.workspace_manager.ensure()
-        conversation = self._get_or_create_conversation(conversation_id, workspace)
+        logger.info("查询工作区就绪: workspace=%s path=%s", workspace.id, workspace.path)
         run_id = f"RUN-{uuid.uuid4().hex}"
         started_at = _now()
         started_clock = time.monotonic()
-        self.db.execute(
-            """INSERT INTO query_run
-               (id,conversation_id,runtime,runtime_session_id,question,status,answer,
-                error,usage_json,started_at,completed_at,duration_ms)
-               VALUES (?,?,?,?,?,'running','',NULL,'{}',?,NULL,0)""",
-            (
-                run_id,
-                conversation["id"],
-                self._runtime_name(),
-                conversation["runtime_session_id"],
-                question,
-                started_at,
-            ),
-        )
-        self._save_message(conversation["id"], run_id, "user", question, started_at)
-        self.db.commit()
+        # Hold the write lock across the active-run check and insertion so
+        # another tab/request cannot start the same session concurrently.
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            conversation = self._get_or_create_conversation(conversation_id, workspace)
+            active = self.db.execute(
+                "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
+                (conversation["id"],),
+            ).fetchone()
+            if active:
+                raise QueryBusyError(active["id"])
+            self.db.execute(
+                """INSERT INTO query_run
+                   (id,conversation_id,runtime,runtime_session_id,question,status,answer,
+                    error,usage_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,NULL,0)""",
+                (run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"], question, started_at),
+            )
+            self._save_message(conversation["id"], run_id, "user", question, started_at)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
+        logger.info("查询开始: run=%s conversation=%s runtime=%s session=%s",
+                    run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"] or "new")
         emitted: list[dict[str, Any]] = []
+        client_connected = True
 
         def on_event(event: Mapping[str, Any]) -> None:
+            nonlocal client_connected
             normalized = dict(event)
             emitted.append(normalized)
             self._save_event(run_id, normalized, len(emitted))
             self.db.commit()
-            if event_callback:
+            if event_callback and client_connected:
                 try:
                     event_callback(normalized)
                 except (BrokenPipeError, ConnectionResetError, OSError):
+                    client_connected = False
                     # A disconnected SSE client must not turn a successful
                     # runtime invocation into a failed persisted run.
-                    logger.debug("query event client disconnected", exc_info=True)
+                    logger.warning("查询客户端已断开: run=%s；后台继续保存结果", run_id)
 
         try:
+            if run_callback:
+                run_callback({"runId": run_id, "conversationId": conversation["id"]})
             raw_result = self.runtime.ask(
                 question,
                 workspace=str(workspace.path),
                 session_id=conversation["runtime_session_id"],
                 event_callback=on_event,
+                cancel_check=lambda: self.db.execute("SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
             )
             result = normalize_runtime_result(raw_result)
         except Exception as exc:
             duration = round((time.monotonic() - started_clock) * 1000, 3)
+            logger.error("查询失败: run=%s conversation=%s duration_ms=%s error_type=%s",
+                         run_id, conversation["id"], duration, type(exc).__name__)
             error_text = str(exc) or exc.__class__.__name__
             self._save_event(
                 run_id,
@@ -177,30 +202,45 @@ class QueryService:
 
         session_id = result.runtime_session_id or conversation["runtime_session_id"]
         completed_at = _now()
+        final_status = "cancelled" if result.status == "cancelled" else "completed"
+        if final_status == "cancelled":
+            on_event({"sequence": len(emitted) + 1, "eventType": "status",
+                      "payload": {"phase": "cancelled", "label": "已停止"}})
         duration = round((time.monotonic() - started_clock) * 1000, 3)
         self.db.execute(
-            """UPDATE query_run SET status='completed',runtime_session_id=?,answer=?,
+            """UPDATE query_run SET status=?,runtime_session_id=?,answer=?,
                usage_json=?,completed_at=?,duration_ms=? WHERE id=?""",
-            (session_id, result.answer, _json(result.usage), completed_at, duration, run_id),
+            (final_status, session_id, result.answer, _json(result.usage), completed_at, duration, run_id),
         )
-        self._save_message(conversation["id"], run_id, "assistant", result.answer, completed_at)
+        if result.answer:
+            self._save_message(conversation["id"], run_id, "assistant", result.answer, completed_at)
         self.db.execute(
             """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,updated_at=?
                WHERE id=?""",
             (self._runtime_name(), session_id, workspace.id, completed_at, conversation["id"]),
         )
         self.db.commit()
+        logger.info("查询结束: run=%s status=%s conversation=%s session=%s duration_ms=%s events=%s answer_characters=%s",
+                    run_id, final_status, conversation["id"], session_id, duration, len(emitted), len(result.answer))
         return {
             "runId": run_id,
             "conversationId": conversation["id"],
             "runtime": self._runtime_name(),
             "sessionId": session_id,
             "workspaceId": workspace.id,
-            "status": "completed",
+            "status": final_status,
             "answer": result.answer,
             "events": emitted,
             "usage": result.usage,
         }
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        self.db.execute("UPDATE query_run SET status='cancelling' WHERE id=? AND status='running'", (run_id,))
+        self.db.commit()
+        row = self.db.execute("SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()
+        if not row:
+            raise KeyError(run_id)
+        return {"runId": run_id, "status": row["status"]}
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         row = self.db.execute("SELECT * FROM query_run WHERE id=?", (run_id,)).fetchone()
@@ -236,6 +276,45 @@ class QueryService:
             "durationMs": value["duration_ms"],
             "events": events,
             "feedback": feedback,
+        }
+
+    def get_conversation(self, conversation_id: str) -> dict[str, Any]:
+        if not self.db.execute("SELECT 1 FROM query_conversation WHERE id=?", (conversation_id,)).fetchone():
+            raise KeyError(conversation_id)
+        rows = self.db.execute(
+            "SELECT id FROM query_run WHERE conversation_id=? ORDER BY started_at,id", (conversation_id,),
+        ).fetchall()
+        return {"conversationId": conversation_id, "items": [self.get_run(row["id"]) for row in rows]}
+
+    def list_conversations(self, limit: int = 20, cursor: str | None = None) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 100))
+        args = []
+        boundary = ""
+        if cursor:
+            try:
+                position = json.loads(cursor)
+                if not isinstance(position, list) or len(position) != 2 or not all(isinstance(item, str) for item in position):
+                    raise ValueError()
+            except (TypeError, ValueError):
+                raise ValueError("invalid conversation cursor") from None
+            boundary = "AND (r.started_at,r.id) < (?,?)"
+            args.extend(position)
+        args.append(limit + 1)
+        rows = self.db.execute(
+            f"""SELECT r.id,r.conversation_id,r.question,r.status,r.started_at
+                FROM query_run r
+                WHERE r.id=(SELECT latest.id FROM query_run latest
+                            WHERE latest.conversation_id=r.conversation_id
+                            ORDER BY latest.started_at DESC,latest.id DESC LIMIT 1)
+                {boundary}
+                ORDER BY r.started_at DESC,r.id DESC LIMIT ?""", args,
+        ).fetchall()
+        page = rows[:limit]
+        return {
+            "items": [{"id": row["id"], "runId": row["id"], "conversationId": row["conversation_id"],
+                       "question": row["question"], "status": row["status"], "startedAt": row["started_at"]}
+                      for row in page],
+            "nextCursor": _json([page[-1]["started_at"], page[-1]["id"]]) if len(rows) > limit else None,
         }
 
     def list_runs(self, limit: int = 30) -> list[dict[str, Any]]:

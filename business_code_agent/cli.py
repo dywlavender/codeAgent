@@ -20,7 +20,7 @@ def _configure_logging() -> None:
     level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
         level=level,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        format="%(asctime)s %(levelname)-7s [%(threadName)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
 

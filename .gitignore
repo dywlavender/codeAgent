@@ -31,3 +31,5 @@ project.config.json
 !tests/fixtures/**/project.config.json
 
 .workbuddy/
+.playwright-cli/
+output/playwright/

@@ -20,6 +20,7 @@ class RuntimeResult:
     runtime_session_id: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
+    status: str = "completed"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +28,7 @@ class RuntimeResult:
             "runtimeSessionId": self.runtime_session_id,
             "events": [dict(event) for event in self.events],
             "usage": dict(self.usage),
+            "status": self.status,
         }
 
 
@@ -42,6 +44,7 @@ class AgentRuntime(Protocol):
         workspace: str,
         session_id: str | None = None,
         event_callback: EventCallback | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> RuntimeResult | Mapping[str, Any]:
         """Ask one question in a workspace, optionally resuming a session."""
 
@@ -61,7 +64,7 @@ def normalize_runtime_result(value: RuntimeResult | Mapping[str, Any]) -> Runtim
     if not isinstance(value, Mapping):
         raise RuntimeErrorBase("runtime returned an invalid result")
     answer = str(value.get("answer") or value.get("result") or "").strip()
-    if not answer:
+    if not answer and value.get("status") != "cancelled":
         raise RuntimeErrorBase("runtime returned an empty answer")
     raw_events = value.get("events") or []
     events = [dict(event) for event in raw_events if isinstance(event, Mapping)]
@@ -72,4 +75,5 @@ def normalize_runtime_result(value: RuntimeResult | Mapping[str, Any]) -> Runtim
         runtime_session_id=str(session_id) if session_id else None,
         events=events,
         usage=dict(usage) if isinstance(usage, Mapping) else {},
+        status=str(value.get("status") or "completed"),
     )

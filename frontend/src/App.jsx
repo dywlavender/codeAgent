@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  BookOpen, ChatCircleDots, Graph, Lock, Plus, ShieldCheck,
+  BookOpen, ChatCircleDots, Graph, Lock, Plus, ShieldCheck, SidebarSimple,
 } from "@phosphor-icons/react";
 import {
   Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Typography,
 } from "antd";
 import { RequestAborted, request, streamQuery } from "./lib/api.js";
 import { formatTime } from "./lib/format.js";
+import { isActiveRun, mergeConversations, turnFromRun, watchRun } from "./lib/query-state.js";
 import { AgentPage } from "./pages/AgentPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
 import { GraphPage } from "./pages/GraphPage.jsx";
@@ -37,6 +38,18 @@ export default function App() {
   const [lockOpen, setLockOpen] = useState(false);
   const [lockToken, setLockToken] = useState("");
   const queryAbortRef = useRef(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
+  const restoreRef = useRef(0);
+  const historyRequestRef = useRef(0);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (conversationId) sessionStorage.setItem("queryConversationId", conversationId);
+  }, [conversationId]);
+
+  useEffect(() => () => queryAbortRef.current?.abort(), []);
 
   useEffect(() => {
     const onHash = () => setPage(pageFromHash());
@@ -47,25 +60,35 @@ export default function App() {
   function navigate(id) {
     if (window.location.hash !== `#/${id}`) window.location.hash = `#/${id}`;
     else setPage(id);
+    if (window.innerWidth < 768) setSidebarOpen(false);
   }
 
-  const refreshRuns = async () => {
-    const data = await request("/api/runs?limit=30");
-    setRuns(data.items || []);
+  const refreshRuns = async (cursor = null) => {
+    const requestId = ++historyRequestRef.current;
+    setHistoryLoading(true);
+    try {
+      const data = await request(`/api/conversations?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      if (requestId !== historyRequestRef.current) return;
+      setRuns((current) => cursor ? mergeConversations(current, data.items || []) : data.items || []);
+      setNextCursor(data.nextCursor || null);
+    } finally {
+      if (requestId === historyRequestRef.current) setHistoryLoading(false);
+    }
   };
 
   useEffect(() => {
-    Promise.all([request("/api/workspace"), request("/api/runs?limit=30")])
-      .then(([space, history]) => {
+    Promise.all([request("/api/workspace"), refreshRuns()])
+      .then(([space]) => {
         setWorkspace(space);
-        setRuns(history.items || []);
+        const saved = sessionStorage.getItem("queryConversationId");
+        if (saved && pageFromHash() === "agent" && restoreRef.current === 0 && !queryAbortRef.current) doRestore({ conversationId: saved });
       })
       .catch((reason) => setError(reason.message));
   }, []);
 
   async function submit(nextQuestion = question) {
     const normalized = nextQuestion.trim();
-    if (!normalized || status === "loading") return;
+    if (!normalized || status === "loading" || queryAbortRef.current) return;
     const turnId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setQuestion("");
     setTurns((current) => [...current, { id: turnId, question: normalized, status: "loading", events: [] }]);
@@ -76,6 +99,7 @@ export default function App() {
     setError("");
 
     const controller = new AbortController();
+    setCancelling(false);
     queryAbortRef.current = controller;
     try {
       const data = await streamQuery("/api/query/stream", {
@@ -83,34 +107,65 @@ export default function App() {
         conversationId,
       }, {
         signal: controller.signal,
-        onEvent: (event) => setTurns((current) => current.map((turn) => (
+        onRun: (value) => {
+          if (queryAbortRef.current !== controller) return;
+          controller.runId = value.runId;
+          setConversationId(value.conversationId);
+          if (controller.cancelRequested) requestCancellation(controller);
+        },
+        onEvent: (event) => queryAbortRef.current === controller && setTurns((current) => current.map((turn) => (
           turn.id === turnId ? { ...turn, events: [...(turn.events || []), event] } : turn
         ))),
       });
-      const detail = await request(`/api/query/${data.runId}`);
+      if (queryAbortRef.current !== controller) return;
+      const detail = data;
       setResult(data);
       setRunDetail(detail);
       setConversationId(data.conversationId || detail.conversationId || conversationId);
-      setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "success", result: data, detail, events: data.events || turn.events || [] } : turn));
+      setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: data.status === "cancelled" ? "cancelled" : "success", result: data, detail, events: data.events || turn.events || [] } : turn));
       setStatus("success");
-      await refreshRuns();
+      await refreshRuns().catch(() => {});
     } catch (reason) {
+      if (queryAbortRef.current !== controller) return;
       if (reason instanceof RequestAborted || reason?.name === "AbortError") {
-        setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "error", error: "本次查询已被手动停止。" } : turn));
+        setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "stopped" } : turn));
         setError("");
         setStatus("idle");
         return;
       }
-      setError(reason.message);
+      // Query failures belong to this turn, not the independent operation banner.
       setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, status: "error", error: reason.message } : turn));
       setStatus("error");
     } finally {
-      queryAbortRef.current = null;
+      if (queryAbortRef.current === controller) {
+        queryAbortRef.current = null;
+        setCancelling(false);
+      }
     }
   }
 
   function stopQuery() {
-    queryAbortRef.current?.abort();
+    const controller = queryAbortRef.current;
+    if (!controller) return;
+    controller.cancelRequested = true;
+    setCancelling(true);
+    requestCancellation(controller);
+  }
+
+  async function requestCancellation(controller) {
+    if (!controller.runId || controller.cancelSent) return;
+    controller.cancelSent = true;
+    try {
+      await request(`/api/query/${controller.runId}/cancel`, { method: "POST" });
+      if (queryAbortRef.current === controller) setError("");
+      // Keep SSE connected until the runtime confirms termination and saves it.
+    } catch (reason) {
+      if (queryAbortRef.current !== controller) return;
+      controller.cancelSent = false;
+      controller.cancelRequested = false;
+      setCancelling(false);
+      setError(`停止失败：${reason.message}，可以重试。`);
+    }
   }
 
   async function openRun(run) {
@@ -122,12 +177,18 @@ export default function App() {
   }
 
   async function doRestore(run) {
-    if (!run) return;
+    if (!run || queryAbortRef.current) return;
+    const restoreId = ++restoreRef.current;
     setError("");
     setStatus("loading");
     navigate("agent");
     try {
-      const detail = await request(`/api/query/${run.id}`);
+      const history = run.conversationId
+        ? (await request(`/api/conversations/${run.conversationId}`)).items
+        : [await request(`/api/query/${run.id}`)];
+      if (restoreId !== restoreRef.current) return;
+      const detail = history.at(-1);
+      if (!detail) throw new Error("会话没有可恢复的消息");
       setRunDetail(detail);
       setQuestion("");
       const restoredResult = {
@@ -140,23 +201,65 @@ export default function App() {
         events: detail.events || [],
       };
       setResult(restoredResult);
-      setTurns([{ id: detail.id, question: detail.question, status: "success", result: restoredResult, detail }]);
+      setTurns(history.map(turnFromRun));
       setConversationId(detail.conversationId || null);
       setActiveTurnId(detail.id);
-      setStatus("success");
+      if (isActiveRun(detail)) {
+        const controller = new AbortController();
+        controller.runId = detail.runId || detail.id;
+        queryAbortRef.current = controller;
+        setCancelling(detail.status === "cancelling");
+        setStatus("loading");
+        await monitorRun(controller);
+      } else setStatus(detail.status === "failed" ? "error" : "success");
     } catch (reason) {
+      if (restoreId !== restoreRef.current) return;
       setError(reason.message);
       setStatus("error");
     }
   }
 
+  async function monitorRun(controller) {
+    try {
+      await watchRun(controller.runId, {
+        signal: controller.signal,
+        getRun: (id, signal) => request(`/api/query/${id}`, {}, signal),
+        onUpdate: (run) => {
+          if (queryAbortRef.current !== controller) return;
+          setTurns((current) => current.map((turn) => turn.id === controller.runId ? turnFromRun(run) : turn));
+          setResult(run);
+          setRunDetail(run);
+          if (!isActiveRun(run)) {
+            setStatus(run.status === "failed" ? "error" : "success");
+            setError("");
+          } else if (run.status === "cancelling") setCancelling(true);
+        },
+      });
+      await refreshRuns().catch(() => {});
+    } catch (reason) {
+      if (controller.signal.aborted || queryAbortRef.current !== controller) return;
+      setError(`任务进度连接中断，请重新打开当前会话恢复。${reason.message}`);
+      setTurns((current) => current.map((turn) => turn.id === controller.runId ? { ...turn, status: "disconnected" } : turn));
+      setStatus("error");
+    } finally {
+      if (queryAbortRef.current === controller) {
+        queryAbortRef.current = null;
+        setCancelling(false);
+      }
+    }
+  }
+
   function newConversation() {
+    if (queryAbortRef.current) return;
+    restoreRef.current += 1;
     queryAbortRef.current?.abort();
+    queryAbortRef.current = null;
     setTurns([]);
     setResult(null);
     setRunDetail(null);
     setQuestion("");
     setConversationId(null);
+    sessionStorage.removeItem("queryConversationId");
     setError("");
     setStatus("idle");
     setActiveTurnId(null);
@@ -183,22 +286,25 @@ export default function App() {
 
   const activeTurn = turns.find((turn) => turn.id === activeTurnId);
   const activeRunId = activeTurn ? (activeTurn.result?.runId || activeTurn.id) : null;
-  const sideBg = "#EBE7E0";
+  const recentConversations = runs;
 
   return (
-    <Layout style={{ minHeight: "100dvh", background: "#F4F2ED" }}>
-      <Sider width={248} style={{ background: sideBg, borderRight: "1px solid #E0DCD5", position: "sticky", top: 0, height: "100dvh", overflow: "auto" }}>
+    <Layout className="app-layout">
+      {sidebarOpen && <button className="sidebar-scrim" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} />}
+      <Sider width={240} collapsedWidth={0} collapsed={!sidebarOpen} trigger={null} className="app-sidebar">
         <div className="side-brand">
           <Avatar shape="square" size={30} style={{ background: "#211E1A", fontWeight: 700, fontFamily: "monospace", fontSize: 12, borderRadius: 8, color: "#F4F2ED" }}>{"{}"}</Avatar>
           <div>
             <Typography.Text strong style={{ fontSize: 13.5, display: "block", lineHeight: 1.3 }}>Code Atlas</Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 10.5 }}>Claude Code 业务代码问答</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>业务与代码</Typography.Text>
           </div>
+          <Button type="text" className="side-collapse" icon={<SidebarSimple size={18} />} onClick={() => setSidebarOpen(false)} aria-label="收起侧栏" />
         </div>
         <Button
           block
           icon={<Plus size={14} weight="bold" />}
           onClick={newConversation}
+          disabled={status === "loading"}
           style={{ margin: "2px 14px 8px", width: "calc(100% - 28px)", borderRadius: 10, fontWeight: 550, boxShadow: "0 1px 2px rgba(30,28,20,.05)" }}
         >
           开始新对话
@@ -222,21 +328,21 @@ export default function App() {
           ]}
         />
         <div className="recent-block">
-          <div className="zone-label">最近分析</div>
+          <div className="zone-label">最近会话<Button type="text" size="small" disabled={historyLoading} onClick={() => refreshRuns().catch((reason) => setError(reason.message))}>刷新</Button></div>
           {runs.length === 0 && (
             <Typography.Text type="secondary" style={{ fontSize: 12, padding: "4px 18px", display: "block", lineHeight: 1.7 }}>
               提交第一个问题后，分析历史会出现在这里。
             </Typography.Text>
           )}
-          {runs.slice(0, 12).map((run) => (
-            <button key={run.id} className={`recent-item ${run.id === activeRunId ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
-          <span className={`rstate ${run.status === "completed" ? "sufficient" : run.status === "failed" ? "conflict" : "insufficient"}`} />
+          {recentConversations.map((run) => (
+            <button key={run.id} disabled={status === "loading"} className={`recent-item ${run.conversationId === conversationId || run.id === activeRunId ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
           <span className="rcopy">
             <span className="rq">{run.question}</span>
-            <small>{run.runtime || "CLAUDE_CODE"} · {formatTime(run.startedAt || run.created_at)}</small>
+            <small>{formatTime(run.startedAt || run.created_at)}</small>
               </span>
             </button>
           ))}
+          {nextCursor && <Button type="text" block loading={historyLoading} disabled={historyLoading} onClick={() => refreshRuns(nextCursor).catch((reason) => setError(reason.message))}>加载更多会话</Button>}
         </div>
         {!showAdminZone && (
           <button className="admin-entry" onClick={() => setLockOpen(true)}>
@@ -252,6 +358,7 @@ export default function App() {
       </Sider>
 
       <Content style={{ minWidth: 0 }}>
+        {page !== "agent" && !sidebarOpen && <Button className="reopen-sidebar" icon={<SidebarSimple size={18} />} onClick={() => setSidebarOpen(true)}>导航</Button>}
         {page === "agent" && (
           <AgentPage
             workspace={workspace}
@@ -260,6 +367,7 @@ export default function App() {
             setQuestion={setQuestion}
             submit={submit}
             stopQuery={stopQuery}
+            cancelling={cancelling}
             status={status}
             error={error}
             result={result}
@@ -268,6 +376,7 @@ export default function App() {
             activeTurnId={activeTurnId}
             selectTurn={selectTurn}
             newConversation={newConversation}
+            toggleSidebar={() => setSidebarOpen((open) => !open)}
           />
         )}
         {page === "library" && <LibraryPage workspace={workspace} />}

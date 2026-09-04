@@ -19,7 +19,7 @@ export async function request(path, options = {}, signal) {
   return body;
 }
 
-export async function streamQuery(path, payload, { signal, onEvent } = {}) {
+export async function streamQuery(path, payload, { signal, onEvent, onRun } = {}) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -50,6 +50,7 @@ export async function streamQuery(path, payload, { signal, onEvent } = {}) {
     let value;
     try { value = JSON.parse(data); } catch { return; }
     if (eventName === "result") result = value;
+    if (eventName === "run" && onRun) onRun(value);
     if (onEvent && eventName === "event") onEvent(value);
     if (eventName === "error") {
       streamError = value?.error || "流式查询失败";
