@@ -1,5 +1,13 @@
 export const isActiveRun = (run) => ["running", "cancelling"].includes(run?.status);
 
+export const RUN_STATUS_LABEL = {
+  running: "运行中",
+  cancelling: "正在停止",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已停止",
+};
+
 export function turnFromRun(run) {
   return { id: run.runId || run.id, question: run.question,
     status: isActiveRun(run) ? "loading" : run.status === "completed" ? "success" : run.status === "cancelled" ? "cancelled" : "error",

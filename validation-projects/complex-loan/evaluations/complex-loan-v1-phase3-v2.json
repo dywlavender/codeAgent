@@ -1,0 +1,104 @@
+{
+  "name": "融商贷V1阶段3题库V2（区分度修订）",
+  "scope": "融商贷阶段3（多层额度、授信审批、版本快照）＋阶段2三系统基座＋Fineract 1.14.0。本版修订：检查项不再复述需求文档文字，全部题目需读源码才能完整回答；需求文档与判分依据恢复隔离。不含阶段4计划内容（优惠券、担保责任生命周期、多收款人）。",
+  "origin": "synthetic",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "v2-callback-twice",
+      "question": "一笔提款的付款成功回调被模拟服务重复投递了两次。第二次到达时，如果第一次触发的入账还没有完成（Fineract 还没放款成功），会发生什么？两次投递各自走到哪一步，台账会不会重复变化？",
+      "checks": [
+        "回调入口 ExternalResultController 先校验 extSerialNo 与业务单保存的流水号一致才分发，否则忽略",
+        "第一次回调：onPaymentResult 置 paymentStatus=SUCCESS、业务单状态 EXTERNAL_SUCCESS_BOOKING_PENDING、bookingStatus=TO_BOOK，并同步调用 book() 发起 Fineract 放款",
+        "第二次回调：被幂等防线挡住（order.terminal() 或 paymentStatus 已是 SUCCESS 直接 return），不会再次进入 book()",
+        "若第一次 book() 失败转 RETRY_NEEDED，第二次成功回调同样被幂等挡住，只能靠 CompensationTask 的入账重试线收敛，重试前用 isLoanActive 防重复放款",
+        "台账 OCCUPY 流水只在 confirmOccupy 成功路径写一次，重复回调不会产生第二条"
+      ],
+      "category": "cross_system"
+    },
+    {
+      "id": "v2-record-count",
+      "question": "同样是提款受理，为什么有的业务单台账里出现 4 条 PRE_OCCUPY 流水，有的只有 3 条？每条流水的 productId 字段分别是什么值？",
+      "checks": [
+        "TOTAL 层流水无条件记录（LimitService.preOccupy 对总授信层总是写入）",
+        "PRODUCT 层仅当该授信配置了该产品的子额度才记（findSubLimit 无结果则跳过该层）",
+        "GROUP 层仅当授信通过 GroupMember 挂在某集团才记（findGroupOf 为空则跳过）",
+        "GUARANTEE 层仅当产品担保要求=开才记（availableForDrawdown 与预占的分支条件）",
+        "productId 只有 PRODUCT 层流水携带，TOTAL/GROUP/GUARANTEE 层流水该字段为空"
+      ],
+      "category": "middle_rule"
+    },
+    {
+      "id": "v2-decrease-edge",
+      "question": "企业甲占用 25 万、预占 3 万，此时申请把总授信降到 28 万整——restricted 会置位吗？那笔预占中的提款随后入账成功，结果是什么？如果降到 27 万呢？",
+      "checks": [
+        "restricted 判定是 (occupied+preOccupied) 与新上限的比较（CreditService.effectuate），28 万不大于 28 万，不置位",
+        "预占中的提款入账走 confirmOccupy，该方法不检查 restricted 或 frozen，入账成功、占用变为 28 万",
+        "降到 27 万时 28>27 置位 restricted，但已受理单子仍能入账（confirmOccupy 无资格检查），占用 28 万超过新上限",
+        "effectuate 只改 totalLimit 与 restricted 标志，不取消已预占的单子、不改已有债务",
+        "后续新增提款受 availableForDrawdown 新上限约束"
+      ],
+      "category": "middle_rule"
+    },
+    {
+      "id": "v2-approved-limit",
+      "question": "模拟审批返回的批准额度低于申请额度时，INITIAL 申请和 LIMIT_INCREASE 申请分别怎么生效？提额申请被批了比现有授信还低的额度，会出什么结果？",
+      "checks": [
+        "onApprovalResult 用批准额度落 approvedLimit，批准额度为空时回退取申请额度",
+        "INITIAL：totalLimit=批准额度，新建授信并 applyLayers 落集团/子额度/担保覆盖各层配置",
+        "LIMIT_INCREASE：totalLimit 直接设为批准额度，代码不校验批准额度是否高于当前额度",
+        "提额被批了更低额度等于事实降额：occupied+preOccupied 高于新总额度时 restricted 被置位、新增提款受限",
+        "审批结果只是数据：生效、restricted 判定都发生在中台 effectuate，而不是模拟服务"
+      ],
+      "category": "cross_system"
+    },
+    {
+      "id": "v2-strategy-code",
+      "question": "中台创建借据的请求里 transactionProcessingStrategyCode 传的是什么值？这个值在 Fineract 侧由谁消费、怎样决定还款金额的分配顺序？它和 Fineract 贷款产品上配置的策略是什么关系？",
+      "checks": [
+        "中台 FineractClient.createLoan 请求中硬编码传 fineract-style",
+        "Fineract 侧该值保存在贷款账户上（Loan 实体字段），还款处理时 LoanTransactionProcessingServiceImpl 按 loan.getTransactionProcessingStrategyCode() 经 LoanRepaymentScheduleTransactionProcessorFactory.determineProcessor 选择分配处理器",
+        "创建时 LoanAssemblerImpl 只在 allowOverridingTransactionProcessingStrategy 允许覆盖时才取请求值，否则用贷款产品上配置的策略码——中台传值可能被忽略",
+        "fineract-style 对应 FineractStyleLoanRepaymentScheduleTransactionProcessor；换成其他合法策略码，费用/利息/本金的分配顺序随之改变",
+        "中台不做任何金额分配，只通过 getRepaymentAllocation 读取 Fineract 交易的本金/利息/费用分配结果"
+      ],
+      "category": "native"
+    },
+    {
+      "id": "v2-channel-display",
+      "question": "运营想区分页面上显示\"处理中\"的提款单，到底是\"外部还没结果\"还是\"中台入账失败\"。当前渠道接口能直接支持吗？依据哪些字段？如果只能改一处代码，改哪里收益最大？",
+      "checks": [
+        "渠道详情接口已返回 middleStatus（ChannelService.drawdownDetail 返回中台原始状态），可与展示状态并列使用",
+        "展示状态由 displayOf 把 EXTERNAL_SUCCESS_BOOKING_PENDING、RETRY_NEEDED 等合并为 PROCESSING",
+        "中台原始状态持久化在渠道申请单 middleRawStatus 字段，每次详情查询刷新保存",
+        "区分两类原因还需中台细粒度状态：中台 detail 返回 payments[].status（付款指令）与 booking.status（入账），渠道详情的 detail 字段已透传",
+        "列表场景当前只有 displayStatus，要支持需渠道侧新增按原始状态的筛选或展示字段"
+      ],
+      "category": "cross_system"
+    },
+    {
+      "id": "v2-stale-failed",
+      "question": "补偿任务对一笔付款主动查单拿到 FAILED，但同一时刻这笔单子的入账刚好完成、业务单已经 SUCCESS。系统会出现重复释放预占或\"失败覆盖成功\"吗？靠什么机制避免？",
+      "checks": [
+        "onPaymentResult 的终态防线：order.terminal()（SUCCESS/FAILED/CANCELLED）为真直接 return，陈旧结果不产生任何写操作",
+        "查单入口有状态过滤：CompensationTask 只对 paymentStatus=PROCESSING 的单子发起查单，已入账单子不在扫描范围",
+        "releasePreOccupied 只在失败分支执行，且失败分支自身有 paymentStatus 已是 FAILED 的幂等判断，不会重复释放",
+        "业务单状态、付款状态与台账流水写入在同一事务（@Transactional onPaymentResult）内完成，不出现台账与状态不一致的中间态",
+        "因此既不会重复释放预占，也不会用失败覆盖成功"
+      ],
+      "category": "cross_system"
+    },
+    {
+      "id": "v2-version-edge",
+      "question": "运营把采购贷年利率从 8% 改成 7.5% 后，立刻生成了一张新报价；同时另一人拿着 29 分钟前（旧利率时期）生成的老报价提交申请。两张单各按什么规则执行？什么情况下老报价会被拒绝？",
+      "checks": [
+        "新报价：resolveVersion 比对当前配置与最新版本，利率不同生成新版本行，报价绑定新版本，按 7.5% 一套规则执行",
+        "29 分钟的老报价未过 30 分钟有效期，usable 为真，按其绑定的旧版本规则执行，不受新配置影响",
+        "apply 的校验读报价绑定的 ProductConfigVersion（versionRepo 反查），全程不读当前 ProductConfig 的规则字段",
+        "两张单的额度校验都按申请时点多层口径重新计算：快照只锁定规则与价格，不锁定额度余量",
+        "老报价超过 30 分钟有效期则 usable 为假，提交抛 QUOTE_EXPIRED，必须重新报价"
+      ],
+      "category": "middle_rule"
+    }
+  ]
+}

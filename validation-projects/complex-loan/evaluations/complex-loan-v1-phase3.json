@@ -1,0 +1,112 @@
+{
+  "name": "融商贷V1阶段3题库",
+  "scope": "融商贷阶段3（授信与多层额度：总授信/产品子额度/集团限额/担保覆盖、降额冻结、授信申请审批、版本快照）＋阶段2三系统基座＋Fineract 1.14.0 原生源码。不含阶段4计划内容（优惠券、担保责任生命周期、多收款人）；所有题目均可且仅可依据当前项目源码回答。",
+  "origin": "synthetic",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "p3-multilayer-calc",
+      "question": "种子数据里企业甲总授信 80 万元，页面申请采购贷时最多只能借 50 万。请说明四个额度层各自的余量、最终可用额度怎么算出来、代码在哪个类。",
+      "checks": [
+        "四层余量：总授信 80 万（CR-202609010001）、采购贷子额度 70 万、甲乙集团限额 60 万、担保覆盖 40 万÷覆盖比例 80%=可支持 50 万",
+        "最终可用＝各层余量取最小值＝50 万，层间不可相加替代",
+        "计算在 loan-middle 的 LimitService.availableForDrawdown；担保层公式在 GuaranteeCoverage.supportable()",
+        "担保覆盖层只对担保要求=开的产品生效（ProductConfig.requiresGuarantee，种子中采购贷=开）",
+        "冻结时可用为 0；担保要求开但无有效覆盖时也不可借"
+      ],
+      "category": "middle_rule",
+      "notes": "典型错误：把 80+70+60+40 相加，或忽略覆盖比例除法。"
+    },
+    {
+      "id": "p3-multilayer-booking",
+      "question": "一笔 30 万采购贷提款受理后、入账前，额度台账发生了什么？入账成功后呢？请说明台账流水的层次结构。",
+      "checks": [
+        "受理时逐层预占：LimitService.preOccupy 在 TOTAL/PRODUCT/GROUP/GUARANTEE 各写一条 PRE_OCCUPY 流水（LimitRecord）",
+        "每条流水带 creditId、layer、kind、reason、amount、bizOrderNo（可按业务单核对四层）",
+        "入账成功后 confirmOccupy 逐层把预占转实占",
+        "GUARANTEE 层只在担保要求=开的产品提款时参与记账",
+        "流水可通过 GET /middle/api/v1/credit/{creditId}/records 查询"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"只记总授信一层\"视为未理解逐层记账。"
+    },
+    {
+      "id": "p3-decrease-rule",
+      "question": "企业甲总授信从 80 万降到 30 万，此时已有占用 40 万。系统会怎么处理？已有借据还款还能恢复占用吗？还能再提款吗？",
+      "checks": [
+        "降额经申请审批（type=LIMIT_DECREASE），生效在 CreditService.effectuate：设置新上限并判定 restricted",
+        "restricted 时总授信层余量下限取 0（CreditLimit.totalRemaining），不修改已有债务",
+        "已有借据还款照常恢复占用（LimitService.restoreByPrincipal 不受 restricted 影响）",
+        "新增提款因余量不足被 LIMIT_INSUFFICIENT 拒绝（availableForDrawdown 低于申请额）",
+        "占用降回新上限以内后新增提款自动恢复可用（无需人工干预）"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"降额会收回已放款或清零占用\"为错误。"
+    },
+    {
+      "id": "p3-group-sharing",
+      "question": "企业乙和企业甲同属一个集团限额。企业乙借了 20 万之后，企业甲的可借额度有什么变化？这个约束在代码哪里实现？",
+      "checks": [
+        "集团限额被成员共享：GroupLimit + GroupMember 关系，任一成员占用都减少集团余量",
+        "LimitService 预占/实占/恢复时同步更新 GROUP 层计数",
+        "企业甲的 availableForDrawdown 会取集团层余量参与最小值比较",
+        "两个企业的总授信层相互独立（TOTAL 层各自记账），集团约束只作用于集团层",
+        "实例：乙借 20 万后集团余量 40 万，甲的担保经营场景可借变为 min(80,70,40,50)=40 万"
+      ],
+      "category": "cross_system",
+      "notes": "答\"乙的借款不影响甲\"为未理解共享限额。"
+    },
+    {
+      "id": "p3-approval-flow",
+      "question": "从客户在渠道提交授信申请，到中台账本上出现一笔生效的授信，完整链路是什么？审批结果有哪几种回到中台的方式？",
+      "checks": [
+        "渠道准入：ChannelService.applyCredit（channelAllowsCredit 校验），透传到中台并保存渠道侧快照",
+        "中台建申请单：CreditService.apply 生成 CR- 单号、各层配置随单提交，调 SimulatorClient.submitApproval",
+        "结果回中台两条路：模拟服务回调 type=APPROVAL（ExternalResultController 分发），或补偿任务超时查单（CreditService.queryAndSettle）",
+        "onApprovalResult 落结论（批准额度可能低于申请额度）后 effectuate：INITIAL 建授信+子额度/集团/担保覆盖配置",
+        "审批结果只是数据：授信是否生效以中台账本为准（边界设计判例）"
+      ],
+      "category": "cross_system",
+      "notes": "漏掉补偿查单路径视为遗漏；答\"审批通过即额度生效\"未指明中台 effectuate 属于职责混淆。"
+    },
+    {
+      "id": "p3-freeze-rule",
+      "question": "授信因风险原因被冻结。此时已有借据的还款入账还会恢复占用吗？客户还能发起新提款吗？冻结和降额的限制有什么区别？",
+      "checks": [
+        "冻结是运营操作不走审批：CreditService.freeze 只置 frozen 标志",
+        "冻结时新增提款可用为 0（LimitService.availableForDrawdown 冻结分支），新提款全部拒绝",
+        "已有借据还款恢复占用照常执行：restoreByPrincipal 不检查 frozen，冻结不减占用也不碍恢复",
+        "解冻 unfreeze 后新增提款资格恢复",
+        "区别：冻结是资格开关（挡新增），降额 restricted 是余量不足（占用高于新上限），两者可叠加且语义不同"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"冻结后还款不恢复额度\"为错误（违反冻结只挡新增的规则）。"
+    },
+    {
+      "id": "p3-version-snapshot",
+      "question": "运营把采购贷年利率从 8% 改成 7.5% 之后，一张改动之前生成的报价单此时提交申请，按哪个利率与规则执行？代码靠什么机制保证？",
+      "checks": [
+        "按报价绑定的产品版本执行：报价快照记录 productVersionId（DrawdownService.quote → resolveVersion）",
+        "版本行不可变（ProductConfigVersion），配置变化时 sameRules 判定不一致则生成新版本号",
+        "apply 校验从 versionRepo 读报价绑定版本（validateAmountAndTerm(version,...)），不读当前配置",
+        "新配置只适用于新报价（新生成的报价绑定新版本）",
+        "渠道侧同样在申请单保存命中规则快照（channelRuleSnapshotJson），双方都可按快照核对争议"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"按当前配置执行\"为错误；说不出版本绑定机制视为未覆盖。"
+    },
+    {
+      "id": "p3-guarantee-restore",
+      "question": "一笔担保要求=开的 12 期借款，第三期提前归还本金 10 万元。四个额度层各恢复多少？恢复金额的依据是什么？",
+      "checks": [
+        "总授信层、产品子额度层、集团限额层各恢复 10 万（本金部分）",
+        "担保覆盖层按覆盖比例折算：10 万 × 80% = 8 万（LimitService.restoreByPrincipal 中 principalPortion × coverageRatio）",
+        "恢复依据是 Fineract 还款交易分配明细的本金部分（FineractClient.getRepaymentAllocation），不是还款总额",
+        "利息、费用部分不恢复任何层",
+        "台账在四层各写一条 RELEASE/PRINCIPAL_REPAID 流水，金额按层不同（担保层 8 万）"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"担保覆盖也恢复 10 万\"为未理解覆盖比例折算。"
+    }
+  ]
+}

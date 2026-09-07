@@ -6,6 +6,7 @@ import threading
 import unittest
 from pathlib import Path
 
+from business_code_agent.query_agent.claude_runtime import ClaudeCodeRuntime
 from business_code_agent.query_agent.runtime import RuntimeResult
 from business_code_agent.query_agent.service import QueryBusyError, QueryService
 from business_code_agent.schema import connect
@@ -17,8 +18,13 @@ class _FakeRuntime:
     def __init__(self):
         self.calls = []
 
-    def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None):
-        self.calls.append({"question": question, "workspace": workspace, "session_id": session_id})
+    def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None, repositories=None):
+        self.calls.append({
+            "question": question,
+            "workspace": workspace,
+            "session_id": session_id,
+            "repositories": set(repositories) if repositories is not None else None,
+        })
         event = {"sequence": 1, "eventType": "tool_use", "payload": {"name": "Read", "path": "CLAUDE.md"}}
         if event_callback:
             event_callback(event)
@@ -148,7 +154,7 @@ class QueryRuntimeServiceTest(unittest.TestCase):
         class BrokenRuntime:
             runtime_name = "BROKEN"
 
-            def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None):
+            def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None, repositories=None):
                 raise RuntimeError("runtime unavailable")
 
         with tempfile.TemporaryDirectory() as folder:
@@ -163,6 +169,122 @@ class QueryRuntimeServiceTest(unittest.TestCase):
             self.assertIn("runtime unavailable", row[1])
             self.assertEqual(["user"], [item[0] for item in db.execute("SELECT role FROM query_message")])
             db.close()
+
+    def test_list_conversations_returns_workspace_dimension(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "project.json"
+            config.write_text(json.dumps({
+                "project": {"id": "dim-test", "name": "Dim Test"},
+                "knowledge": {"baselineRoot": "knowledge/baseline"},
+                "repositories": [],
+            }), encoding="utf-8")
+            db_path = root / "db.sqlite"
+            db = connect(str(db_path))
+            service = QueryService(db, db_path=str(db_path), project_config=config, runtime=_FakeRuntime())
+            result = service.query("问题")
+            page = service.list_conversations()
+            self.assertEqual([result["conversationId"]], [item["conversationId"] for item in page["items"]])
+            self.assertEqual("dim-test", page["items"][0]["workspaceId"])
+            db.close()
+
+    def test_delete_conversation_removes_records_and_rejects_active_run(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "db.sqlite")
+            db = connect(path)
+            service = QueryService(db, db_path=path, runtime=_FakeRuntime())
+            target = service.query("要删除的会话")
+            keep = service.query("要保留的会话")
+
+            running_id = "RUN-running"
+            db.execute(
+                "INSERT INTO query_run(id,conversation_id,runtime,question,status,started_at) VALUES (?,?,?,?,?,?)",
+                (running_id, target["conversationId"], "FAKE_RUNTIME", "还在跑", "running", "2026-01-01T00:00:00+00:00"),
+            )
+            with self.assertRaises(QueryBusyError):
+                service.delete_conversation(target["conversationId"])
+            db.execute("UPDATE query_run SET status='completed' WHERE id=?", (running_id,))
+
+            result = service.delete_conversation(target["conversationId"])
+            self.assertTrue(result["deleted"])
+            self.assertEqual([keep["conversationId"]], [item["conversationId"] for item in service.list_conversations()["items"]])
+            self.assertEqual(0, db.execute("SELECT count(*) FROM query_run WHERE conversation_id=?", (target["conversationId"],)).fetchone()[0])
+            self.assertEqual(0, db.execute("SELECT count(*) FROM query_message WHERE conversation_id=?", (target["conversationId"],)).fetchone()[0])
+            self.assertEqual(0, db.execute("SELECT count(*) FROM query_conversation WHERE id=?", (target["conversationId"],)).fetchone()[0])
+            with self.assertRaises(KeyError):
+                service.delete_conversation(target["conversationId"])
+            with self.assertRaises(KeyError):
+                service.get_conversation(target["conversationId"])
+            db.close()
+
+    @staticmethod
+    def _scope_project_config(root: Path) -> Path:
+        config = root / "project.json"
+        config.write_text(json.dumps({
+            "project": {"id": "scope-test", "name": "Scope Test"},
+            "knowledge": {"baselineRoot": "knowledge/baseline"},
+            "systems": [{"id": "s-channel", "name": "渠道系统"}, {"id": "s-middle", "name": "贷款中台系统"}],
+            "repositories": [{"id": "r-h5", "gitUrl": "unused", "localPath": "repos/h5"},
+                             {"id": "r-middle", "gitUrl": "unused", "localPath": "repos/middle"}],
+            "applications": [
+                {"id": "a-h5", "name": "渠道H5", "systemId": "s-channel", "repositoryId": "r-h5",
+                 "sourceRoot": ".", "type": "FRONTEND"},
+                {"id": "a-middle", "name": "中台", "systemId": "s-middle", "repositoryId": "r-middle",
+                 "sourceRoot": ".", "type": "BACKEND"},
+            ],
+        }), encoding="utf-8")
+        return config
+
+    def test_scope_narrows_runtime_persists_and_resets_session_on_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db_path = root / "db.sqlite"
+            db = connect(str(db_path))
+            runtime = _FakeRuntime()
+            service = QueryService(db, db_path=str(db_path), project_config=self._scope_project_config(root), runtime=runtime)
+            first = service.query("跨系统怎么调用？", scope={"systemIds": ["s-channel"], "repositoryIds": []})
+            self.assertEqual({"r-h5"}, runtime.calls[0]["repositories"])
+            self.assertIsNone(runtime.calls[0]["session_id"])
+            self.assertEqual({"systemIds": ["s-channel"], "repositoryIds": ["r-h5"]}, first["scope"])
+
+            service.query("继续追问", conversation_id=first["conversationId"], scope={"systemIds": ["s-channel"], "repositoryIds": []})
+            self.assertEqual("session-1", runtime.calls[1]["session_id"])
+
+            third = service.query("换成中台", conversation_id=first["conversationId"], scope={"systemIds": ["s-middle"], "repositoryIds": []})
+            self.assertIsNone(runtime.calls[2]["session_id"])
+            self.assertEqual({"r-middle"}, runtime.calls[2]["repositories"])
+            self.assertEqual({"systemIds": ["s-middle"], "repositoryIds": ["r-middle"]}, third["scope"])
+
+            detail = service.get_run(third["runId"])
+            self.assertEqual({"systemIds": ["s-middle"], "repositoryIds": ["r-middle"]}, detail["scope"])
+            page = service.list_conversations()
+            self.assertEqual({"systemIds": ["s-middle"], "repositoryIds": ["r-middle"]}, page["items"][0]["scope"])
+            with self.assertRaises(ValueError):
+                service.query("未知范围", conversation_id=first["conversationId"], scope={"systemIds": ["s-nope"], "repositoryIds": []})
+            db.close()
+
+    def test_claude_command_scope_limits_directories_and_prompt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "repos" / "alpha").mkdir(parents=True)
+            (root / "repos" / "beta").mkdir()
+            (root / "knowledge" / "baseline").mkdir(parents=True)
+            runtime = ClaudeCodeRuntime()
+
+            command = runtime.build_command("问题", workspace=root, repositories={"alpha"})
+            prompt = command[command.index("--append-system-prompt") + 1]
+            self.assertIn("代码仓库 alpha", prompt)
+            self.assertNotIn("代码仓库 beta", prompt)
+            self.assertIn("本轮调查已限定范围", prompt)
+            directories = command[command.index("--add-dir") + 1: command.index("-p")]
+            joined = "\n".join(directories)
+            self.assertIn(str((root / "repos" / "alpha").resolve()), joined)
+            self.assertNotIn(str((root / "repos" / "beta").resolve()), joined)
+
+            unscoped = runtime.build_command("问题", workspace=root)
+            prompt_all = unscoped[unscoped.index("--append-system-prompt") + 1]
+            self.assertIn("代码仓库 beta", prompt_all)
+            self.assertNotIn("本轮调查已限定范围", prompt_all)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 from .claude_runtime import ClaudeCodeRuntime
 from .runtime import RuntimeErrorBase, normalize_runtime_result
-from .workspace import Workspace, WorkspaceManager
+from .workspace import Workspace, WorkspaceManager, _safe_name
 
 
 logger = logging.getLogger(__name__)
@@ -98,12 +98,17 @@ class QueryService:
         history=(),
         event_callback=None,
         run_callback=None,
+        scope=None,
     ) -> dict[str, Any]:
         """Run one question and persist the complete runtime exchange.
 
         ``history`` remains an accepted argument for old clients, but is
         deliberately ignored. Session recovery belongs to Claude Code's
         ``--resume`` mechanism, not to Python-side prompt reconstruction.
+
+        ``scope`` optionally narrows the investigation to configured systems
+        and repositories: ``{"systemIds": [...], "repositoryIds": [...]}``.
+        ``None``/empty means every mounted source stays authorized.
         """
         del history
         question = str(question or "").strip()
@@ -113,6 +118,7 @@ class QueryService:
         logger.info("查询请求: conversation=%s question_characters=%s", conversation_id or "new", len(question))
         workspace = self.workspace_manager.ensure()
         logger.info("查询工作区就绪: workspace=%s path=%s", workspace.id, workspace.path)
+        effective_scope = self._normalize_scope(scope)
         run_id = f"RUN-{uuid.uuid4().hex}"
         started_at = _now()
         started_clock = time.monotonic()
@@ -121,6 +127,15 @@ class QueryService:
         self.db.execute("BEGIN IMMEDIATE")
         try:
             conversation = self._get_or_create_conversation(conversation_id, workspace)
+            stored_scope = _load_json(conversation.get("scope_json"), None)
+            if effective_scope != stored_scope:
+                # 范围变更不续用旧 runtime 会话：resumed session 可能保留上一范围的目录授权。
+                self.db.execute(
+                    "UPDATE query_conversation SET scope_json=?,runtime_session_id=NULL,updated_at=? WHERE id=?",
+                    (_json(effective_scope) if effective_scope else None, _now(), conversation["id"]),
+                )
+                conversation["runtime_session_id"] = None
+                conversation["scope_json"] = _json(effective_scope) if effective_scope else None
             active = self.db.execute(
                 "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
                 (conversation["id"],),
@@ -130,9 +145,10 @@ class QueryService:
             self.db.execute(
                 """INSERT INTO query_run
                    (id,conversation_id,runtime,runtime_session_id,question,status,answer,
-                    error,usage_json,started_at,completed_at,duration_ms)
-                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,NULL,0)""",
-                (run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"], question, started_at),
+                    error,usage_json,scope_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,NULL,0)""",
+                (run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"], question,
+                 _json(effective_scope) if effective_scope else None, started_at),
             )
             self._save_message(conversation["id"], run_id, "user", question, started_at)
             self.db.commit()
@@ -169,6 +185,7 @@ class QueryService:
                 session_id=conversation["runtime_session_id"],
                 event_callback=on_event,
                 cancel_check=lambda: self.db.execute("SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
+                repositories={_safe_name(repo) for repo in effective_scope["repositoryIds"]} if effective_scope else None,
             )
             result = normalize_runtime_result(raw_result)
         except Exception as exc:
@@ -229,10 +246,49 @@ class QueryService:
             "sessionId": session_id,
             "workspaceId": workspace.id,
             "status": final_status,
+            "scope": effective_scope,
             "answer": result.answer,
             "events": emitted,
             "usage": result.usage,
         }
+
+    def _normalize_scope(self, scope: Any) -> dict[str, list[str]] | None:
+        """校验并展开查询范围；返回 None 表示不限定（全部资料）。
+
+        系统会展开成对应工程集合；repositoryIds 可以直接指定工程。任何未在
+        项目配置中登记的 id 都直接拒绝，避免静默放大或缩小调查范围。
+        """
+        if scope in (None, "", {}):
+            return None
+        if not isinstance(scope, dict):
+            raise ValueError("scope 必须是对象，形如 {systemIds: [], repositoryIds: []}")
+        raw_systems = scope.get("systemIds") or []
+        raw_repositories = scope.get("repositoryIds") or []
+        if not isinstance(raw_systems, list) or not isinstance(raw_repositories, list):
+            raise ValueError("scope.systemIds 和 scope.repositoryIds 必须是数组")
+        system_ids = sorted({str(item).strip() for item in raw_systems if str(item).strip()})
+        repository_ids = sorted({str(item).strip() for item in raw_repositories if str(item).strip()})
+        if not system_ids and not repository_ids:
+            return None
+
+        config = self.workspace_manager.config or {}
+        configured_systems = {str(item.get("id") or "").strip()
+                              for item in config.get("systems") or [] if isinstance(item, dict)}
+        configured_repositories = {str(item.get("id") or "").strip()
+                                   for item in config.get("repositories") or [] if isinstance(item, dict)}
+        application_pairs = [(str(item.get("systemId") or "").strip(), str(item.get("repositoryId") or "").strip())
+                             for item in config.get("applications") or [] if isinstance(item, dict)]
+        for system_id in system_ids:
+            if system_id not in configured_systems:
+                raise ValueError(f"scope 包含未配置的系统: {system_id}")
+        for repository_id in repository_ids:
+            if repository_id not in configured_repositories:
+                raise ValueError(f"scope 包含未配置的工程: {repository_id}")
+        effective = set(repository_ids)
+        for system_id, repo_id in application_pairs:
+            if system_id in system_ids and repo_id:
+                effective.add(repo_id)
+        return {"systemIds": system_ids, "repositoryIds": sorted(effective)}
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         self.db.execute("UPDATE query_run SET status='cancelling' WHERE id=? AND status='running'", (run_id,))
@@ -268,6 +324,7 @@ class QueryService:
             "workspaceId": conversation["workspace_id"] if conversation else None,
             "question": value["question"],
             "status": value["status"],
+            "scope": _load_json(value["scope_json"], None),
             "answer": value["answer"],
             "error": value["error"],
             "usage": _load_json(value["usage_json"], {}),
@@ -286,6 +343,30 @@ class QueryService:
         ).fetchall()
         return {"conversationId": conversation_id, "items": [self.get_run(row["id"]) for row in rows]}
 
+    def delete_conversation(self, conversation_id: str) -> dict[str, Any]:
+        if not self.db.execute("SELECT 1 FROM query_conversation WHERE id=?", (conversation_id,)).fetchone():
+            raise KeyError(conversation_id)
+        active = self.db.execute(
+            "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
+            (conversation_id,),
+        ).fetchone()
+        if active:
+            raise QueryBusyError(active["id"])
+        self.db.execute(
+            "DELETE FROM query_event WHERE run_id IN (SELECT id FROM query_run WHERE conversation_id=?)",
+            (conversation_id,),
+        )
+        self.db.execute(
+            "DELETE FROM query_feedback WHERE run_id IN (SELECT id FROM query_run WHERE conversation_id=?)",
+            (conversation_id,),
+        )
+        self.db.execute("DELETE FROM query_message WHERE conversation_id=?", (conversation_id,))
+        self.db.execute("DELETE FROM query_run WHERE conversation_id=?", (conversation_id,))
+        self.db.execute("DELETE FROM query_conversation WHERE id=?", (conversation_id,))
+        self.db.commit()
+        logger.info("会话删除: conversation=%s", conversation_id)
+        return {"conversationId": conversation_id, "deleted": True}
+
     def list_conversations(self, limit: int = 20, cursor: str | None = None) -> dict[str, Any]:
         limit = max(1, min(int(limit), 100))
         args = []
@@ -301,8 +382,8 @@ class QueryService:
             args.extend(position)
         args.append(limit + 1)
         rows = self.db.execute(
-            f"""SELECT r.id,r.conversation_id,r.question,r.status,r.started_at
-                FROM query_run r
+            f"""SELECT r.id,r.conversation_id,r.question,r.status,r.started_at,c.workspace_id,c.scope_json
+                FROM query_run r JOIN query_conversation c ON c.id=r.conversation_id
                 WHERE r.id=(SELECT latest.id FROM query_run latest
                             WHERE latest.conversation_id=r.conversation_id
                             ORDER BY latest.started_at DESC,latest.id DESC LIMIT 1)
@@ -312,7 +393,8 @@ class QueryService:
         page = rows[:limit]
         return {
             "items": [{"id": row["id"], "runId": row["id"], "conversationId": row["conversation_id"],
-                       "question": row["question"], "status": row["status"], "startedAt": row["started_at"]}
+                       "question": row["question"], "status": row["status"], "startedAt": row["started_at"],
+                       "workspaceId": row["workspace_id"], "scope": _load_json(row["scope_json"], None)}
                       for row in page],
             "nextCursor": _json([page[-1]["started_at"], page[-1]["id"]]) if len(rows) > limit else None,
         }
@@ -384,6 +466,7 @@ class QueryService:
         return {
             "project": project,
             "workspace": workspace_info,
+            "sources": self.workspace_manager.source_summary(),
             "repositories": repositories,
             "applications": applications,
             "counts": {
@@ -419,7 +502,7 @@ class QueryService:
         now = _now()
         if conversation_id:
             row = self.db.execute(
-                "SELECT id,runtime,runtime_session_id,workspace_id FROM query_conversation WHERE id=?",
+                "SELECT id,runtime,runtime_session_id,workspace_id,scope_json FROM query_conversation WHERE id=?",
                 (conversation_id,),
             ).fetchone()
             if row:

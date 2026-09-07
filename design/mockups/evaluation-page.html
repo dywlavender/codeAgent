@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>效果验证 · 设计稿 v5（双面板对照）</title>
+<style>
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+  --canvas: #F7F7F6; --raised: #FFFFFF; --well: #F3F3F2;
+  --border: #E4E4E2; --border-strong: #CFCECB;
+  --ink: #26251F; --secondary: #6F6E68; --faint: #A5A29B;
+  --brand: #1B6B65; --ok: #1B7A46; --danger: #A53831;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font: 14px/1.7 var(--font); }
+
+.spec-bar { position: sticky; top: 0; z-index: 9; padding: 9px 20px; background: #26251F; color: #F4F2ED; font-size: 12.5px; }
+.spec-bar b { font-weight: 600; margin-right: 12px; }
+
+.page { max-width: 700px; margin: 0 auto; padding: 30px 24px 100px; }
+.screen { margin-top: 50px; }
+.screen:first-of-type { margin-top: 0; }
+.screen-label {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 14px;
+  font: 600 11px var(--mono); letter-spacing: .1em; color: var(--faint);
+}
+.screen-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.run { background: #B5892B; } .dot.bad { background: var(--danger); } .dot.idle { background: var(--faint); }
+.pulse { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #C9C4BA; border-top-color: #6F6E68; animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--secondary); } .faint { color: var(--faint); font-size: 12px; }
+.good { color: var(--ok); } .bad { color: var(--danger); }
+.btn { font: 500 13px var(--font); padding: 5px 13px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--raised); color: var(--ink); }
+.btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+a.quiet { color: var(--brand); text-decoration: none; }
+
+/* —— 任务头 —— */
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.head h2 { margin: 0; font-size: 17px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.head h2 .status { font-weight: 500; font-size: 13px; color: var(--secondary); display: inline-flex; gap: 6px; align-items: center; }
+.head .actions { display: flex; gap: 8px; }
+.sub { font-size: 12.5px; color: var(--secondary); margin: 3px 0 0; }
+.sub .sep { color: var(--faint); margin: 0 6px; }
+
+/* —— 双面板对照：核心构件 —— */
+.versus { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0 0; }
+.panel { background: var(--raised); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px 16px; }
+.panel .arm { font-size: 12.5px; font-weight: 550; color: var(--secondary); display: flex; gap: 7px; align-items: center; margin-bottom: 10px; }
+.panel .stat { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; }
+.panel .stat em { font-style: normal; color: var(--faint); font-size: 12px; width: 52px; flex-shrink: 0; }
+.panel .stat b { font: 600 17px var(--mono); font-variant-numeric: tabular-nums; }
+.panel .stat .unit { font-size: 12px; color: var(--faint); }
+.delta-line { font-size: 12.5px; color: var(--secondary); margin: 12px 2px 0; }
+.delta-line b { font-family: var(--mono); font-weight: 550; }
+.delta-line .good { color: var(--ok); } .delta-line .bad { color: var(--danger); }
+.delta-line .src { color: var(--faint); }
+.delta-line a { color: var(--brand); text-decoration: none; }
+
+/* —— 逐题 —— */
+.list-h { font-size: 13px; font-weight: 600; margin: 26px 0 4px; }
+.qrow { display: flex; align-items: baseline; gap: 10px; padding: 10px 6px; margin: 0 -6px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
+.qrow:hover { background: rgba(0,0,0,.02); }
+.qrow b { font-weight: 550; }
+.qrow .kind { color: var(--faint); font-size: 12px; }
+.qrow .score { margin-left: auto; font: 12.5px var(--mono); color: var(--secondary); }
+.qrow .caret { color: var(--faint); font-size: 10px; }
+
+/* —— 展开详情（保持 v3/v4 的两栏对照）—— */
+.detail { margin: 6px -6px 0; padding: 14px 18px 16px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; }
+.detail .q { font-size: 12.5px; color: var(--secondary); margin: 0 0 12px; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 14px; }
+.answer h4 { margin: 0 0 6px; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.answer h4 .mono { color: var(--faint); font-weight: 400; font-size: 11.5px; margin-left: auto; }
+.answer .body { font-size: 13px; line-height: 1.9; max-height: 220px; overflow: hidden; position: relative; }
+.answer .body p { margin: 0 0 8px; }
+.answer .body code { background: var(--well); border-radius: 4px; padding: 1px 5px; font: .87em var(--mono); color: #2F6382; }
+.answer .fade { position: absolute; bottom: 0; left: 0; right: 0; height: 36px; background: linear-gradient(transparent, var(--raised)); }
+.answer .foot { margin-top: 6px; font-size: 12px; }
+.answer .foot a { color: var(--brand); text-decoration: none; }
+.checks-h { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+.check { padding: 9px 0; border-top: 1px solid var(--border); display: grid; grid-template-columns: minmax(110px, 0.8fr) 1fr 1fr; gap: 4px 16px; font-size: 12.5px; align-items: start; }
+.check .std { color: var(--secondary); }
+.check .mark { font-weight: 600; margin-right: 5px; }
+.check .mark.yes { color: var(--ok); } .check .mark.no { color: var(--danger); }
+.review-bar { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 14px; background: var(--well); border-radius: 10px; flex-wrap: wrap; }
+.review-bar .seg2 { display: inline-flex; gap: 2px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.review-bar .seg2 span { padding: 2px 11px; border-radius: 6px; font-size: 12px; color: var(--secondary); cursor: pointer; }
+.review-bar .seg2 span.on { background: var(--ink); color: #fff; }
+.review-bar input { flex: 1; min-width: 170px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font: 12.5px var(--font); background: var(--raised); }
+
+/* —— 运行中：同样的双面板 —— */
+.panel .live { display: flex; gap: 7px; align-items: baseline; padding: 3px 0; font-size: 12.5px; color: var(--secondary); }
+
+/* —— S1 / 历史 —— */
+.s1 { max-width: 540px; margin: 0 auto; padding-top: 6vh; text-align: center; }
+.s1 h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+.s1 .sub { color: var(--secondary); font-size: 13.5px; margin: 0 0 26px; }
+.form { text-align: left; background: var(--raised); border: 1px solid var(--border); border-radius: 14px; padding: 4px 20px 16px; box-shadow: 0 1px 2px rgba(0,0,0,.03), 0 8px 24px rgba(0,0,0,.05); }
+.form-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.form-row:last-of-type { border-bottom: 0; }
+.form-label { width: 60px; flex-shrink: 0; font-size: 13px; color: var(--secondary); }
+.select-like { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; flex: 1; }
+.select-like .caret { color: var(--faint); }
+.seg { display: inline-flex; gap: 2px; }
+.seg span { padding: 3px 12px; border-radius: 7px; font-size: 12.5px; color: var(--secondary); cursor: pointer; }
+.seg span.on { background: var(--well); color: var(--ink); font-weight: 550; }
+.toggle { width: 32px; height: 19px; border-radius: 99px; background: var(--ink); position: relative; display: inline-block; }
+.toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; }
+.form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+.form-foot .hint { font-size: 12px; color: var(--faint); }
+
+.hist-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+.hist-row .name { font-weight: 550; }
+.hist-row .meta { font-size: 12px; color: var(--secondary); }
+.hist-row .score { margin-left: auto; font-size: 12px; color: var(--secondary); }
+.hist-row .score a { color: var(--brand); text-decoration: none; }
+
+@media (max-width: 640px) {
+  .versus, .answers, .check { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="spec-bar"><b>效果验证 · 设计稿 v5</b>布局做减法：对照 = 左右两块面板面对面对比，差异是面板下一行小字；逐题一行一题。没有五列表格、没有双层表头。</div>
+
+<div class="page">
+
+  <!-- S1 -->
+  <div class="screen">
+    <div class="screen-label">S1 · 发起（不变）</div>
+    <div class="s1">
+      <h1>发起对照验证</h1>
+      <p class="sub">同一组问题，分别不接入 / 接入知识主干作答，对比质量与成本。</p>
+      <div class="form">
+        <div class="form-row">
+          <span class="form-label">题库</span>
+          <span class="select-like">提款演示回归（4 题）<span class="caret">⌄</span></span>
+        </div>
+        <div class="form-row">
+          <span class="form-label">轮次</span>
+          <span class="seg"><span>1</span><span class="on">2</span><span>3</span></span>
+        </div>
+        <div class="form-row">
+          <span class="form-label">模型初评</span>
+          <span class="toggle"></span>
+        </div>
+        <div class="form-row">
+          <span class="form-label">题目</span>
+          <span class="select-like" style="color:var(--secondary)">全部 4 题<span class="caret">⌄</span></span>
+        </div>
+        <div class="form-foot">
+          <span class="hint">16 次答题 · 最多 16 次初评</span>
+          <button class="btn primary">开始验证</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S2 运行中 -->
+  <div class="screen">
+    <div class="screen-label">S2 · 运行中（双面板看两组进度）</div>
+    <div class="head">
+      <h2>提款演示回归 <span class="status"><span class="pulse"></span> 运行中</span></h2>
+      <div class="actions"><button class="btn">停止</button></div>
+    </div>
+    <p class="sub">4 题 × 2 组 × 2 轮<span class="sep">·</span>已耗时 6 分<span class="sep">·</span>复核 0/16</p>
+
+    <div class="versus">
+      <div class="panel">
+        <div class="arm"><span class="dot idle"></span> 无主干</div>
+        <div class="stat"><em>答题</em><b>4</b><span class="unit">/ 8</span></div>
+        <div class="stat"><em>初评</em><b>2</b><span class="unit">/ 8</span></div>
+        <div class="live"><span class="pulse"></span> 正在作答 flow · 第 2 轮（68s）</div>
+      </div>
+      <div class="panel">
+        <div class="arm"><span class="dot ok"></span> 有主干</div>
+        <div class="stat"><em>答题</em><b>5</b><span class="unit">/ 8</span></div>
+        <div class="stat"><em>初评</em><b>2</b><span class="unit">/ 8</span></div>
+        <div class="live"><span class="pulse"></span> 正在作答 coupon · 第 1 轮（31s）</div>
+      </div>
+    </div>
+
+    <div class="list-h">逐题</div>
+    <div class="qrow"><b>flow</b> <span class="kind">业务流程 · 第 1 轮</span><span class="score">✓ 64s · ✓ 46s · 已初评</span><span class="caret">▸</span></div>
+    <div class="qrow"><b>coupon</b> <span class="kind">普通代码 · 第 1 轮</span><span class="score">✓ 52s · ⟳ 31s</span><span class="caret">▸</span></div>
+    <div class="qrow"><b>preconditions</b> <span class="kind">业务规则 · 第 1 轮</span><span class="score">排队 · 排队</span><span class="caret">▸</span></div>
+  </div>
+
+  <!-- S3 完成 -->
+  <div class="screen">
+    <div class="screen-label">S3 · 完成（双面板 + 一行差异 + 逐题）</div>
+    <div class="head">
+      <h2>提款演示回归 <span class="status"><span class="dot ok"></span> 已完成</span></h2>
+      <div class="actions">
+        <button class="btn">重新初评</button>
+        <button class="btn">导出报告</button>
+        <button class="btn">再跑一轮</button>
+      </div>
+    </div>
+    <p class="sub">4 题 × 2 组 × 1 轮<span class="sep">·</span>昨天 23:12<span class="sep">·</span>6 分 08 秒<span class="sep">·</span>复核 4/8</p>
+
+    <div class="versus">
+      <div class="panel">
+        <div class="arm"><span class="dot idle"></span> 无主干</div>
+        <div class="stat"><em>检查项</em><b>19/20</b></div>
+        <div class="stat"><em>耗时</em><b>47.9</b><span class="unit">秒</span></div>
+        <div class="stat"><em>工具</em><b>52</b></div>
+      </div>
+      <div class="panel">
+        <div class="arm"><span class="dot ok"></span> 有主干</div>
+        <div class="stat"><em>检查项</em><b>19/20</b></div>
+        <div class="stat"><em>耗时</em><b>48.6</b><span class="unit">秒</span></div>
+        <div class="stat"><em>工具</em><b>47</b></div>
+      </div>
+    </div>
+    <p class="delta-line">
+      有主干 vs 无主干：检查项 <b>0</b> · 额外问题 <b class="good">−3</b> · 耗时 <b class="bad">+0.7s</b> · 工具 <b>−5</b>
+      　<span class="src">来源：复核记录（4 配对）· <a href="#">改看模型初评</a></span>
+    </p>
+
+    <div class="list-h">逐题</div>
+    <div class="qrow"><b>flow</b> <span class="kind">业务流程</span><span class="score">5/5 · 5/5 · 已复核</span><span class="caret">▸</span></div>
+    <div class="qrow"><b>coupon</b> <span class="kind">普通代码</span><span class="score">5/5 · 5/5 · 已复核</span><span class="caret">▸</span></div>
+    <div class="qrow"><b>preconditions</b> <span class="kind">业务规则</span><span class="score">4/5 · 失败 · 待复核</span><span class="caret">▸</span></div>
+
+    <!-- 展开的 preconditions -->
+    <div class="detail">
+      <p class="q">用户没有实际签合同或完成纳税授权，当前实现能阻止他提交提款吗？请结合前端传值和后端检查说明。</p>
+      <div class="answers">
+        <div class="answer">
+          <h4><span class="dot idle"></span> 无主干 <span class="mono">41s · 12 工具</span></h4>
+          <div class="body">
+            <p><b>前端</b>　提交时合同号 <code>CT-10001</code>、授权号 <code>TA-10001</code> 为硬编码，不依赖签约/授权接口真实返回。</p>
+            <p><b>后端</b>　中台仅校验 contractId / taxAuthorizationId 非空，另校验银行卡、还款方式、还款日非空。</p>
+            <div class="fade"></div>
+          </div>
+          <div class="foot"><a href="#">调查记录（12）</a></div>
+        </div>
+        <div class="answer">
+          <h4><span class="dot bad"></span> 有主干 <span class="mono">调用失败</span></h4>
+          <div class="body"><p class="faint">请求超时，无答案。失败不计入质量对比。</p></div>
+          <div class="foot"><a href="#">调查记录（3）</a></div>
+        </div>
+      </div>
+      <div class="checks-h">判分（无主干初评）</div>
+      <div class="check">
+        <span class="std">前端硬编码合同/授权号</span>
+        <span class="cell"><span class="mark yes">✓</span>指出 CT-10001 / TA-10001 硬编码且不依赖真实返回。</span>
+      </div>
+      <div class="check">
+        <span class="std">仅非空校验，不核验真实性</span>
+        <span class="cell"><span class="mark yes">✓</span>明确“只判非空、无真实性核验”。</span>
+      </div>
+      <div class="review-bar">
+        <span class="seg2"><span class="on">复核无主干</span><span>复核有主干</span></span>
+        <input placeholder="额外问题（每行一条）">
+        <button class="btn primary">保存复核</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- S5 -->
+  <div class="screen">
+    <div class="screen-label">S5 · 历史</div>
+    <div class="hist-row">
+      <span class="name">提款演示回归</span>
+      <span class="meta">昨天 23:12 · 4 题 × 1 轮 · 64.04s / 45.52s</span>
+      <span class="score">复核 4/5 对 5/5 · <a href="#">查看</a> · <a href="#">导出</a></span>
+    </div>
+    <div class="hist-row">
+      <span class="name">提款演示回归</span>
+      <span class="meta">昨天 23:09 · 4 题 × 2 轮 · 47.9s / 48.6s</span>
+      <span class="score">初评 19/20 对 19/20 · <a href="#">查看</a> · <a href="#">导出</a></span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

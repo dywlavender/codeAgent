@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..schema import connect
+from ..evaluation.service import EvaluationService
 from .service import QueryBusyError, QueryRuntimeError, QueryService
 
 
@@ -58,11 +59,13 @@ def make_server(
     port: int = 8082,
     *,
     project_config: str | None = None,
+    evaluation_service: EvaluationService | None = None,
 ):
     static_root = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
     admin_access = _admin_access(project_config)
     if host not in {"127.0.0.1", "localhost", "::1"} and not admin_access["token"]:
         raise ValueError("non-loopback binding requires admin.apiTokenEnv and its environment variable")
+    evaluations = evaluation_service or EvaluationService(project_config=project_config)
 
     class Handler(BaseHTTPRequestHandler):
         def _json(self, status, payload):
@@ -148,6 +151,29 @@ def make_server(
                     ))
                     return
 
+                if path == "/api/evaluations":
+                    if not self._require_admin():
+                        return
+                    body = self._body()
+                    result = evaluations.start(body)
+                    self._json(202 if not result.get("duplicate") else 200, result)
+                    return
+                if path == "/api/evaluation-suites":
+                    if not self._require_admin():
+                        return
+                    body = self._body()
+                    self._json(201, evaluations.create_suite(body))
+                    return
+                evaluation_action = re.fullmatch(r"/api/evaluations/([^/]+)/(cancel|rejudge)", path)
+                if evaluation_action:
+                    if not self._require_admin():
+                        return
+                    eval_id, action = evaluation_action.group(1), evaluation_action.group(2)
+                    body = self._body() if action == "rejudge" else {}
+                    result = evaluations.cancel(eval_id) if action == "cancel" else evaluations.rejudge(eval_id)
+                    self._json(202, result)
+                    return
+
                 if path not in {"/api/query", "/api/query/stream"}:
                     self._json(404, {"error": "not found"})
                     return
@@ -155,6 +181,9 @@ def make_server(
                 body = self._body()
                 question = body.get("question")
                 conversation_id = body.get("conversationId")
+                scope = body.get("scope")
+                if scope is not None and not isinstance(scope, dict):
+                    raise ValueError("scope 必须是对象，形如 {systemIds: [], repositoryIds: []}")
                 service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                 if path == "/api/query/stream":
                     stream_started = True
@@ -163,6 +192,7 @@ def make_server(
                         result = service.query(
                             question,
                             conversation_id=conversation_id,
+                            scope=scope,
                             event_callback=lambda event: self._sse("event", event),
                             run_callback=lambda value: self._sse("run", value),
                         )
@@ -177,7 +207,7 @@ def make_server(
                             pass
                     return
 
-                self._json(200, service.query(question, conversation_id=conversation_id))
+                self._json(200, service.query(question, conversation_id=conversation_id, scope=scope))
             except QueryBusyError as exc:
                 self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
@@ -201,10 +231,69 @@ def make_server(
                 if service:
                     service.db.close()
 
+        def do_PUT(self):
+            try:
+                path = urlparse(self.path).path
+                suite_match = re.fullmatch(r"/api/evaluation-suites/([^/]+)", path)
+                if suite_match:
+                    if not self._require_admin():
+                        return
+                    body = self._body()
+                    self._json(200, evaluations.update_suite(suite_match.group(1), body))
+                    return
+                review_match = re.fullmatch(r"/api/evaluations/([^/]+)/reviews/([^/]+)", path)
+                if review_match:
+                    if not self._require_admin():
+                        return
+                    body = self._body()
+                    self._json(200, evaluations.save_review(review_match.group(1), review_match.group(2), body))
+                    return
+                self._json(404, {"error": "not found"})
+            except (KeyError, ValueError, json.JSONDecodeError) as exc:
+                self._json(400, {"error": str(exc)})
+            except Exception as exc:
+                logger.exception("评测接口内部错误: %s", type(exc).__name__)
+                self._json(500, {"error": _user_facing_internal_error(exc), "type": type(exc).__name__})
+
         def do_GET(self):
             service = None
             try:
                 parsed = urlparse(self.path)
+                if parsed.path == "/api/evaluations/setup":
+                    setup = evaluations.setup()
+                    setup["adminAuthRequired"] = admin_access["token"] is not None
+                    self._json(200, setup)
+                    return
+                if parsed.path == "/api/evaluation-suites":
+                    self._json(200, evaluations.list_suites())
+                    return
+                if parsed.path == "/api/evaluations":
+                    self._json(200, evaluations.list_evaluations())
+                    return
+                case_match = re.fullmatch(r"/api/evaluations/([^/]+)/cases/([^/]+)/repeats/(\d+)", parsed.path)
+                if case_match:
+                    self._json(200, evaluations.get_case(case_match.group(1), case_match.group(2),
+                                                        int(case_match.group(3))))
+                    return
+                source_match = re.fullmatch(r"/api/evaluations/([^/]+)/sources/([^/]+)", parsed.path)
+                if source_match:
+                    params = parse_qs(parsed.query)
+                    self._json(200, evaluations.read_source(
+                        source_match.group(1), source_match.group(2),
+                        params.get("path", [""])[0],
+                        int(params.get("start", ["1"])[0]),
+                        int(params.get("end", ["0"])[0]) or None,
+                    ))
+                    return
+                report_match = re.fullmatch(r"/api/evaluations/([^/]+)/report", parsed.path)
+                if report_match:
+                    source = parse_qs(parsed.query).get("source", ["review"])[0]
+                    self._json(200, evaluations.export_report(report_match.group(1), source))
+                    return
+                evaluation_match = re.fullmatch(r"/api/evaluations/([^/]+)", parsed.path)
+                if evaluation_match:
+                    self._json(200, evaluations.get_evaluation(evaluation_match.group(1)))
+                    return
                 if parsed.path == "/api/workspace":
                     service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
                     self._json(200, {**service.workspace_summary(), "adminAuthRequired": admin_access["token"] is not None})
@@ -282,6 +371,27 @@ def make_server(
                 self._json(404, {"error": str(exc)})
             except (ValueError, json.JSONDecodeError) as exc:
                 self._json(400, {"error": str(exc)})
+            finally:
+                if service:
+                    service.db.close()
+
+        def do_DELETE(self):
+            service = None
+            try:
+                path = urlparse(self.path).path
+                conversation_match = re.fullmatch(r"/api/conversations/([^/]+)", path)
+                if conversation_match:
+                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    self._json(200, service.delete_conversation(conversation_match.group(1)))
+                    return
+                self._json(404, {"error": "not found"})
+            except QueryBusyError as exc:
+                self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
+            except KeyError:
+                self._json(404, {"error": "会话不存在或已删除"})
+            except Exception as exc:
+                logger.exception("删除会话内部错误: %s", type(exc).__name__)
+                self._json(500, {"error": _user_facing_internal_error(exc), "type": type(exc).__name__})
             finally:
                 if service:
                     service.db.close()

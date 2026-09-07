@@ -1,255 +1,83 @@
 import React, { useEffect, useState } from "react";
-import { MagnifyingGlass } from "@phosphor-icons/react";
-import {
-  Button, Card, Descriptions, Empty, Flex, Input, Segmented, Skeleton,
-  Splitter, Tag, Typography,
-} from "antd";
+import { Alert, Button, Empty, Flex, Input, Segmented, Skeleton, Tag, Typography } from "antd";
 import { request } from "../lib/api.js";
 
-const TYPE_CONFIG = {
-  代码: {
-    endpoint: "/api/code/search?q=",
-    placeholder: "搜索类、方法或字段，如 repayType",
-    empty: "换一个 Symbol 或字段名再试。",
-    countKey: "symbols",
-    noun: "Symbols",
-    initialQuery: "repayType",
-  },
-  业务知识: {
-    endpoint: "/api/knowledge/entities?q=",
-    placeholder: "搜索业务术语、能力、流程、规则或关系",
-    empty: "还没有业务知识。请在管理页面导入业务基线。",
-    countKey: "businessKnowledge",
-    noun: "Knowledge",
-    initialQuery: "",
-  },
+const TYPES = { repository: "代码仓库", baseline: "业务基线", requirements: "需求原文" };
+const STATUS = {
+  READABLE: ["green", "目录可读"], EMPTY: ["orange", "空目录"],
+  MISSING: ["red", "目录不存在"], UNREADABLE: ["red", "目录无法读取"],
+};
+const PURPOSE = {
+  repository: "用于核实当前实现、方法逻辑和跨仓库调用关系。",
+  baseline: "用于理解业务含义、系统职责和调查入口。",
+  requirements: "用于查阅需求原文，与当前代码实现对照。",
 };
 
-export function LibraryPage({ workspace }) {
-  const [type, setType] = useState("代码");
-  const config = TYPE_CONFIG[type];
-  const [items, setItems] = useState([]);
+export function LibraryPage() {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState(config.initialQuery);
-  const [selectedId, setSelectedId] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-
+  const [revision, setRevision] = useState(0);
+  const [type, setType] = useState("all");
+  const [query, setQuery] = useState("");
   useEffect(() => {
-    let alive = true;
-    // 初始与切换类型都按当前查询词搜索，避免首屏永远是空列表
-    setLoading(true);
-    setError("");
-    setSelectedId(null);
-    setDetail(null);
-    request(`${config.endpoint}${encodeURIComponent(config.initialQuery)}`).then((data) => {
-      if (alive) setItems(data.items || []);
-    }).catch((reason) => {
-      if (alive) setError(reason.message);
-    }).finally(() => {
-      if (alive) setLoading(false);
-    });
-    return () => { alive = false; };
-  }, [type]);
-
-  async function search(nextQuery = query) {
-    setLoading(true);
-    setError("");
-    setSelectedId(null);
-    setDetail(null);
-    try {
-      setItems((await request(`${config.endpoint}${encodeURIComponent(nextQuery)}`)).items || []);
-    } catch (reason) {
-      setError(reason.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function select(item) {
-    if (item.id === selectedId) { setSelectedId(null); setDetail(null); return; }
-    setSelectedId(item.id);
-    setDetail(null);
-    if (type !== "代码") { setDetail({ item }); return; }
-    setDetailLoading(true);
-    try {
-      const data = await request(`/api/code/symbol/${encodeURIComponent(item.id)}`);
-      setDetail(data);
-    } catch (reason) {
-      setDetail({ item, error: reason.message });
-    } finally {
-      setDetailLoading(false);
-    }
-  }
-
+    let active = true;
+    setLoading(true); setError("");
+    request("/api/workspace").then((value) => { if (active) setData(value); })
+      .catch((reason) => { if (active) setError(reason.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [revision]);
+  const sources = data?.sources || [];
+  const visible = sources.filter((item) => (type === "all" || item.kind === type)
+    && (item.name + " " + item.path).toLowerCase().includes(query.trim().toLowerCase()));
   return (
-    <div className="page-wrap">
-      <div style={{ maxWidth: 1180, margin: "0 auto", width: "100%" }}>
-        <Typography.Title level={4} style={{ marginTop: 0, letterSpacing: "-.02em" }}>浏览知识库</Typography.Title>
-        <Flex gap={10} align="center" style={{ marginBottom: 14 }} wrap="wrap">
-          <Segmented
-            value={type}
-            onChange={(value) => setType(value)}
-            options={Object.keys(TYPE_CONFIG)}
-          />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onPressEnter={() => search()}
-            placeholder={config.placeholder}
-            prefix={<MagnifyingGlass size={15} style={{ color: "#a3a29c" }} />}
-            style={{ width: 320 }}
-            allowClear
-          />
-          <Button type="primary" onClick={() => search()} ghost>搜索</Button>
-          <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {workspace?.counts?.[config.countKey] ?? "…"} {config.noun}
-            </Typography.Text>
-          </span>
+    <div className="page-wrap" style={{ overflowY: "auto" }}>
+      <div style={{ width: "100%", maxWidth: 1180, margin: "0 auto" }}>
+        <Typography.Title level={4} style={{ marginTop: 0 }}>项目资料</Typography.Title>
+        <Typography.Paragraph type="secondary">
+          查看 Agent 的资料来源。问答直接读取这些目录中的文件，不依赖代码符号索引或结构化知识条目。
+        </Typography.Paragraph>
+        <Flex gap={12} wrap="wrap" align="center" style={{ marginBottom: 20 }}>
+          <Segmented value={type} onChange={setType} options={[
+            { value: "all", label: "全部" }, ...Object.entries(TYPES).map(([value, label]) => ({ value, label })),
+          ]} />
+          <Input aria-label="筛选资料名称或路径" placeholder="筛选名称或路径" allowClear
+            value={query} onChange={(event) => setQuery(event.target.value)} style={{ maxWidth: 320 }} />
+          <Button loading={loading} onClick={() => setRevision((value) => value + 1)}>刷新状态</Button>
         </Flex>
+        {error && <Alert type="error" showIcon title="无法读取资料状态" description={error} />}
+        {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : !error && <>
+          <Typography.Paragraph type="secondary">
+            {data?.project} · {sources.length} 个来源。刷新只检查本地状态，不会拉取代码或导入知识。
+          </Typography.Paragraph>
+          {!visible.length ? <Empty description={sources.length ? "没有匹配的资料" : "尚未配置资料，请联系管理员配置项目来源。"} />
+            : visible.map((item) => {
+              const [color, label] = STATUS[item.status] || ["default", "状态未知"];
+              return <section key={item.id} style={{ padding: "20px 0", borderTop: "1px solid #ebeae4" }}>
+                <Flex gap={8} align="center" wrap="wrap">
+                  <Typography.Text strong>{item.name}</Typography.Text>
+                  <Typography.Text type="secondary">{TYPES[item.kind]}</Typography.Text>
+                  <Tag color={color}>{label}</Tag>
+                  <Tag color={item.authorizationConfigured ? "default" : "orange"}>
+                    {item.authorizationConfigured ? "已配置目录授权" : "未配置目录授权"}
+                  </Tag>
+                </Flex>
+                <Typography.Paragraph copyable style={{ margin: "10px 0", overflowWrap: "anywhere" }}>
+                  {item.path}
+                </Typography.Paragraph>
+                <Typography.Text type="secondary">{PURPOSE[item.kind]}</Typography.Text>
+                {item.status !== "READABLE" && <Typography.Paragraph style={{ margin: "8px 0 0" }}>
+                  {item.status === "EMPTY" ? "目录中尚无资料，请补充文件后再使用。" : "请管理员检查项目配置、仓库同步结果或目录读取权限。"}
+                </Typography.Paragraph>}
+              </section>;
+            })}
+          <Typography.Paragraph type="secondary" style={{ marginTop: 24 }}>
+            目录状态由后端检查；授权状态表示启动参数配置，不代表已经通过模型工具访问验证。
+            结构化知识请在管理员的“业务知识维护”中查看。
+          </Typography.Paragraph>
+        </>}
       </div>
-
-      <Splitter style={{ flex: 1, minHeight: 0, maxWidth: 1180, margin: "0 auto", width: "100%", height: "calc(100dvh - 210px)" }}>
-        <Splitter.Panel defaultSize="42%" min="28%" max="60%">
-          <div className="result-list">
-            {error ? (
-              <Empty description={error} style={{ marginTop: 80 }} />
-            ) : loading ? (
-              <div style={{ padding: 16 }}><Skeleton active paragraph={{ rows: 8 }} /></div>
-            ) : items.length === 0 ? (
-              <Empty description={<span style={{ fontSize: 12.5 }}>{config.empty}</span>} style={{ marginTop: 80 }} />
-            ) : items.map((item) => (
-              <ResultRow key={item.id} item={item} type={type} active={item.id === selectedId} onSelect={() => select(item)} />
-            ))}
-          </div>
-        </Splitter.Panel>
-        <Splitter.Panel>
-          <div className="detail-scroll">
-            {!selectedId ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12.5 }}>在左侧选择一个条目查看详情</span>} style={{ marginTop: 120 }} />
-            ) : detailLoading && type === "代码" ? (
-              <Skeleton active paragraph={{ rows: 6 }} style={{ padding: 20 }} />
-            ) : detail ? (
-              type === "代码"
-                ? <CodeDetail item={items.find((i) => i.id === selectedId)} detail={detail} />
-                : <KnowledgeDetail type={type} item={detail.item || selectedRaw(items, selectedId)} />
-            ) : null}
-          </div>
-        </Splitter.Panel>
-      </Splitter>
     </div>
   );
-}
-
-function selectedRaw(items, id) {
-  return items.find((item) => item.id === id);
-}
-
-function rowTitle(item, type) {
-  return item.qualified_name || item.title || item.name || item.id;
-}
-
-function rowSubtitle(item, type) {
-  if (type === "代码") {
-    const facts = (item.summary || "").split(" ").filter(Boolean).length;
-    return `${item.kind || "SYMBOL"} · ${facts} 条事实`;
-  }
-  if (type === "业务知识") {
-    return `${item.definition || item.statement || ""}`;
-  }
-  return `${item.status || ""}`;
-}
-
-function statusColor(status) {
-  const value = String(status || "").toUpperCase();
-  if (["CONFIRMED", "VERIFIED", "ACTIVE", "READY"].includes(value)) return "green";
-  return "default";
-}
-
-function ResultRow({ item, type, active, onSelect }) {
-  return (
-    <button className={`r-row ${active ? "on" : ""}`} onClick={onSelect}>
-      <span className={`r-glyph ${type === "代码" ? "code" : type === "业务知识" ? "biz" : "req"}`}>
-        {type === "代码" ? "{ }" : type === "业务知识" ? "知" : "需"}
-      </span>
-      <span className="r-copy">
-        <b>{rowTitle(item, type)}</b>
-        <small>{rowSubtitle(item, type)}</small>
-      </span>
-      {item.status && <Tag color={statusColor(item.status)} style={{ fontSize: 10.5 }}>{item.status === "CONFIRMED" ? "已确认" : item.status}</Tag>}
-    </button>
-  );
-}
-
-function factTypeLabel(type) {
-  return ({ CALL: "调用", READ: "读取", WRITE: "写入", GENERATE: "生成", CHECK: "校验" })[type] || type;
-}
-
-function CodeDetail({ item, detail }) {
-  const relations = detail?.relations || [];
-  const grouped = relations.reduce((acc, row) => {
-    (acc[row.fact_type || "FACT"] ||= []).push(row);
-    return acc;
-  }, {});
-  return (
-    <Card styles={{ body: { padding: "18px 22px" } }}>
-      <Descriptions size="small" column={1} bordered={false} style={{ marginBottom: 4 }}
-        items={[
-          { key: "kind", label: "类型", children: item?.kind || "SYMBOL" },
-          { key: "name", label: "限定名", children: <Typography.Text code copyable style={{ fontSize: 12 }}>{item?.qualified_name}</Typography.Text> },
-          ...(detail?.path ? [{ key: "loc", label: "源码位置", children: <Typography.Text style={{ fontSize: 12 }}>{detail.path}:{detail.line_start}-{detail.line_end}</Typography.Text> }] : []),
-        ]}
-      />
-      {Object.entries(grouped).map(([factType, rows]) => (
-        <div key={factType} style={{ marginTop: 14 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: ".05em", display: "block", marginBottom: 7 }}>
-            {factTypeLabel(factType)} · {rows.length}
-          </Typography.Text>
-          <Flex gap={6} wrap="wrap">
-            {rows.map((row, index) => (
-              <Tag key={`${row.evidence_id}-${index}`} bordered={false}>
-                {row.subject}{row.target ? ` → ${row.target}` : ""}
-              </Tag>
-            ))}
-          </Flex>
-        </div>
-      ))}
-      <Divider_ />
-      {detail?.error ? (
-        <Typography.Text type="warning">无法读取源码：{detail.error}</Typography.Text>
-      ) : detail?.content ? (
-        <>
-          <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: ".05em", display: "block", marginBottom: 7 }}>源码</Typography.Text>
-          <pre className="ev-pre drawer">{detail.content}</pre>
-        </>
-      ) : null}
-    </Card>
-  );
-}
-
-function KnowledgeDetail({ type, item }) {
-  if (!item) return null;
-  const fields = type === "业务知识"
-    ? [
-      { key: "st", label: "定义", children: item.definition || item.statement || "—" },
-      { key: "kt", label: "知识类型", children: item.knowledge_type || item.type || "—" },
-      { key: "status", label: "状态", children: item.status || "—" },
-      { key: "ev", label: "原文证据", children: item.sourceEvidenceId || item.evidence_id || "—" },
-    ]
-    : [
-      { key: "ver", label: "当前版本", children: item.current_version != null ? `V${item.current_version}` : "—" },
-      { key: "up", label: "更新时间", children: item.updated_at ? new Date(item.updated_at).toLocaleDateString("zh-CN") : "—" },
-    ];
-  return (
-    <Card styles={{ body: { padding: "18px 22px" } }}>
-      <Typography.Title level={5} style={{ marginTop: 0 }}>{item.title || item.name || item.id}</Typography.Title>
-      <Descriptions size="small" column={1} items={fields} />
-    </Card>
-  );
-}
-
-function Divider_() {
-  return <div style={{ borderTop: "1px dashed #ebeae4", margin: "16px 0" }} />;
 }

@@ -1,0 +1,138 @@
+{
+  "name": "融商贷V1阶段2题库",
+  "scope": "融商贷三系统代码基座（阶段2：提款、还款两条链路，单层授信额度，受托支付单收款人）＋Fineract 1.14.0 原生源码。不含阶段3/4计划内容（多层额度、优惠、担保、多收款人、授信申请）；所有题目均可且仅可依据当前项目源码回答。",
+  "origin": "synthetic",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "v1-limit-calc",
+      "question": "企业甲授信 80 万元，已占用 35 万，另有一笔 5 万的提款还在处理中。此时再提交一笔 45 万的提款申请会被拒绝吗？可用额度是怎么算出来的，代码在哪个类？",
+      "checks": [
+        "会被拒绝：可用额度＝总授信上限−已占用−预占（35+5 已占 40，剩余 40 < 45）",
+        "计算在 loan-middle 的 CreditLimit.available()",
+        "提款受理时预占（DrawdownService.apply → LimitService.preOccupy），额度不足抛 LIMIT_INSUFFICIENT",
+        "预占转实占发生在入账成功后（LimitService.confirmOccupy），付款失败释放预占（releasePreOccupied）",
+        "冻结状态 available 为 0 但已占用可因还款减少（LimitService 中冻结只挡新增提款）"
+      ],
+      "category": "middle_rule",
+      "notes": "考察预占与实占两个概念是否被区分；只看总授信与已占用会误判为可借。"
+    },
+    {
+      "id": "v1-booking-pending",
+      "question": "一笔提款的外部付款已经回调成功，但渠道页面仍显示\"处理中\"。中台此刻是什么状态？后续由谁、按什么步骤把它收敛为成功或失败？",
+      "checks": [
+        "中台业务单状态为 EXTERNAL_SUCCESS_BOOKING_PENDING，入账状态 TO_BOOK（DrawdownOrder）",
+        "渠道展示映射：ChannelService.displayOf 把该状态合并为\"处理中\"，原始状态保存在渠道申请单",
+        "收敛入口是 DrawdownService.book()：调 FineractClient.disburseLoan 放款登记，成功后 confirmOccupy 预占转实占、状态 SUCCESS",
+        "入账失败转 RETRY_NEEDED 记录重试次数与错误，由 CompensationTask 定时重试",
+        "重试前先调 FineractClient.isLoanActive 检查借据是否已生效，防止重复放款"
+      ],
+      "category": "cross_system",
+      "notes": "重点考察\"外部成功≠业务成功\"的可恢复状态与补偿收敛链。"
+    },
+    {
+      "id": "v1-callback-query",
+      "question": "模拟服务配置了\"回调不送达\"场景时，中台如何最终拿到付款结果？请说明回调重试、查单触发条件和两条路径的共同出口。",
+      "checks": [
+        "模拟服务 CallbackDispatcher 投递失败重试，超过 callbackMaxAttempts（默认3）后停止投递，每次投递写入 CallbackLog",
+        "NO_CALLBACK_NEED_QUERY 场景终态已产生但从不主动回调，callbackSuppressed 标记",
+        "中台 CompensationTask 对 PROCESSING 超过 payment-query-timeout-seconds（默认60秒）的付款主动调 SimulatorClient.query 查单",
+        "模拟服务查询接口返回真实终态（即使回调未送达）",
+        "查单结果与回调都走 DrawdownService.onPaymentResult 同一处理通道"
+      ],
+      "category": "cross_system",
+      "notes": "考察回调与查单互为兜底的异步设计；只答回调不查单视为遗漏。"
+    },
+    {
+      "id": "v1-idempotent",
+      "question": "同一笔付款成功回调被重复投递两次，中台会不会重复放款、重复恢复额度或重复释放预占？请指出每一处的幂等防线。",
+      "checks": [
+        "提款侧：DrawdownService.onPaymentResult 对已终态业务单直接 return；paymentStatus 已是 SUCCESS 的重复成功直接 return",
+        "入账侧：book() 对 BOOKED 状态直接 return，且放款前用 isLoanActive 校验借据是否已生效",
+        "额度侧：confirmOccupy/releasePreOccupied 只在状态迁移路径中执行一次，重复回调不会再次触发",
+        "还款侧 onDeductionResult 同样按终态与 deductionStatus 双重幂等",
+        "模拟服务提交按 bizOrderNo+kind 幂等，重复提交返回同一 extSerialNo（SimulatorService.submit）"
+      ],
+      "category": "cross_system",
+      "notes": "答\"依赖数据库唯一键\"而未指出状态机幂等防线的，视为未覆盖。"
+    },
+    {
+      "id": "v1-channel-diff",
+      "question": "同一客户在\"企业自助渠道\"只能借最多 30 万、选 3/6/12 期，在\"客户经理渠道\"却能借更高金额和更多期限。这是哪一层在限制？中台的校验和渠道的校验分别在哪里、各自拦截什么？",
+      "checks": [
+        "渠道限制在 channel-service：ChannelProductRule 种子数据（SELF_SERVICE 单笔上限30万、期限3/6/12；RM_ASSISTED 上限更高）",
+        "可选条件收窄在 ChannelService.narrowByChannel：金额取两者较小值、期限取子集，收窄到不可用则不透出",
+        "渠道侧拦截返回 CHANNEL_AMOUNT_LIMIT / CHANNEL_TERM_LIMIT（ChannelService.applyDrawdown）",
+        "中台只校验产品本身支持（DrawdownService.validateAmountAndTerm：金额区间、termList、还款方式）",
+        "渠道规则不能放大中台能力：最终额度与期限仍受中台产品配置约束"
+      ],
+      "category": "middle_rule",
+      "notes": "考察渠道与中台职责边界；答\"中台按渠道返回不同产品配置\"属职责混淆。"
+    },
+    {
+      "id": "v1-limit-restore",
+      "question": "一笔 45,230.55 元的还款入账后，授信占用恢复多少？恢复金额的依据来自哪里，为什么不能由中台自己按金额比例计算？",
+      "checks": [
+        "恢复金额＝分配明细中的本金部分 principalPortion，不是还款总额",
+        "分配明细来自 Fineract：FineractClient.getRepaymentAllocation 读取该笔还款交易的 principalPortion/interestPortion/feePortion",
+        "中台用本金部分调 LimitService.restoreByPrincipal，台账流水 reason=PRINCIPAL_REPAID",
+        "利息、费用不恢复本金授信额度（边界设计判例）",
+        "分配顺序由 Fineract 产品分配策略决定，中台只保存结果，不在多系统重复实现分配"
+      ],
+      "category": "middle_rule",
+      "notes": "答\"按还款全额恢复额度\"为错误结论。"
+    },
+    {
+      "id": "v1-quote-recheck",
+      "question": "客户拿到 30 万报价后隔了一小时才提交，期间该授信另一笔提款占了额度。提交时中台会怎么处理？报价本身的校验有哪些？",
+      "checks": [
+        "报价快照 30 分钟有效：DrawdownQuote.usable 校验 status=UNUSED 且 validUntil 未过，超期抛 QUOTE_EXPIRED",
+        "申请时按申请时点重新校验可用额度：available < 报价金额抛 LIMIT_INSUFFICIENT（DrawdownService.apply）",
+        "报价快照固定金额/期限/利率/试算计划，申请以快照为准；快照置为 USED",
+        "产品校验：金额区间、termList、还款方式（validateAmountAndTerm）",
+        "预占发生在校验通过后、提交付款之前"
+      ],
+      "category": "middle_rule",
+      "notes": "考察\"报价到提交期间条件变化必须重新校验\"的设计要求在代码里的落点。"
+    },
+    {
+      "id": "v1-drawdown-chain",
+      "question": "从渠道提交提款申请到借据生效、额度实占，完整调用链经过哪些类和外部接口？三个编号（channelRefNo、bizOrderNo、extSerialNo）分别在哪里生成、保存在哪个系统？",
+      "checks": [
+        "渠道：ChannelService.applyDrawdown 校验渠道规则 → MiddleClient.quote → MiddleClient.applyDrawdown，生成 channelRefNo 存渠道库（ChannelApplicationRecord）",
+        "中台：DrawdownService.apply 预占额度（LimitService.preOccupy）→ FineractClient.createLoan 创建借据 → SimulatorClient.submitPayment 提交付款，bizOrderNo 由中台生成存中台库",
+        "外部：SimulatorService.submit 生成 extSerialNo 存模拟服务库，终态经 CallbackClient 回调中台 ExternalResultController",
+        "入账：DrawdownService.book 调 FineractClient.disburseLoan，成功后 LimitService.confirmOccupy 预占转实占，状态 SUCCESS",
+        "标识链 channelRefNo → bizOrderNo → extSerialNo 三段各存各库，通过接口传递，无跨库读取"
+      ],
+      "category": "cross_system",
+      "notes": "考察跨四仓库的端到端追踪能力；漏掉补偿任务不算错但答错顺序算错。"
+    },
+    {
+      "id": "v1-loan-create-mapping",
+      "question": "中台创建借据时，客户选择的\"等额本金\"如何映射到 Fineract 的参数？贷款的计息方式、还款频率、首期起算日是怎么定的？",
+      "checks": [
+        "FineractClient.amortizationType：EQUAL_PRINCIPAL→0、EQUAL_INSTALLMENTS→1（对应 Fineract AmortizationMethod 枚举）",
+        "interestType=0 即 DECLINING_BALANCE 余额递减计息",
+        "loanTermFrequencyType/repaymentFrequencyType=2（月），repaymentEvery=1",
+        "repaymentStartDateType=1 即按放款日（DISBURSEMENT_DATE）起算首期",
+        "创建走 POST /loans（Fineract LoansApiResource），中台不直接写 Fineract 数据库"
+      ],
+      "category": "native",
+      "notes": "枚举值必须与 Fineract 1.14.0 源码一致；凭记忆写错枚举值算不符合。"
+    },
+    {
+      "id": "v1-simulator-scenario",
+      "question": "外部模拟服务如何做到\"同一笔业务重复提交只产生一条流水\"？五种场景配置分别对应什么行为，终态在什么时刻产生？",
+      "checks": [
+        "提交幂等：SimulatorService.submit 按 bizOrderNo+kind 查重，已存在返回原 extSerialNo 与当前状态",
+        "场景挂在 bizOrderNo 上（ScenarioConfig），未配置走默认 SYNC_SUCCESS；场景不混入正式业务字段",
+        "SYNC_SUCCESS/SYNC_REJECT 提交时立即终态（响应 SUCCESS/REJECTED），不再回调",
+        "ASYNC_SUCCESS_DELAY/ASYNC_FAIL 到达 processDueAt 后由 CallbackDispatcher 产生终态并回调",
+        "NO_CALLBACK_NEED_QUERY 终态产生但不主动回调（callbackSuppressed），只能被中台查单取得"
+      ],
+      "category": "cross_system",
+      "notes": "考察场景机制与幂等；把场景编号当业务字段是常见误解。"
+    }
+  ]
+}

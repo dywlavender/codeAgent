@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS requirement_chunk (
 );
 CREATE TABLE IF NOT EXISTS query_conversation (
   id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
-  runtime_session_id TEXT, workspace_id TEXT,
+  runtime_session_id TEXT, workspace_id TEXT, scope_json TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS query_run (
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS query_run (
   runtime TEXT NOT NULL, runtime_session_id TEXT,
   question TEXT NOT NULL, status TEXT NOT NULL,
   answer TEXT NOT NULL DEFAULT '', error TEXT,
-  usage_json TEXT NOT NULL DEFAULT '{}',
+  usage_json TEXT NOT NULL DEFAULT '{}', scope_json TEXT,
   started_at TEXT NOT NULL, completed_at TEXT, duration_ms REAL NOT NULL DEFAULT 0,
   FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
 );
@@ -409,9 +409,14 @@ def _migrate_query_runtime(connection: sqlite3.Connection) -> None:
             ("runtime", "TEXT NOT NULL DEFAULT 'CLAUDE_CODE'"),
             ("runtime_session_id", "TEXT"),
             ("workspace_id", "TEXT"),
+            ("scope_json", "TEXT"),
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE query_conversation ADD COLUMN {name} {declaration}")
+    if "query_run" in existing:
+        run_columns = {row[1] for row in connection.execute("PRAGMA table_info(query_run)")}
+        if "scope_json" not in run_columns:
+            connection.execute("ALTER TABLE query_run ADD COLUMN scope_json TEXT")
 
     # These explicit CREATE statements make the migration safe for a database
     # created by an intermediate build that had not yet shipped the new schema.
@@ -419,7 +424,7 @@ def _migrate_query_runtime(connection: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS query_conversation (
           id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
-          runtime_session_id TEXT, workspace_id TEXT,
+          runtime_session_id TEXT, workspace_id TEXT, scope_json TEXT,
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS query_run (
@@ -427,7 +432,7 @@ def _migrate_query_runtime(connection: sqlite3.Connection) -> None:
           runtime TEXT NOT NULL, runtime_session_id TEXT,
           question TEXT NOT NULL, status TEXT NOT NULL,
           answer TEXT NOT NULL DEFAULT '', error TEXT,
-          usage_json TEXT NOT NULL DEFAULT '{}',
+          usage_json TEXT NOT NULL DEFAULT '{}', scope_json TEXT,
           started_at TEXT NOT NULL, completed_at TEXT,
           duration_ms REAL NOT NULL DEFAULT 0,
           FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)

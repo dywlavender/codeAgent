@@ -65,10 +65,11 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
       <Flex justify="space-between" align="center" style={{ maxWidth: 1180, margin: "0 auto 14px", width: "100%" }}>
         <div>
           <Typography.Title level={4} style={{ margin: 0 }}>业务知识维护</Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>导入自然语言业务基线，维护业务语义、关系和少量调查入口。</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>查看和维护基线导入后的结构化知识。问答 Agent 直接读取原始资料，不以这里的条目作为检索入口。</Typography.Text>
         </div>
         <Space>
           <Select value={parser} options={PARSERS} onChange={setParser} style={{ width: 190 }} />
+          <Button onClick={() => { window.location.hash = "#/evaluation"; }}>验证问答效果</Button>
           <Button type="primary" icon={<ArrowClockwise size={15} />} loading={running === "refresh"} onClick={refresh}>导入业务基线</Button>
         </Space>
       </Flex>

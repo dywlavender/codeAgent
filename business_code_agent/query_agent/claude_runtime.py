@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping
 
 from .runtime import EventCallback, RuntimeErrorBase, RuntimeResult
 from .progress import ProgressEvents
+from .workspace import project_overview, search_instructions, workspace_sources
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,19 @@ class ClaudeCodeRuntime:
         self.read_tools = tuple(read_tools)
         self.environment = dict(environment or {})
 
-    def build_command(self, question: str, *, workspace: str | Path, session_id: str | None = None) -> list[str]:
-        """Build the exact read-only Claude Code invocation."""
+    def build_command(
+        self,
+        question: str,
+        *,
+        workspace: str | Path,
+        session_id: str | None = None,
+        repositories: set[str] | None = None,
+    ) -> list[str]:
+        """Build the exact read-only Claude Code invocation.
+
+        ``repositories`` narrows the per-turn authorization to the given
+        workspace repo directory names; ``None`` keeps every mounted repo.
+        """
         command = [
             self.command,
             "--output-format", "stream-json",
@@ -54,8 +66,14 @@ class ClaudeCodeRuntime:
             "--permission-mode", "dontAsk",
             "--tools", ",".join(self.read_tools),
             "--disallowed-tools", "Edit,Write,Bash,NotebookEdit,Task",
-            "--add-dir", str(Path(workspace).expanduser().resolve()),
         ]
+        root = Path(workspace).expanduser().resolve()
+        sources = workspace_sources(root, repositories)
+        # Supply current roots explicitly on every turn, rather than relying
+        # only on CLAUDE.md discovery or an older resumed session's context.
+        command.extend(["--append-system-prompt", search_instructions(sources, scoped=repositories is not None) + project_overview(sources)])
+        directories = list(dict.fromkeys([root, *(path for _, path in sources)]))
+        command.extend(["--add-dir", *(str(path) for path in directories)])
         if session_id:
             command.extend(["--resume", str(session_id)])
         command.extend(["-p", str(question)])
@@ -69,6 +87,7 @@ class ClaudeCodeRuntime:
         session_id: str | None = None,
         event_callback: EventCallback | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        repositories: set[str] | None = None,
     ) -> RuntimeResult:
         question = str(question or "").strip()
         if not question:
@@ -85,7 +104,7 @@ class ClaudeCodeRuntime:
                     self.command, workspace_path, session_id or "new", self.timeout_seconds, ",".join(self.read_tools))
         try:
             process = subprocess.Popen(
-                self.build_command(question, workspace=workspace_path, session_id=session_id),
+                self.build_command(question, workspace=workspace_path, session_id=session_id, repositories=repositories),
                 cwd=str(workspace_path),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

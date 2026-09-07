@@ -1,21 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  BookOpen, ChatCircleDots, Graph, Lock, Plus, ShieldCheck, SidebarSimple,
+  BookOpen, ChatCircleDots, Check, Flask, Graph, Lock, MinusCircle, Plus, ShieldCheck, SidebarSimple, Trash, WarningCircle,
 } from "@phosphor-icons/react";
 import {
-  Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Typography,
+  Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Popconfirm, Typography,
 } from "antd";
 import { RequestAborted, request, streamQuery } from "./lib/api.js";
-import { formatTime } from "./lib/format.js";
-import { isActiveRun, mergeConversations, turnFromRun, watchRun } from "./lib/query-state.js";
+import { formatRelative } from "./lib/format.js";
+import { isActiveRun, mergeConversations, RUN_STATUS_LABEL, turnFromRun, watchRun } from "./lib/query-state.js";
 import { AgentPage } from "./pages/AgentPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
 import { GraphPage } from "./pages/GraphPage.jsx";
 import { KnowledgeAdminPage } from "./pages/KnowledgeAdminPage.jsx";
+import { EvaluationPage } from "./pages/EvaluationPage.jsx";
 
 const { Sider, Content } = Layout;
 
-const PAGE_IDS = ["agent", "library", "graph", "admin"];
+const PAGE_IDS = ["agent", "library", "graph", "evaluation", "admin"];
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, "");
@@ -37,6 +38,7 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(() => Boolean(sessionStorage.getItem("knowledgeAdminToken")));
   const [lockOpen, setLockOpen] = useState(false);
   const [lockToken, setLockToken] = useState("");
+  const [scope, setScope] = useState(null);
   const queryAbortRef = useRef(null);
   const [cancelling, setCancelling] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
@@ -105,6 +107,7 @@ export default function App() {
       const data = await streamQuery("/api/query/stream", {
         question: normalized,
         conversationId,
+        scope: scope || undefined,
       }, {
         signal: controller.signal,
         onRun: (value) => {
@@ -176,6 +179,16 @@ export default function App() {
     }
   }
 
+  async function deleteConversation(run) {
+    try {
+      await request(`/api/conversations/${run.conversationId}`, { method: "DELETE" });
+      if (run.conversationId === conversationId) newConversation();
+      await refreshRuns().catch(() => {});
+    } catch (reason) {
+      setError(`删除失败：${reason.message}`);
+    }
+  }
+
   async function doRestore(run) {
     if (!run || queryAbortRef.current) return;
     const restoreId = ++restoreRef.current;
@@ -204,6 +217,7 @@ export default function App() {
       setTurns(history.map(turnFromRun));
       setConversationId(detail.conversationId || null);
       setActiveTurnId(detail.id);
+      setScope(detail.scope || null);
       if (isActiveRun(detail)) {
         const controller = new AbortController();
         controller.runId = detail.runId || detail.id;
@@ -259,6 +273,7 @@ export default function App() {
     setRunDetail(null);
     setQuestion("");
     setConversationId(null);
+    setScope(null);
     sessionStorage.removeItem("queryConversationId");
     setError("");
     setStatus("idle");
@@ -287,6 +302,19 @@ export default function App() {
   const activeTurn = turns.find((turn) => turn.id === activeTurnId);
   const activeRunId = activeTurn ? (activeTurn.result?.runId || activeTurn.id) : null;
   const recentConversations = runs;
+  // 单项目部署时不显示项目标签，避免每张卡片重复同一名字；出现多项目后自动点亮。
+  const currentWorkspaceId = workspace?.workspace?.id;
+  const multiProject = new Set(runs.map((run) => run.workspaceId).filter(Boolean)).size > 1;
+  // 范围标签：显示所选系统名，加上不属于这些系统的直接指定工程。
+  const applications = workspace?.applications || [];
+  const scopeText = (value) => {
+    if (!value) return "";
+    const covered = new Set(applications.filter((item) => value.systemIds?.includes(item.systemId)).map((item) => item.repositoryId));
+    const names = (value.systemIds || []).map((id) => applications.find((item) => item.systemId === id)?.systemName || id);
+    const direct = (value.repositoryIds || []).filter((id) => !covered.has(id))
+      .map((id) => workspace?.repositories?.find((item) => item.id === id)?.displayName || id);
+    return [...names, ...direct].join(" + ");
+  };
 
   return (
     <Layout className="app-layout">
@@ -316,8 +344,9 @@ export default function App() {
           onClick={({ key }) => navigate(key)}
           items={[
             { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "问答" },
-            { key: "library", icon: <BookOpen size={16.5} />, label: "浏览知识库" },
+            { key: "library", icon: <BookOpen size={16.5} />, label: "项目资料" },
             { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
+            { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
             ...(showAdminZone ? [{
               type: "group",
               label: "管理",
@@ -334,14 +363,56 @@ export default function App() {
               提交第一个问题后，分析历史会出现在这里。
             </Typography.Text>
           )}
-          {recentConversations.map((run) => (
-            <button key={run.id} disabled={status === "loading"} className={`recent-item ${run.conversationId === conversationId || run.id === activeRunId ? "on" : ""}`} title={run.question} onClick={() => doRestore(run)}>
-          <span className="rcopy">
-            <span className="rq">{run.question}</span>
-            <small>{formatTime(run.startedAt || run.created_at)}</small>
-              </span>
-            </button>
-          ))}
+          {recentConversations.map((run) => {
+            const running = isActiveRun(run);
+            const statusKey = running ? "running" : run.status;
+            const showProject = multiProject && run.workspaceId && run.workspaceId !== currentWorkspaceId;
+            return (
+              <div
+                key={run.id}
+                role="button"
+                tabIndex={0}
+                className={`task-card ${run.conversationId === conversationId || run.id === activeRunId ? "on" : ""}`}
+                title={run.question}
+                onClick={() => { if (status !== "loading") doRestore(run); }}
+                onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && status !== "loading") { event.preventDefault(); doRestore(run); } }}
+              >
+                <span className={`task-state ${statusKey || "unknown"}`} aria-hidden>
+                  {running ? <span className="activity-pulse" />
+                    : run.status === "failed" ? <WarningCircle size={12} weight="fill" />
+                    : run.status === "cancelled" ? <MinusCircle size={12} />
+                    : <Check size={11} weight="bold" />}
+                </span>
+                <span className="task-copy">
+                  <span className="task-q">{run.question}</span>
+                  <small className="task-meta">
+                    {RUN_STATUS_LABEL[run.status] || run.status || "未知状态"} · {formatRelative(run.startedAt || run.created_at)}
+                    {scopeText(run.scope) && ` · ${scopeText(run.scope)}`}
+                    {showProject && ` · ${run.workspaceId}`}
+                  </small>
+                </span>
+                <Popconfirm
+                  title="删除这条会话？"
+                  description="将删除该会话的全部问答记录。"
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={(event) => { event?.stopPropagation(); deleteConversation(run); }}
+                  onCancel={(event) => event?.stopPropagation()}
+                >
+                  <Button
+                    className="task-delete"
+                    type="text"
+                    size="small"
+                    aria-label="删除会话"
+                    icon={<Trash size={13} />}
+                    disabled={running}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </Popconfirm>
+              </div>
+            );
+          })}
           {nextCursor && <Button type="text" block loading={historyLoading} disabled={historyLoading} onClick={() => refreshRuns(nextCursor).catch((reason) => setError(reason.message))}>加载更多会话</Button>}
         </div>
         {!showAdminZone && (
@@ -377,10 +448,13 @@ export default function App() {
             selectTurn={selectTurn}
             newConversation={newConversation}
             toggleSidebar={() => setSidebarOpen((open) => !open)}
+            scope={scope}
+            setScope={setScope}
           />
         )}
         {page === "library" && <LibraryPage workspace={workspace} />}
         {page === "graph" && <GraphPage workspace={workspace} />}
+        {page === "evaluation" && <EvaluationPage onRequireUnlock={() => setLockOpen(true)} />}
         {page === "admin" && <KnowledgeAdminPage onRequireUnlock={() => setLockOpen(true)} />}
       </Content>
 

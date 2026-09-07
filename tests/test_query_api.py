@@ -19,7 +19,7 @@ from business_code_agent.schema import connect
 class _Runtime:
     runtime_name = "FAKE_RUNTIME"
 
-    def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None):
+    def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None, repositories=None):
         if event_callback:
             event_callback({"sequence": 1, "eventType": "tool_use", "payload": {"name": "Read"}})
         return RuntimeResult("答案：" + question, session_id or "session-1")
@@ -30,7 +30,7 @@ class QueryApiTest(unittest.TestCase):
         class WaitingRuntime:
             runtime_name = "WAITING_TEST"
 
-            def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None):
+            def ask(self, question, *, workspace, session_id=None, event_callback=None, cancel_check=None, repositories=None):
                 event_callback({"sequence": 1, "eventType": "text", "payload": {
                     "id": "m", "mode": "append", "text": "部分回答",
                 }})

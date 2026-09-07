@@ -1,5 +1,7 @@
 # Claude Code Runtime 架构
 
+本文记录当前实现。后续涉及知识主干、知识图谱和代码调查的整改，遵循 [项目整改指导方向](knowledge-backbone-direction.md)；本文中的现有实现边界不构成对后续技术方案的固定限制。
+
 ## 目标
 
 CodeAgent 不是另一套代码问答 Agent，而是给成熟 Coding Agent 准备正确资料和运行环境。Claude Code 负责理解问题、决定查什么、读取源码、追调用链、判断是否继续调查以及组织最终回答。
@@ -50,6 +52,8 @@ Python 不再执行问题分类、业务检索、Anchor 路由、Code Candidate 
 目录优先使用软链接；Windows 无法创建软链接时使用 Junction。链接始终指向已同步目录，不复制源代码。刷新工作区只重建链接和 `CLAUDE.md`，不会改动仓库。
 
 `CLAUDE.md` 只写资料位置、源码必须实际读取、Anchor 只是导航提示、只读限制等稳定规则，不写固定 Agent Workflow。
+
+业务基线可额外提供 `project-overview.md`。Runtime 每轮读取当前总览，连同检索范围通过 `--append-system-prompt` 提供；总览正文不写入 `CLAUDE.md`，其余业务流程文档保留在资料目录中供模型按需搜索。这是轻量项目上下文，不执行 Python 侧问题分类、图谱检索或固定调查流程。
 
 ## Runtime
 
@@ -130,6 +134,25 @@ event: error   data: {"error":"..."}
 - `functional_*`、旧 mapping、治理 proposal 表按既有迁移规则清除。
 
 新库永远只创建 `query_run` 和 `query_event`，不会重新引入旧 Query Agent 表。
+
+## 效果验证（评测子系统）
+
+同题「有无知识主干」的对照验证由 `business_code_agent/evaluation/` 实现，命令行脚本与页面共用同一执行逻辑：
+
+```text
+business_code_agent/evaluation/
+├── scoring.py   评分解析与引文校验（满足项必须引用候选答案原文）
+├── harness.py   单任务执行：冻结工作区、Claude 调用、工具轨迹、独立会话初评
+├── runner.py    批次编排：题库校验、资料冻结、并发执行、取消、按评分来源汇总
+├── report.py    report.md / summary.json 生成与导出视图
+└── service.py   EvaluationService：后台线程、state.json 持久化、题库/复核/快照
+```
+
+- 每个批次是 `.data/evaluations/eval-<时间戳>/` 下的一个目录：`protocol.json`（冻结的题库、设置与仓库快照）、`inputs/`（冻结代码与主干文档）、`runs/<run-id>/`（逐次结果、事件、评分及修订历史）、`state.json`（页面进度）、`results.json`、`reviews.json`（人工复核修订）。
+- `EvaluationService` 在 HTTP 请求之外的后台线程运行批次（批内并发 2），每个任务落盘后更新状态；页面约 2 秒轮询批次摘要，任务结束停止轮询。服务重启时运行中的批次标记为 `interrupted`，保留已完成结果，不自动追加调用。
+- 取消停止安排新任务并取消受本批次管理的模型调用；答题失败不评分，评分失败不记零分。质量汇总按明确评分来源（模型初评 / 复核记录）分别计算配对分母，不把未复核答案的模型分数混入复核视图。
+- 页面入口为 `#/evaluation`（「效果验证」）；启动、停止、重新初评、题库修改和复核保存复用管理员凭证，读取接口公开。
+- CLI 入口保留：`scripts/evaluate_backbone.py`（对照执行与 `--rejudge`）、`scripts/backbone_report.py`（报告重生成）调用同一模块。结果目录兼容旧脚本读取。
 
 ## 运行限制
 

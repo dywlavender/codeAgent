@@ -23,8 +23,15 @@ dist/
 .vscode/
 examples/validation-project/
 
+# Cloned validation source snapshots are re-creatable from
+# validation-projects/*/VERSIONS.md; keep them out of this repository.
+validation-projects/**/repos/
+validation-projects/**/.data/
+
 # Local runtime config (copy from project.config.example.json)
 project.config.json
+# Project configs inside validation projects are committed assets, not local state.
+!validation-projects/**/project.config.json
 
 # Committed demo/test configurations are fixtures, not local runtime state.
 !examples/demo/project.config.json

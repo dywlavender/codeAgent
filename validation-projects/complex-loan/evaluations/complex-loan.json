@@ -1,0 +1,76 @@
+{
+  "name": "复杂贷款V0原生源码题库",
+  "scope": "基于 Apache Fineract 1.14.0 + Mifos X Web App（v1.0.0-fineract1.14）原生源码的贷款业务调查验证（V0）。不含 V1 渠道、模拟服务与自研改造业务；所有题目均可且仅可依据当前两份源码回答。",
+  "origin": "synthetic",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "native-lifecycle",
+      "question": "在当前项目中，一笔贷款申请从提交、审批到放款，账户状态如何流转？状态定义和流转校验分别在代码哪里实现？请结合 REST 入口说明每次动作是如何触发状态变化的。",
+      "checks": [
+        "状态定义在 LoanStatus 枚举（fineract-core 模块），列出 SUBMITTED_AND_PENDING_APPROVAL(100)、APPROVED(200)、ACTIVE(300)、CLOSED_OBLIGATIONS_MET(600) 等关键状态",
+        "流转校验在 DefaultLoanLifecycleStateMachine（fineract-loan 模块），按 LoanEvent 事件判定，不是在 REST 层硬编码",
+        "LOAN_APPROVED 只允许从 SUBMITTED_AND_PENDING_APPROVAL 转入 APPROVED；LOAN_DISBURSED 从 APPROVED（或结清后）转入 ACTIVE",
+        "创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse",
+        "command 经 CommandWrapperBuilder 构造为 entity=LOAN 的命令，按 @CommandType 注解路由到对应 Handler（如 LoanApplicationApprovalCommandHandler）"
+      ],
+      "category": "native_lifecycle",
+      "notes": "常见错误：把 LoanStatus 说成在 provider 模块、把状态机说成 REST 层 if-else、漏掉 command 路由机制。"
+    },
+    {
+      "id": "native-schedule",
+      "question": "还款计划是什么时候生成的？审批和放款时会不会重算还款计划？计划生成器有哪些实现、如何选择？请给出代码依据。",
+      "checks": [
+        "提交申请时首次生成：LoanAssemblerImpl 组装，经 LoanScheduleAssembler.assembleLoanScheduleFrom 调 LoanScheduleGeneratorFactory",
+        "放款时按实际放款信息重算：LoanWritePlatformServiceJpaRepositoryImpl 的 regenerateScheduleOnDisbursement",
+        "审批只在放款明细/日期变更时重算，未变更不重算",
+        "DefaultLoanScheduleGeneratorFactory 按 scheduleType+interestMethod 映射三种实现：CUMULATIVE+FLAT、CUMULATIVE+DECLINING_BALANCE、PROGRESSIVE",
+        "PROGRESSIVE 实现为 fineract-progressive-loan 模块的 ProgressiveLoanScheduleGenerator；累计型继承 AbstractCumulativeLoanScheduleGenerator（1.14 没有 AbstractLoanScheduleGenerator 这个类）",
+        "重算后由 ReprocessLoanTransactionsService 重放既有交易保持一致"
+      ],
+      "category": "native_schedule",
+      "notes": "常见错误：说成放款才生成计划、审批必然重算、引用 1.14 已不存在的 AbstractLoanScheduleGenerator 类名。"
+    },
+    {
+      "id": "native-repayment",
+      "question": "一笔还款提交后，系统如何把金额分配到费用、罚息、利息和本金？分配顺序由什么决定？还款入账后账户状态如何变化？请追到实际实现说明。",
+      "checks": [
+        "入口 LoanTransactionsApiResource：POST /loans/{loanId}/transactions?command=repayment",
+        "经 @CommandType(entity=LOAN, action=REPAYMENT) 的 LoanRepaymentCommandHandler 调写服务 makeLoanRepayment，先做 validateNewRepaymentTransaction 校验",
+        "按产品的 transactionProcessingStrategyCode 经 LoanRepaymentScheduleTransactionProcessorFactory 选择分配处理器",
+        "处理器按提前于期次还款/按时还款/逾期还款三种场景分配，顺序随策略类不同而不同（内置 FineractStyle、PrincipalInterestPenaltyFeesOrder 等多个实现，渐进贷款用 AdvancedPaymentScheduleTransactionProcessor）",
+        "还款入账后状态机 determineAndTransition 自动判定结清状态（CLOSED_OBLIGATIONS_MET、REPAID_IN_FULL 相关事件、OVERPAID），不是人工设置字段",
+        "产品 inArrearsTolerance 容差影响逾期/结清判定"
+      ],
+      "category": "native_repayment",
+      "notes": "若答案称存在全局固定分配顺序（如一律先费后息后本）而不说明依策略变化，视为遗漏关键分支。"
+    },
+    {
+      "id": "native-product",
+      "question": "贷款产品如何定义利率、期限与还款安排？平台支持浮动利率吗？浮动利率在代码中如何建模？请给出实体和枚举的代码依据。",
+      "checks": [
+        "产品实体 LoanProduct（表 m_product_loan），利率与期限字段集中在 LoanProductRelatedDetail：principal、annualNominalInterestRate、interestMethod、interestCalculationPeriodMethod、repayEvery、repaymentPeriodFrequencyType、numberOfRepayments、inArrearsTolerance 等",
+        "InterestMethod 枚举只有 DECLINING_BALANCE 和 FLAT；InterestCalculationPeriodMethod 只有 DAILY 和 SAME_AS_REPAYMENT_PERIOD；还款频率用 PeriodFrequencyType",
+        "支持浮动利率：产品字段 isLinkedToFloatingInterestRate 关联 FloatingRate 与 FloatingRatePeriod（fineract-rates 模块），区间带起止日期与相对基准差值标记",
+        "不存在名为 InterestRatePeriod 的领域类，只有数据类 InterestRatePeriodData；虚构该类名属于源码未确认",
+        "产品维护入口 LoanProductsApiResource（/v1/loanproducts）"
+      ],
+      "category": "native_product",
+      "notes": "本题考察版本差异消歧：网络旧资料常引用 InterestRatePeriod 或 MyBatis 映射，1.14.0 中均不存在。"
+    },
+    {
+      "id": "native-frontend",
+      "question": "Mifos X 前端在创建贷款申请、发起审批、放款和还款时，分别调用哪些服务方法和后端接口？API 地址前缀、租户标识和认证是如何统一处理的？",
+      "checks": [
+        "创建：create-loans-account.component.ts 的 submit() → loansService.createLoansAccount → POST /loans",
+        "审批/放款：loanActionButtons(loanId, 'approve'|'disburse', data) → POST /loans/{loanId}?command=...",
+        "还款：make-repayment.component.ts 解析模板交易类型 → submitLoanActionButton(loanId, data, command) → POST /loans/{loanId}/transactions?command=repayment",
+        "ApiPrefixInterceptor 统一拼接 /fineract-provider/api/v1 前缀；AuthenticationInterceptor 注入 Fineract-Platform-TenantId 头与 Basic/Bearer 认证",
+        "各业务域一个 service 文件（如 loans.service.ts），地址配置在 src/environments/environment.ts，可被运行时 window.env 覆盖",
+        "前端只组装与发送请求，业务规则全部在后端"
+      ],
+      "category": "native_frontend",
+      "notes": "若答案称前端独立计算还款计划或校验业务规则，视为职责混淆。"
+    }
+  ]
+}

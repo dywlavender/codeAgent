@@ -48,3 +48,24 @@ export function toolTarget(tool) {
   const input = tool.input || {};
   return input.file_path || input.pattern || input.path || "";
 }
+
+// 从工具调用里提取"实际读取过的文件"：只有带 file_path 的调用算文件证据，
+// Grep/Glob 的目录参数和搜索模式不当作文件卡片展示。
+export function fileEvidence(tools = []) {
+  const byPath = new Map();
+  for (const tool of tools) {
+    const path = tool.input?.file_path || "";
+    if (!path) continue;
+    // Glob/Bash 常把目录塞进 file_path；没有扩展名末段按目录处理，不生成文件卡片
+    const last = path.split("/").filter(Boolean).at(-1) || "";
+    if (!last.includes(".")) continue;
+    const entry = byPath.get(path) || { path, snippet: "" };
+    if (tool.output && tool.output.trim()) {
+      const text = tool.output.trim();
+      entry.snippet = entry.snippet ? `${entry.snippet}\n…\n${text}` : text;
+      if (entry.snippet.length > 1200) entry.snippet = `${entry.snippet.slice(0, 1200)}…`;
+    }
+    byPath.set(path, entry);
+  }
+  return [...byPath.values()];
+}

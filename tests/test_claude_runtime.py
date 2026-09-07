@@ -40,7 +40,7 @@ class _FakeProcess:
 class ClaudeRuntimeTest(unittest.TestCase):
     def test_cancel_terminates_real_child_and_preserves_partial_answer(self):
         class LocalRuntime(ClaudeCodeRuntime):
-            def build_command(self, question, *, workspace, session_id=None):
+            def build_command(self, question, *, workspace, session_id=None, repositories=None):
                 payload = {"type": "assistant", "session_id": "cancel-session", "message": {
                     "id": "m", "content": [{"type": "text", "text": "已收到的部分回答"}],
                 }}

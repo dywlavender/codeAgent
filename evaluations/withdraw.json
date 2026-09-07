@@ -1,0 +1,56 @@
+{
+  "name": "提款演示回归",
+  "scope": "简单演示项目；已知题库，不能证明复杂项目或新问题收益",
+  "origin": "known_regression",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "flow",
+      "question": "请说明这个项目的提款业务全流程、各系统职责和主要代码入口，并区分业务步骤与代码实际强制的执行顺序。",
+      "checks": [
+        "覆盖六项查询、签合同、纳税授权、申请九个阶段",
+        "H5 发起，渠道接入转发，中台实现",
+        "列出 H5 页面及两侧 Controller 入口",
+        "独立按钮，没有强制九步串行编排",
+        "合同/授权等字段非 null 校验不等于真实业务完成"
+      ],
+      "category": "business_flow"
+    },
+    {
+      "id": "coupon",
+      "question": "H5 查询优惠券最终由哪个系统处理？请给出完整调用链、接口和关键参数，并说明是否真的按提款金额筛选优惠券。",
+      "checks": [
+        "H5 GET /api/withdraw/coupons",
+        "渠道 Controller → Service → LoanMiddleClient",
+        "中台 GET /middle/withdraw/coupons → Controller → WithdrawQueryService.queryCoupons",
+        "传递 customerId、amount，不臆造金额单位",
+        "返回固定两张券，未按金额筛选"
+      ],
+      "category": "code_control"
+    },
+    {
+      "id": "preconditions",
+      "question": "用户没有实际签合同或完成纳税授权，当前实现能阻止他提交提款吗？请结合前端传值和后端检查说明。",
+      "checks": [
+        "前端提交硬编码 CT-10001、TA-10001",
+        "提交没有依赖签约/授权接口真实返回的状态",
+        "中台对合同和授权 ID 只检查 null",
+        "还检查银行卡、还款方式和还款日非 null",
+        "未核验合同/授权真实性，不能保证阻止未完成者"
+      ],
+      "category": "business_rule"
+    },
+    {
+      "id": "boundary",
+      "question": "提款申请返回 ACCEPTED 后，当前项目如何完成实际放款和结果通知？请追到实际实现，说明目前能确认的业务边界。",
+      "checks": [
+        "定位 H5 → 渠道 → 中台申请路径",
+        "WithdrawApplicationService.apply 校验后返回固定 WD-10001、ACCEPTED",
+        "ACCEPTED 不等于放款成功",
+        "当前仓库未找到真实放款及结果通知实现",
+        "结论限于提供的项目，不臆造外部核心、消息或回调实现"
+      ],
+      "category": "boundary"
+    }
+  ]
+}
