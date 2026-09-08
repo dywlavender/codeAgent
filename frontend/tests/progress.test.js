@@ -57,3 +57,21 @@ test("SSE exposes run ID before progress and accepts cancelled result", async ()
     assert.equal(result.status, "cancelled");
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("project-scoped SSE uses the canonical project route from the page URL", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { search: "?projectId=alpha" } };
+  globalThis.fetch = async (url) => {
+    assert.equal(url, "/api/projects/alpha/api/query/stream");
+    return new Response('event: result\ndata: {"answer":"ok"}\n\n');
+  };
+  try {
+    const result = await streamQuery("/api/query/stream", {}, {});
+    assert.equal(result.answer, "ok");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});

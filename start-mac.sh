@@ -13,6 +13,8 @@ DATABASE_EXPLICIT=0
 REPOSITORY=""
 REPOSITORY_ID="repo-main"
 PROJECT_CONFIG=""
+PROJECT_REGISTRY=""
+PROJECT_ID=""
 HOST_ADDRESS="127.0.0.1"
 PORT="8082"
 PORT_EXPLICIT=0
@@ -33,6 +35,8 @@ Options:
   --repository PATH             Java/MyBatis repository for Repository mode
   --repository-id ID            Repository identifier (default: repo-main)
   --project-config PATH         Override the default project.config.json path
+  --project-registry PATH       Platform data directory for multiple projects
+  --project-id ID               Default project ID in registry mode
   --host ADDRESS                Listen address (default: 127.0.0.1)
   --port PORT                   Listen port (default: project startup.port or 8082)
   --skip-install                Reuse the installed Python environment
@@ -88,6 +92,16 @@ while [ "$#" -gt 0 ]; do
       PROJECT_CONFIG="$2"
       shift 2
       ;;
+    --project-registry)
+      [ "$#" -ge 2 ] || fail "--project-registry requires a path"
+      PROJECT_REGISTRY="$2"
+      shift 2
+      ;;
+    --project-id)
+      [ "$#" -ge 2 ] || fail "--project-id requires an ID"
+      PROJECT_ID="$2"
+      shift 2
+      ;;
     --host)
       [ "$#" -ge 2 ] || fail "--host requires an address"
       HOST_ADDRESS="$2"
@@ -121,7 +135,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "$PROJECT_CONFIG" ] && [ "$MODE_EXPLICIT" -eq 0 ] && [ -z "$REPOSITORY" ] && [ -f "$DEFAULT_PROJECT_CONFIG" ]; then
+if [ -z "$PROJECT_REGISTRY" ] && [ -z "$PROJECT_CONFIG" ] && [ "$MODE_EXPLICIT" -eq 0 ] && [ -z "$REPOSITORY" ] && [ -f "$DEFAULT_PROJECT_CONFIG" ]; then
   PROJECT_CONFIG="$DEFAULT_PROJECT_CONFIG"
 fi
 
@@ -229,7 +243,10 @@ DATA_DIRECTORY="$(dirname "$DATABASE_PATH")"
 mkdir -p "$DATA_DIRECTORY"
 
 step "Preparing knowledge database"
-if [ -n "$PROJECT_CONFIG" ]; then
+if [ -n "$PROJECT_REGISTRY" ]; then
+  mkdir -p "$PROJECT_REGISTRY"
+  printf 'Registry mode: project databases and materials are opened per selected project.\n'
+elif [ -n "$PROJECT_CONFIG" ]; then
   [ -f "$PROJECT_CONFIG" ] || fail "Project config does not exist: $PROJECT_CONFIG"
   "$VENV_PYTHON" -m business_code_agent.cli init-db --db "$DATABASE_PATH"
   "$VENV_PYTHON" -m business_code_agent.cli sync-project --config "$PROJECT_CONFIG" --db "$DATABASE_PATH"
@@ -323,6 +340,12 @@ SERVER_ARGUMENTS=(-m business_code_agent.cli serve-query --db "$DATABASE_PATH" -
 if [ -n "$PROJECT_CONFIG" ]; then
   SERVER_ARGUMENTS+=(--project-config "$PROJECT_CONFIG")
 fi
+if [ -n "$PROJECT_REGISTRY" ]; then
+  SERVER_ARGUMENTS+=(--project-registry "$PROJECT_REGISTRY")
+fi
+if [ -n "$PROJECT_ID" ]; then
+  SERVER_ARGUMENTS+=(--project-id "$PROJECT_ID")
+fi
 "$VENV_PYTHON" "${SERVER_ARGUMENTS[@]}" >>"$LOG_PATH" 2>>"$ERROR_LOG_PATH" &
 SERVER_PID=$!
 
@@ -342,7 +365,9 @@ while [ "$ATTEMPT" -lt 40 ]; do
     [ -s "$ERROR_LOG_PATH" ] && tail -n 30 "$ERROR_LOG_PATH" >&2
     exit 1
   fi
-  if curl --silent --fail --max-time 1 "$URL_HOST:$PORT/api/workspace" >/dev/null 2>&1; then
+  READY_PATH="/api/workspace"
+  [ -n "$PROJECT_REGISTRY" ] && READY_PATH="/api/projects"
+  if curl --silent --fail --max-time 1 "$URL_HOST:$PORT$READY_PATH" >/dev/null 2>&1; then
     READY=1
     break
   fi

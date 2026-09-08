@@ -21,9 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .harness import EvaluationRuntime, write_json
+from .ast_service import AstService
+from .case_import import import_upload
 from .report import build_view_report, generate_report
-from .runner import (ARM_DESCRIPTIONS_ABC, ARMS_ABC, freeze_batch, load_protocol, rejudge_output,
-                     run_batch, summarize_pairs, validate_suite)
+from .runner import (ARM_DESCRIPTIONS_ABC, ARMS_ABC, COMPARISONS, freeze_batch, load_protocol, rejudge_output,
+                     run_batch, summarize_pairs, validate_suite, resolve_project_sources)
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +62,12 @@ class EvaluationError(ValueError):
 
 
 class EvaluationService:
-    def __init__(self, *, project_config=None, data_root=None, runtime_factory=None,
+    def __init__(self, *, project_config=None, data_root=None, ast_data_root=None,
+                 baseline_root=None, requirements_root=None, runtime_factory=None,
                  timeout_seconds=240, workers=2, command="claude"):
         self.project_config = Path(project_config).expanduser().resolve() if project_config else None
+        self.baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
+        self.requirements_root = Path(requirements_root).expanduser().resolve() if requirements_root else None
         if data_root:
             self.root = Path(data_root).expanduser().resolve()
         elif self.project_config:
@@ -76,6 +81,7 @@ class EvaluationService:
             os.environ.get("BUSINESS_CODE_EVALUATION_TIMEOUT_SECONDS", timeout_seconds))
         self.workers = int(os.environ.get("BUSINESS_CODE_EVALUATION_WORKERS", workers))
         self.command = command
+        self.ast_service = AstService(project_config=self.project_config, data_root=ast_data_root)
         self.runtime_factory = runtime_factory or (lambda job=None: EvaluationRuntime(timeout_seconds=self.timeout_seconds))
         self._lock = threading.RLock()
         self._active: dict[str, dict] = {}
@@ -195,8 +201,12 @@ class EvaluationService:
             normalized_cases.append({
                 "id": str(case.get("id") or "").strip(),
                 "question": str(case.get("question") or "").strip(),
+                "referenceAnswer": str(case.get("referenceAnswer") or case.get("reference_answer") or "").strip(),
                 "checks": [str(check) for check in (case.get("checks") or [])],
                 "category": str(case.get("category") or "uncategorized"),
+                "scope": str(case.get("scope") or "").strip(),
+                "evidence": str(case.get("evidence") or "").strip(),
+                "disabled": bool(case.get("disabled", False)),
                 "notes": str(case.get("notes") or "") or None,
             })
         suite = {
@@ -232,13 +242,98 @@ class EvaluationService:
     def create_suite(self, payload: dict) -> dict:
         payload = payload or {}
         with self._lock:
+            if payload.get("upload"):
+                uploaded = payload["upload"]
+                if not isinstance(uploaded, dict):
+                    raise EvaluationError("upload 必须是文件对象")
+                imported = import_upload(str(uploaded.get("filename") or "cases.json"),
+                                         str(uploaded.get("content") or ""),
+                                         str(uploaded.get("encoding") or "base64"),
+                                         mapping=payload.get("mapping"))
+                if payload.get("name"):
+                    imported["name"] = str(payload["name"])
+                if imported.get("mappingRequired"):
+                    return imported
+                return self._create_imported_suite(imported, source_name=str(uploaded.get("filename") or "上传文件"))
+            if payload.get("example"):
+                example_ref = payload.get("example") if isinstance(payload.get("example"), str) else None
+                return self._import_example(example_ref)
             if payload.get("importPath"):
                 return self._import_suite(str(payload["importPath"]))
             suite_id = f"suite-{_safe_slug(payload.get('name') or 'suite')}-{uuid.uuid4().hex[:6]}"
             suite = self._normalize_suite(suite_id, payload)
+            if payload.get("requireReference"):
+                self._require_reference_answers(suite)
             suite["projectConfig"] = self._validate_suite_binding({"projectConfig": suite.get("projectConfig")})
             self._write_suite(suite)
             return suite
+
+    def _create_imported_suite(self, imported: dict, *, source_name: str) -> dict:
+        suite_id = f"suite-{_safe_slug(imported.get('name') or 'suite')}-{uuid.uuid4().hex[:6]}"
+        suite = self._normalize_suite(suite_id, imported)
+        suite["projectConfig"] = self._validate_suite_binding(imported)
+        suite["source"] = f"import:{source_name}"
+        suite["importSummary"] = imported.get("importSummary") or {"success": len(suite["cases"]), "failed": 0, "errors": []}
+        if suite["cases"]:
+            validate_suite({**suite, "cases": suite["cases"]})
+        self._write_suite(suite)
+        return suite
+
+    @staticmethod
+    def _require_reference_answers(suite: dict) -> None:
+        missing = [str(case.get("id") or "(未编号)") for case in suite.get("cases") or []
+                   if not case.get("disabled") and not str(case.get("referenceAnswer") or "").strip()]
+        if missing:
+            raise EvaluationError("以下启用案例缺少参考答案：" + "、".join(missing[:8]))
+
+    def _import_example(self, example_ref: str | None = None) -> dict:
+        if not self.project_config:
+            raise EvaluationError("当前服务未配置项目")
+        config = _load_json(self.project_config, {}) or {}
+        evaluation = config.get("evaluation") or config.get("evaluations") or {}
+        declared = None
+        if isinstance(evaluation, dict):
+            declared = evaluation.get("examples") or evaluation.get("exampleSuites")
+        if declared is None:
+            declared = config.get("evaluationExamples")
+        if isinstance(declared, (str, Path)):
+            declared = [declared]
+        candidates = []
+        for item in declared or []:
+            if isinstance(item, dict):
+                value = item.get("path") or item.get("file") or item.get("source")
+                label = str(item.get("name") or value or "")
+            else:
+                value = item
+                label = str(item or "")
+            if not value:
+                continue
+            candidate = Path(str(value)).expanduser()
+            if not candidate.is_absolute():
+                candidate = (self.project_config.parent / candidate).resolve()
+            candidates.append((label, candidate))
+        if example_ref:
+            candidates = [item for item in candidates
+                          if item[0] == example_ref or str(item[1]) == example_ref
+                          or item[1].name == example_ref]
+        path = next((item for item in candidates if item[1].is_file()), None)
+        if not path:
+            if example_ref:
+                raise EvaluationError(f"项目配置未声明可用的示例题库：{example_ref}")
+            raise EvaluationError("当前项目没有声明可导入的示例题库，请在 evaluation.examples 中配置文件路径")
+        label, path = path
+        data = _load_json(path, None)
+        if data is None:
+            raise EvaluationError("项目示例案例不是合法 JSON")
+        metadata = dict(data) if isinstance(data, dict) else {"cases": data}
+        rows = metadata.get("cases") or []
+        cases = []
+        errors = []
+        from .case_import import normalize_rows
+        cases, errors = normalize_rows(rows, require_reference=False)
+        metadata["cases"] = cases
+        metadata["importSummary"] = {"success": len(cases), "failed": len(errors), "errors": errors}
+        return self._create_imported_suite(metadata, source_name=label or path.name)
 
     def _import_suite(self, import_path: str) -> dict:
         path = Path(import_path).expanduser()
@@ -251,6 +346,8 @@ class EvaluationService:
         if data is None:
             raise EvaluationError("题库文件不是合法 JSON")
         suite_id = f"suite-{_safe_slug(data.get('name') or path.stem)}-{uuid.uuid4().hex[:6]}"
+        # Existing project JSON keeps working; uploaded files use the stricter
+        # importer so row-level errors can be shown without discarding valid rows.
         suite = self._normalize_suite(suite_id, data)
         suite["projectConfig"] = self._validate_suite_binding(data, source_path=path)
         suite["source"] = f"import:{path.name}"
@@ -268,6 +365,8 @@ class EvaluationService:
             merged.pop("revision", None)
             merged.pop("id", None)
             suite = self._normalize_suite(suite_id, merged, keep_meta=current)
+            if payload.get("requireReference"):
+                self._require_reference_answers(suite)
             suite["revision"] = int(current.get("revision", 1)) + 1
             suite["projectConfig"] = current.get("projectConfig")
             if suite.get("cases"):
@@ -288,7 +387,11 @@ class EvaluationService:
         baseline = {"root": None, "readable": False, "documents": [], "hasOverview": False}
         try:
             from .runner import resolve_project_sources
-            manager, repository_sources, baseline_root, requirements_root = resolve_project_sources(self.project_config)
+            manager, repository_sources, baseline_root, requirements_root = resolve_project_sources(
+                self.project_config,
+                baseline_root=self.baseline_root,
+                requirements_root=self.requirements_root,
+            )
             repositories = [{"id": rid, "path": str(path), "readable": path.is_dir()}
                             for rid, path in repository_sources]
             requirements = {"root": str(requirements_root), "readable": requirements_root.is_dir()}
@@ -330,12 +433,14 @@ class EvaluationService:
             "suites": suites["items"],
             "lastUsedSuiteId": suites["lastUsedSuiteId"],
             "baseline": baseline,
+            "ast": self.ast_service.status(),
             "repositories": readiness["repositories"],
             "requirements": readiness["requirements"],
             "cli": readiness["cli"],
             "runtime": {"source": "本地 Claude Code 当前模型设置；实际响应模型名称记录在批次报告中",
                         "timeoutSeconds": self.timeout_seconds, "workers": self.workers,
-                        "comparison": {"arms": list(ARMS_ABC), "descriptions": ARM_DESCRIPTIONS_ABC}},
+                        "comparison": {"arms": list(ARMS_ABC), "descriptions": ARM_DESCRIPTIONS_ABC},
+                        "comparisons": COMPARISONS},
             "activeEvaluationId": active,
         }
 
@@ -364,9 +469,16 @@ class EvaluationService:
         repeats = int(payload.get("repeats") or 2)
         if not 1 <= repeats <= 5:
             raise EvaluationError("轮次必须在 1 到 5 之间")
+        comparison = payload.get("comparison", "abc")
+        if comparison not in COMPARISONS:
+            raise EvaluationError("未知对照方式")
+        arm_descriptions = COMPARISONS[comparison]
         judge = bool(payload.get("judge", True))
         suite = self._read_suite(suite_id)
         cases = validate_suite({"cases": suite.get("cases") or []})
+        cases = [case for case in cases if not case.get("disabled")]
+        if not cases:
+            raise EvaluationError("当前题库没有启用中的案例")
         case_ids = None
         if payload.get("caseIds"):
             case_ids = [str(item) for item in payload["caseIds"]]
@@ -374,6 +486,15 @@ class EvaluationService:
             if unknown:
                 raise EvaluationError(f"题目子集包含题库中不存在的 id: {', '.join(sorted(unknown))}")
             cases = [case for case in cases if case["id"] in set(case_ids)]
+        if judge:
+            missing_rubric_ids = [case["id"] for case in cases if not case.get("checks")]
+            if missing_rubric_ids:
+                sample = ", ".join(missing_rubric_ids[:12])
+                suffix = " …" if len(missing_rubric_ids) > 12 else ""
+                raise EvaluationError(
+                    f"以下案例没有评分要点：{sample}{suffix}。请先生成并检查评分要点，"
+                    "或取消‘自动初评’后仅运行答题。"
+                )
         with self._lock:
             if self.active_evaluation():
                 return {"evaluationId": self.active_evaluation(), "duplicate": True, "status": "running"}
@@ -386,6 +507,46 @@ class EvaluationService:
                 raise EvaluationError("业务基线目录不可读，知识主干资料缺失，无法开始对照。")
             if not readiness["baseline"]["documents"]:
                 raise EvaluationError("业务基线目录没有任何 Markdown 文档，有主干组将没有可对照的知识。")
+            ast_status = self.ast_service.status()
+            requested_ast_id = str(payload.get("astVersionId") or "").strip() or None
+            ast_current = self.ast_service.version(requested_ast_id) if requested_ast_id else self.ast_service.current_version()
+            if "ast" in arm_descriptions and (not ast_current or (not requested_ast_id and ast_status.get("status") != "available")):
+                raise EvaluationError("AST 资料尚未手动生成或已经待更新，请先在 AST 管理页生成可用版本。")
+            ast_version_id = ast_current[0] if ast_current else None
+            ast_documents = {
+                str(path.relative_to(ast_current[2])): path.read_text(encoding="utf-8")
+                for path in ast_current[2].rglob("*.md")
+            } if ast_current else None
+            variants = None
+            if ast_documents is not None and "ast" in arm_descriptions:
+                from .runner import baseline_documents
+                _, _, baseline_root, _ = resolve_project_sources(
+                    self.project_config,
+                    baseline_root=self.baseline_root,
+                    requirements_root=self.requirements_root,
+                )
+                baseline_docs = baseline_documents(baseline_root)
+                variants = {}
+                for arm in arm_descriptions:
+                    if arm == "code_only":
+                        variants[arm] = {}
+                    elif arm == "optional":
+                        variants[arm] = baseline_docs
+                    elif arm == "overview":
+                        overview = baseline_docs.get("project-overview.md", "")
+                        variants[arm] = {"project-overview.md": overview +
+                                         "\n\n## 本轮资料范围\n\n本轮只提供项目总览，未提供人工流程主干文件；请从源码确认实现。\n"}
+                    elif arm == "ast":
+                        variants[arm] = ast_documents
+                    elif arm == "overview_ast":
+                        overview = baseline_docs.get("project-overview.md", "")
+                        variants[arm] = {**{key: value for key, value in ast_documents.items()
+                                           if key != "project-overview.md"},
+                                         "ast-overview.md": ast_documents.get("project-overview.md", ""),
+                                         "project-overview.md": overview +
+                                         "\n\n## 可选代码结构资料\n\n[AST结构导航](ast-overview.md)：仅含机械提取的代码结构，实际行为以源码为准。\n"}
+                    else:
+                        variants[arm] = baseline_docs
             stamp = datetime.now().strftime("eval-%Y%m%d-%H%M%S")
             eval_id = stamp
             number = 1
@@ -396,8 +557,12 @@ class EvaluationService:
             try:
                 frozen = freeze_batch(
                     batch_dir, suite=suite, cases=cases, project_config=self.project_config,
-                    arms=list(ARMS_ABC), arm_descriptions=dict(ARM_DESCRIPTIONS_ABC),
-                    comparison="abc", repeats=repeats, case_ids=None, judge=judge,
+                    project_id=self.project_id,
+                    arms=list(arm_descriptions), arm_descriptions=dict(arm_descriptions),
+                    comparison=comparison, repeats=repeats, case_ids=None, judge=judge,
+                    variants=variants, ast_version_id=ast_version_id,
+                    ast_generation_seconds=(ast_current[1].get("generationSeconds") if ast_current else None),
+                    baseline_root=self.baseline_root, requirements_root=self.requirements_root,
                     workers=self.workers, timeout_seconds=self.timeout_seconds,
                     suite_ref={"id": suite["id"], "revision": suite.get("revision", 1),
                                "name": suite["name"], "origin": suite.get("origin"), "scope": suite.get("scope", "")})
@@ -411,17 +576,21 @@ class EvaluationService:
                              "status": "pending", "elapsedSeconds": None, "toolCalls": 0,
                              "toolErrors": 0, "reviewStatus": "none", "modelStatus": "none"})
             state = {
-                "id": eval_id, "status": "running", "phase": "answering",
+                "id": eval_id, "projectId": self.project_id, "status": "running", "phase": "answering",
                 "createdAt": _now(), "startedAt": _now(), "finishedAt": None, "error": None,
                 "cancelRequested": False,
                 "suite": frozen["protocol"].get("suiteRef") or {"id": suite_id, "name": suite["name"],
                                                                "revision": suite.get("revision", 1)},
                 "settings": {"repeats": repeats, "judge": judge, "caseIds": case_ids,
                              "questions": len(cases), "workers": self.workers,
-                             "timeoutSeconds": self.timeout_seconds, "comparison": "ab",
+                             "timeoutSeconds": self.timeout_seconds, "comparison": comparison,
                              "sourceRepoCount": len(frozen["protocol"].get("sourceRepositories", [])),
-                             "baselineDocCount": len(frozen.get("baselineDocuments", {}))},
-                "arms": dict(ARM_DESCRIPTIONS_ABC),
+                             "baselineDocCount": len(frozen.get("baselineDocuments", {})),
+                             "astVersionId": ast_version_id,
+                             "astStatus": ast_status.get("status") if ast_version_id else None,
+                             "retryOf": payload.get("retryOf"),
+                             "astGenerationSeconds": (ast_current[1].get("generationSeconds") if ast_current else None)},
+                "arms": dict(arm_descriptions),
                 "cases": [{"id": case["id"], "question": case["question"],
                            "category": case.get("category") or "未分类",
                            "checkCount": len(case["checks"])} for case in frozen["protocol"]["cases"]],
@@ -433,7 +602,8 @@ class EvaluationService:
             self._save_state(eval_id, state)
             self._index_update(eval_id, id=eval_id, status="running", createdAt=state["createdAt"],
                                suite=state["suite"], settings=state["settings"],
-                               questions=len(cases), repeats=repeats, judge=judge)
+                               questions=len(cases), repeats=repeats, judge=judge,
+                               retryOf=payload.get("retryOf"))
             _atomic_write_json(self.suites_root / "last-used.json",
                                {"suiteId": suite_id, "revision": suite.get("revision", 1), "at": _now()})
             thread = threading.Thread(target=self._run_batch, args=(eval_id,), daemon=True,
@@ -441,6 +611,112 @@ class EvaluationService:
             self._active[eval_id] = {"thread": thread, "cancel": threading.Event(), "mode": "batch"}
             thread.start()
             return {"evaluationId": eval_id, "duplicate": False, "status": "running"}
+
+    def retry_failed(self, eval_id: str) -> dict:
+        """Retry exactly failed answer jobs from the original frozen batch.
+
+        A retry is a new, auditable batch.  It copies the original protocol
+        and frozen inputs, keeps only the failed case/repeat/arm jobs, and
+        never re-reads the current suite, repositories or AST status.
+        """
+        state = self._load_state(eval_id)
+        if state["status"] in ACTIVE_STATUSES:
+            raise EvaluationError("当前批次仍在运行，不能重试失败任务")
+        failed_ids = {
+            str(job.get("answerId"))
+            for job in state.get("jobs", [])
+            if job.get("status") == "failed"
+        }
+        if not failed_ids:
+            raise EvaluationError("当前批次没有失败的答题任务")
+        original_dir = self._batch_dir(eval_id)
+        original_protocol = load_protocol(original_dir)
+        original_jobs = original_protocol.get("jobs") or []
+        retry_jobs = [job for job in original_jobs
+                      if f"{job['case']}-r{job['repeat']}-{job['arm']}" in failed_ids]
+        if not retry_jobs:
+            raise EvaluationError("旧批次没有可定位的失败任务，无法安全重试")
+        retry_case_ids = {job["case"] for job in retry_jobs}
+        retry_cases = [case for case in original_protocol.get("cases", [])
+                       if case.get("id") in retry_case_ids]
+        if len(retry_cases) != len(retry_case_ids):
+            raise EvaluationError("旧批次的失败任务缺少冻结题目，无法安全重试")
+        original_inputs = original_dir / "inputs"
+        if not original_inputs.is_dir():
+            raise EvaluationError("旧批次没有冻结资料目录，无法安全重试")
+
+        with self._lock:
+            active = self.active_evaluation()
+            if active:
+                raise EvaluationError("已有评测任务在运行，请等待完成或先停止。")
+            stamp = datetime.now().strftime("eval-%Y%m%d-%H%M%S")
+            retry_id = stamp
+            number = 1
+            while (self.root / retry_id).exists():
+                number += 1
+                retry_id = f"{stamp}-{number}"
+            retry_dir = self.root / retry_id
+            retry_dir.mkdir(parents=True, exist_ok=False)
+            try:
+                shutil.copytree(original_inputs, retry_dir / "inputs")
+                protocol = json.loads(json.dumps(original_protocol, ensure_ascii=False))
+                protocol["cases"] = retry_cases
+                protocol["jobs"] = retry_jobs
+                protocol["createdAt"] = _now()
+                protocol["retryOf"] = eval_id
+                protocol["retryMode"] = "failed-answer-jobs-only"
+                protocol["notes"] = list(protocol.get("notes") or []) + [
+                    f"本批次只重试原批次 {eval_id} 的失败答题任务：{len(retry_jobs)} 个；使用原批次冻结题库、源码、需求和知识资料。"
+                ]
+                write_json(retry_dir / "protocol.json", protocol)
+            except (OSError, ValueError) as exc:
+                shutil.rmtree(retry_dir, ignore_errors=True)
+                raise EvaluationError(f"复制原批次冻结资料失败：{exc}") from exc
+
+            original_settings = dict(state.get("settings") or {})
+            retry_settings = dict(original_settings)
+            retry_settings.update({
+                "questions": len(retry_case_ids),
+                "caseIds": sorted(retry_case_ids),
+                "retryOf": eval_id,
+                "retryJobCount": len(retry_jobs),
+                "retryJobIds": sorted(failed_ids),
+                "retryMode": "failed-answer-jobs-only",
+            })
+            suite = dict(state.get("suite") or {})
+            suite["name"] = f"{suite.get('name') or '实验批次'} · 失败任务重试"
+            jobs = []
+            for job in retry_jobs:
+                answer_id = f"{job['case']}-r{job['repeat']}-{job['arm']}"
+                jobs.append({"answerId": answer_id, "caseId": job["case"], "repeat": job["repeat"],
+                             "arm": job["arm"], "status": "pending", "elapsedSeconds": None,
+                             "toolCalls": 0, "toolErrors": 0, "reviewStatus": "none", "modelStatus": "none"})
+            now = _now()
+            retry_state = {
+                "id": retry_id, "projectId": self.project_id, "status": "running", "phase": "answering",
+                "createdAt": now, "startedAt": now, "finishedAt": None, "error": None,
+                "cancelRequested": False, "suite": suite, "settings": retry_settings,
+                "arms": dict(state.get("arms") or protocol.get("arms") or {}),
+                "cases": [{"id": case["id"], "question": case["question"],
+                           "category": case.get("category") or "未分类",
+                           "checkCount": len(case.get("checks") or [])} for case in retry_cases],
+                "jobs": jobs, "progress": self._progress(jobs, bool(retry_settings.get("judge"))),
+                "notes": list(state.get("notes") or []) + [
+                    f"本批次只重试原批次 {eval_id} 的 {len(jobs)} 个失败答题任务；不重新读取当前题库或源码。"
+                ],
+            }
+            self._save_state(retry_id, retry_state)
+            self._index_update(retry_id, id=retry_id, status="running", createdAt=now,
+                               suite=suite, settings=retry_settings,
+                               questions=len(retry_case_ids),
+                               repeats=retry_settings.get("repeats", 1),
+                               judge=bool(retry_settings.get("judge")), retryOf=eval_id)
+            thread = threading.Thread(target=self._run_batch, args=(retry_id,), daemon=True,
+                                      name=f"evaluation-{retry_id}")
+            self._active[retry_id] = {"thread": thread, "cancel": threading.Event(), "mode": "batch"}
+            thread.start()
+            return {"evaluationId": retry_id, "duplicate": False, "status": "running", "retryOf": eval_id,
+                    "retryJobCount": len(jobs)}
 
     @staticmethod
     def _progress(jobs, judge) -> dict:
@@ -629,8 +905,12 @@ class EvaluationService:
         ordered_rows = []
         index = {}
         reviews = self._reviews(eval_id)
+        planned_blocks = {(job["caseId"], job["repeat"]) for job in state.get("jobs", [])}
         for case in state.get("cases", []):
-            for repeat in range(1, int(state["settings"].get("repeats", 1)) + 1):
+            repeats = sorted(repeat for case_id, repeat in planned_blocks if case_id == case["id"])
+            if not repeats:
+                repeats = list(range(1, int(state["settings"].get("repeats", 1)) + 1))
+            for repeat in repeats:
                 row = {"caseId": case["id"], "category": case["category"], "question": case["question"],
                        "repeat": repeat, "runs": {}}
                 index[(case["id"], repeat)] = row
@@ -735,6 +1015,7 @@ class EvaluationService:
                 "toolErrors": result.get("toolErrors", 0),
                 "baselineReadCalls": result.get("baselineReadCalls", 0),
                 "baselineContentCalls": result.get("baselineContentCalls", 0),
+                "referenceUsage": result.get("referenceUsage"),
                 "usage": result.get("usage") or {},
                 "metadata": result.get("metadata") or {},
                 "modelReview": result.get("review"),
@@ -742,7 +1023,10 @@ class EvaluationService:
                 "reviews": (reviews.get(answer_id) or {}).get("revisions") or [],
                 "trace": self._trim_trace(result.get("toolTrace") or []),
             }
-        return {"case": {"id": case_id, "question": case["question"], "checks": case["checks"],
+        return {"case": {"id": case_id, "question": case["question"],
+                         "referenceAnswer": case.get("referenceAnswer") or "",
+                         "checks": case["checks"], "scope": case.get("scope") or "",
+                         "evidence": case.get("evidence") or "", "disabled": bool(case.get("disabled")),
                          "category": case.get("category")},
                 "repeat": repeat,
                 "runs": runs,

@@ -8,6 +8,7 @@ from statistics import mean
 
 from .scoring import parse_review
 from .runner import summarize_pairs
+from .diagnosis import investigation_artifacts, diagnosis_summaries, diagnosis_markdown
 
 
 def reviewed(result, cases, manual):
@@ -101,6 +102,17 @@ def generate_report(output, manual_path=None):
                                     "issues": [], "note": "逐项填 0 或 1；未复核保持 null"}
     models = sorted({model for r in results for model in r.get("metadata", {}).get("reportedModels", [])})
     lines += ["", "模型报告的名称：" + ("、".join(models) if models else "未记录") + "。本地网关的上游身份未独立核实。"]
+    prep = protocol.get("referencePreparation") or {}
+    if prep:
+        lines += ["", "## 资料准备成本", "", f"AST生成耗时：{prep.get('astGenerationSeconds')} 秒（独立生成，不计入答题耗时；版本：{prep.get('astVersionId') or '未使用'}）。",
+                  "", "| 组别 | 文档数 | 总字符数 | 自动总览字符数 |", "| --- | ---: | ---: | ---: |"]
+        for arm, item in prep.get("arms", {}).items():
+            lines.append(f"| {arm} | {item['documents']} | {item['characters']} | {item['overviewCharacters']} |")
+    diagnosis = diagnosis_summaries(results, cases, arms)
+    investigation_artifacts(output, protocol, results)
+    lines += ["", "以下分层与增量统计使用模型初评，人工复核请使用页面复核视图导出。", diagnosis_markdown(diagnosis)]
+    write_diagnosis = output / "diagnosis-summary.json"
+    write_diagnosis.write_text(json.dumps(diagnosis, ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (output / "summary.json").write_text(json.dumps({"completeBlocks": len(complete), "reviewedBlocks": len(eligible),
         "aggregates": aggregates, "pairs": pairs}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -150,6 +162,9 @@ def build_view_report(*, protocol, results, cases, source, reviews=None, notes=N
               "模型初评是同一模型服务的新会话评分，存在漏判与引文改写，需人工复核后才能作为验收依据。",
               "未自动判定“无关检索”及“首次正确定位”；工具调用总数不能替代这两个指标。",
               "本流程比较文档主干的整体接入效果，不验证数据库知识图谱的独立收益。"]
+    diagnosis = diagnosis_summaries(results, cases, arms, source=source, reviews=reviews)
+    lines.append(diagnosis_markdown(diagnosis))
+    summary["diagnosis"] = diagnosis
     if notes:
         lines += ["", "## 备注", ""] + [f"- {note}" for note in notes]
     return "\n".join(lines) + "\n", summary

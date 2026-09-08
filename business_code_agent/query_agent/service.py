@@ -24,6 +24,9 @@ from .workspace import Workspace, WorkspaceManager, _safe_name
 
 logger = logging.getLogger(__name__)
 
+QUERY_MODES = ("none", "backbone", "ast")
+QUERY_MODE_LABELS = {"none": "无主干", "backbone": "有主干", "ast": "AST"}
+
 
 class QueryRuntimeError(RuntimeErrorBase):
     """A query could not be completed by the configured runtime."""
@@ -64,14 +67,25 @@ class QueryService:
         project_config: str | Path | None = None,
         runtime=None,
         workspace_manager: WorkspaceManager | None = None,
+        workspace_root: str | Path | None = None,
+        ast_data_root: str | Path | None = None,
+        baseline_root: str | Path | None = None,
+        requirements_root: str | Path | None = None,
+        project_id: str | None = None,
+        project_scoped: bool = False,
     ):
         self.db = db
         self.db_path = db_path
         self.project_config = str(project_config) if project_config else None
+        self.ast_data_root = Path(ast_data_root).expanduser().resolve() if ast_data_root else None
+        self.project_id = str(project_id or "").strip() or None
+        self.project_scoped = bool(project_scoped and self.project_id)
         self.workspace_manager = workspace_manager or WorkspaceManager(
             db,
             project_config=project_config,
-            workspace_root=self._default_workspace_root(project_config, db_path),
+            workspace_root=workspace_root or self._default_workspace_root(project_config, db_path),
+            baseline_root=baseline_root,
+            requirements_root=requirements_root,
         )
         self.runtime = runtime or _default_runtime()
 
@@ -99,6 +113,7 @@ class QueryService:
         event_callback=None,
         run_callback=None,
         scope=None,
+        mode: str | None = None,
     ) -> dict[str, Any]:
         """Run one question and persist the complete runtime exchange.
 
@@ -116,26 +131,35 @@ class QueryService:
             raise ValueError("question is required")
 
         logger.info("查询请求: conversation=%s question_characters=%s", conversation_id or "new", len(question))
-        workspace = self.workspace_manager.ensure()
+        effective_mode = self._normalize_mode(mode)
+        workspace = self._workspace_for_mode(effective_mode)
+        ast_version_id = workspace.ast_version_id
         logger.info("查询工作区就绪: workspace=%s path=%s", workspace.id, workspace.path)
         effective_scope = self._normalize_scope(scope)
-        run_id = f"RUN-{uuid.uuid4().hex}"
+        self._validate_owned_id(conversation_id, "conversation")
+        run_id = self._new_id("RUN")
         started_at = _now()
         started_clock = time.monotonic()
         # Hold the write lock across the active-run check and insertion so
         # another tab/request cannot start the same session concurrently.
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            conversation = self._get_or_create_conversation(conversation_id, workspace)
+            conversation = self._get_or_create_conversation(conversation_id, workspace, effective_mode)
             stored_scope = _load_json(conversation.get("scope_json"), None)
-            if effective_scope != stored_scope:
+            stored_mode = str(conversation.get("mode") or "backbone")
+            stored_ast_version_id = conversation.get("ast_version_id")
+            version_changed = ast_version_id != stored_ast_version_id
+            if effective_scope != stored_scope or effective_mode != stored_mode or version_changed:
                 # 范围变更不续用旧 runtime 会话：resumed session 可能保留上一范围的目录授权。
                 self.db.execute(
-                    "UPDATE query_conversation SET scope_json=?,runtime_session_id=NULL,updated_at=? WHERE id=?",
-                    (_json(effective_scope) if effective_scope else None, _now(), conversation["id"]),
+                    "UPDATE query_conversation SET scope_json=?,mode=?,ast_version_id=?,runtime_session_id=NULL,updated_at=? WHERE id=?",
+                    (_json(effective_scope) if effective_scope else None, effective_mode, ast_version_id,
+                     _now(), conversation["id"]),
                 )
                 conversation["runtime_session_id"] = None
                 conversation["scope_json"] = _json(effective_scope) if effective_scope else None
+                conversation["mode"] = effective_mode
+                conversation["ast_version_id"] = ast_version_id
             active = self.db.execute(
                 "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
                 (conversation["id"],),
@@ -145,10 +169,10 @@ class QueryService:
             self.db.execute(
                 """INSERT INTO query_run
                    (id,conversation_id,runtime,runtime_session_id,question,status,answer,
-                    error,usage_json,scope_json,started_at,completed_at,duration_ms)
-                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,NULL,0)""",
+                    error,usage_json,scope_json,mode,ast_version_id,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,?,?,NULL,0)""",
                 (run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"], question,
-                 _json(effective_scope) if effective_scope else None, started_at),
+                 _json(effective_scope) if effective_scope else None, effective_mode, ast_version_id, started_at),
             )
             self._save_message(conversation["id"], run_id, "user", question, started_at)
             self.db.commit()
@@ -178,7 +202,9 @@ class QueryService:
 
         try:
             if run_callback:
-                run_callback({"runId": run_id, "conversationId": conversation["id"]})
+                run_callback({"runId": run_id, "conversationId": conversation["id"],
+                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                              "astVersionId": ast_version_id})
             raw_result = self.runtime.ask(
                 question,
                 workspace=str(workspace.path),
@@ -232,9 +258,9 @@ class QueryService:
         if result.answer:
             self._save_message(conversation["id"], run_id, "assistant", result.answer, completed_at)
         self.db.execute(
-            """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,updated_at=?
+            """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,ast_version_id=?,updated_at=?
                WHERE id=?""",
-            (self._runtime_name(), session_id, workspace.id, completed_at, conversation["id"]),
+            (self._runtime_name(), session_id, workspace.id, ast_version_id, completed_at, conversation["id"]),
         )
         self.db.commit()
         logger.info("查询结束: run=%s status=%s conversation=%s session=%s duration_ms=%s events=%s answer_characters=%s",
@@ -242,15 +268,47 @@ class QueryService:
         return {
             "runId": run_id,
             "conversationId": conversation["id"],
+            "projectId": self.project_id,
             "runtime": self._runtime_name(),
             "sessionId": session_id,
             "workspaceId": workspace.id,
+            "mode": effective_mode,
+            "modeLabel": QUERY_MODE_LABELS[effective_mode],
+            "astVersionId": ast_version_id,
             "status": final_status,
             "scope": effective_scope,
             "answer": result.answer,
             "events": emitted,
             "usage": result.usage,
         }
+
+    @staticmethod
+    def _normalize_mode(mode: str | None) -> str:
+        value = str(mode or "backbone").strip().casefold()
+        aliases = {"no_backbone": "none", "without": "none", "full": "backbone", "overview": "backbone"}
+        value = aliases.get(value, value)
+        if value not in QUERY_MODES:
+            raise ValueError("mode 必须是 none、backbone 或 ast")
+        return value
+
+    def _workspace_for_mode(self, mode: str) -> Workspace:
+        baseline_source = None
+        description = None
+        ast_version_id = None
+        if mode == "ast":
+            from ..evaluation.ast_service import AstService
+            current = AstService(project_config=self.project_config, data_root=self.ast_data_root).current_version()
+            if not current:
+                raise ValueError("AST 资料尚未生成或已经待更新，请先在 AST 管理页手动生成")
+            version_id, metadata, baseline_source = current
+            ast_version_id = version_id
+            description = f"当前模式：AST（资料版本 {version_id}，生成时间 {metadata.get('generatedAt') or '未知'}）。仅提供自动结构资料，不提供人工业务主干。"
+        elif mode == "none":
+            description = "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务基线或 AST 结构资料。"
+        else:
+            description = "当前模式：有主干。项目总览自动提供，业务流程主干按需读取；源码仍是当前实现依据。"
+        return self.workspace_manager.ensure(mode=mode, baseline_source=baseline_source,
+                                             mode_description=description, ast_version_id=ast_version_id)
 
     def _normalize_scope(self, scope: Any) -> dict[str, list[str]] | None:
         """校验并展开查询范围；返回 None 表示不限定（全部资料）。
@@ -291,6 +349,7 @@ class QueryService:
         return {"systemIds": system_ids, "repositoryIds": sorted(effective)}
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
+        self._validate_owned_id(run_id, "run")
         self.db.execute("UPDATE query_run SET status='cancelling' WHERE id=? AND status='running'", (run_id,))
         self.db.commit()
         row = self.db.execute("SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()
@@ -299,6 +358,7 @@ class QueryService:
         return {"runId": run_id, "status": row["status"]}
 
     def get_run(self, run_id: str) -> dict[str, Any]:
+        self._validate_owned_id(run_id, "run")
         row = self.db.execute("SELECT * FROM query_run WHERE id=?", (run_id,)).fetchone()
         if not row:
             raise KeyError(run_id)
@@ -312,16 +372,21 @@ class QueryService:
         )]
         conversation_id = value["conversation_id"]
         conversation = self.db.execute(
-            "SELECT runtime,runtime_session_id,workspace_id FROM query_conversation WHERE id=?",
+            "SELECT runtime,runtime_session_id,workspace_id,mode,ast_version_id FROM query_conversation WHERE id=?",
             (conversation_id,),
         ).fetchone()
+        ast_version_id = value.get("ast_version_id") or (conversation["ast_version_id"] if conversation else None)
         return {
             "id": value["id"],
             "runId": value["id"],
             "conversationId": conversation_id,
+            "projectId": self.project_id,
             "runtime": value["runtime"],
             "sessionId": value["runtime_session_id"] or (conversation["runtime_session_id"] if conversation else None),
             "workspaceId": conversation["workspace_id"] if conversation else None,
+            "mode": value.get("mode") or (conversation["mode"] if conversation else "backbone"),
+            "modeLabel": QUERY_MODE_LABELS.get(value.get("mode") or (conversation["mode"] if conversation else "backbone"), "有主干"),
+            "astVersionId": ast_version_id,
             "question": value["question"],
             "status": value["status"],
             "scope": _load_json(value["scope_json"], None),
@@ -336,14 +401,17 @@ class QueryService:
         }
 
     def get_conversation(self, conversation_id: str) -> dict[str, Any]:
+        self._validate_owned_id(conversation_id, "conversation")
         if not self.db.execute("SELECT 1 FROM query_conversation WHERE id=?", (conversation_id,)).fetchone():
             raise KeyError(conversation_id)
         rows = self.db.execute(
             "SELECT id FROM query_run WHERE conversation_id=? ORDER BY started_at,id", (conversation_id,),
         ).fetchall()
-        return {"conversationId": conversation_id, "items": [self.get_run(row["id"]) for row in rows]}
+        return {"conversationId": conversation_id, "projectId": self.project_id,
+                "items": [self.get_run(row["id"]) for row in rows]}
 
     def delete_conversation(self, conversation_id: str) -> dict[str, Any]:
+        self._validate_owned_id(conversation_id, "conversation")
         if not self.db.execute("SELECT 1 FROM query_conversation WHERE id=?", (conversation_id,)).fetchone():
             raise KeyError(conversation_id)
         active = self.db.execute(
@@ -382,7 +450,8 @@ class QueryService:
             args.extend(position)
         args.append(limit + 1)
         rows = self.db.execute(
-            f"""SELECT r.id,r.conversation_id,r.question,r.status,r.started_at,c.workspace_id,c.scope_json
+            f"""SELECT r.id,r.conversation_id,r.question,r.status,r.started_at,c.workspace_id,c.scope_json,c.mode,
+                       r.ast_version_id
                 FROM query_run r JOIN query_conversation c ON c.id=r.conversation_id
                 WHERE r.id=(SELECT latest.id FROM query_run latest
                             WHERE latest.conversation_id=r.conversation_id
@@ -393,8 +462,11 @@ class QueryService:
         page = rows[:limit]
         return {
             "items": [{"id": row["id"], "runId": row["id"], "conversationId": row["conversation_id"],
+                       "projectId": self.project_id,
                        "question": row["question"], "status": row["status"], "startedAt": row["started_at"],
-                       "workspaceId": row["workspace_id"], "scope": _load_json(row["scope_json"], None)}
+                       "workspaceId": row["workspace_id"], "scope": _load_json(row["scope_json"], None),
+                       "mode": row["mode"] or "backbone", "modeLabel": QUERY_MODE_LABELS.get(row["mode"] or "backbone", "有主干"),
+                       "astVersionId": row["ast_version_id"]}
                       for row in page],
             "nextCursor": _json([page[-1]["started_at"], page[-1]["id"]]) if len(rows) > limit else None,
         }
@@ -403,7 +475,7 @@ class QueryService:
         limit = max(1, min(int(limit), 100))
         rows = self.db.execute(
             """SELECT id,conversation_id,runtime,runtime_session_id,question,status,answer,error,
-                      started_at,completed_at,duration_ms
+                      mode,ast_version_id,started_at,completed_at,duration_ms
                  FROM query_run ORDER BY started_at DESC,id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -412,10 +484,14 @@ class QueryService:
                 "id": row["id"],
                 "runId": row["id"],
                 "conversationId": row["conversation_id"],
+                "projectId": self.project_id,
                 "runtime": row["runtime"],
                 "sessionId": row["runtime_session_id"],
                 "question": row["question"],
                 "status": row["status"],
+                "mode": row["mode"] or "backbone",
+                "modeLabel": QUERY_MODE_LABELS.get(row["mode"] or "backbone", "有主干"),
+                "astVersionId": row["ast_version_id"],
                 "answer": row["answer"],
                 "error": row["error"],
                 "startedAt": row["started_at"],
@@ -426,6 +502,7 @@ class QueryService:
         ]
 
     def record_feedback(self, run_id: str, rating: str, comment: str = "") -> dict[str, Any]:
+        self._validate_owned_id(run_id, "run")
         if not self.db.execute("SELECT 1 FROM query_run WHERE id=?", (run_id,)).fetchone():
             raise KeyError(run_id)
         rating = str(rating).strip().upper()
@@ -464,6 +541,7 @@ class QueryService:
             logger.warning("无法准备 workspace 摘要: %s", exc)
             workspace_info = {"id": self.workspace_manager.project_id}
         return {
+            "projectId": self.project_id,
             "project": project,
             "workspace": workspace_info,
             "sources": self.workspace_manager.source_summary(),
@@ -494,15 +572,29 @@ class QueryService:
     def _runtime_name(self) -> str:
         return str(getattr(self.runtime, "runtime_name", "CLAUDE_CODE"))
 
+    def _new_id(self, prefix: str) -> str:
+        if self.project_scoped:
+            return f"{prefix}-{_safe_name(self.project_id)}-{uuid.uuid4().hex}"
+        return f"{prefix}-{uuid.uuid4().hex}"
+
+    def _validate_owned_id(self, value: str | None, kind: str) -> None:
+        if not value or not self.project_scoped:
+            return
+        prefix = "CONV" if kind == "conversation" else "RUN"
+        expected = f"{prefix}-{_safe_name(self.project_id)}-"
+        if not str(value).startswith(expected):
+            raise ValueError(f"{kind} 不属于当前工程")
+
     def _get_or_create_conversation(
         self,
         conversation_id: str | None,
         workspace: Workspace,
+        mode: str,
     ) -> dict[str, Any]:
         now = _now()
         if conversation_id:
             row = self.db.execute(
-                "SELECT id,runtime,runtime_session_id,workspace_id,scope_json FROM query_conversation WHERE id=?",
+                "SELECT id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id FROM query_conversation WHERE id=?",
                 (conversation_id,),
             ).fetchone()
             if row:
@@ -513,18 +605,21 @@ class QueryService:
                 value = dict(row)
                 value["workspace_id"] = workspace.id
                 return value
-        conversation_id = conversation_id or f"CONV-{uuid.uuid4().hex}"
+        conversation_id = conversation_id or self._new_id("CONV")
         self.db.execute(
             """INSERT INTO query_conversation
-               (id,runtime,runtime_session_id,workspace_id,created_at,updated_at)
-               VALUES (?,?,?,?,?,?)""",
-            (conversation_id, self._runtime_name(), None, workspace.id, now, now),
+               (id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (conversation_id, self._runtime_name(), None, workspace.id, None, mode,
+             workspace.ast_version_id, now, now),
         )
         return {
             "id": conversation_id,
             "runtime": self._runtime_name(),
             "runtime_session_id": None,
             "workspace_id": workspace.id,
+            "mode": mode,
+            "ast_version_id": workspace.ast_version_id,
         }
 
     def _save_message(self, conversation_id: str, run_id: str, role: str, content: str, created_at: str) -> None:

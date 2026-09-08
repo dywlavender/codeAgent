@@ -11,6 +11,10 @@ import json
 import re
 
 
+class RubricInvalid(ValueError):
+    """The source contradicts the rubric; this is not an answer failure."""
+
+
 def quote_matches(quote, candidate):
     # Markdown styling, whitespace and CJK quote decorations do not change a
     # quote's meaning; the surviving text still has to match verbatim.
@@ -34,6 +38,8 @@ def parse_review(answer, count, candidate=None):
     if len(fenced) == 1:
         text = fenced[0]
     value = json.loads(text)
+    if value.get("rubricInvalid"):
+        raise RubricInvalid("评分标准与源码冲突，需修订标准后重评：" + str(value["rubricInvalid"]))
     checks = value.get("checks", [])
     if len(checks) != count or any(type(c.get("met")) is not bool or not c.get("reason") or not isinstance(c.get("evidence"), str) for c in checks):
         raise ValueError("评分格式错误：每项需要 met 布尔值、reason、evidence")
@@ -48,6 +54,8 @@ def parse_review(answer, count, candidate=None):
 
 def model_review_score(result, case):
     """Score from the answer's own completed model review, else ``None``."""
+    if not case.get("checks"):
+        return None
     review = result.get("review") or {}
     if review.get("status") != "completed":
         return None
@@ -67,6 +75,8 @@ def human_review_score(entry, case):
     A record only counts when every check is filled; partially reviewed
     answers cannot enter a paired quality total.
     """
+    if not case.get("checks"):
+        return None
     checks = entry.get("checks") or []
     if len(checks) != len(case["checks"]) or any(x not in (0, 1) for x in checks):
         return None

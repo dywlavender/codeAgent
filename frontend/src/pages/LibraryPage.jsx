@@ -13,7 +13,7 @@ const PURPOSE = {
   requirements: "用于查阅需求原文，与当前代码实现对照。",
 };
 
-export function LibraryPage() {
+export function LibraryPage({ projectId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -27,7 +27,7 @@ export function LibraryPage() {
       .catch((reason) => { if (active) setError(reason.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [revision]);
+  }, [revision, projectId]);
   const sources = data?.sources || [];
   const visible = sources.filter((item) => (type === "all" || item.kind === type)
     && (item.name + " " + item.path).toLowerCase().includes(query.trim().toLowerCase()));

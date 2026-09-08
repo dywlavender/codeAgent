@@ -1,0 +1,140 @@
+{
+  "name": "融商贷诊断V3（修订标准＋业务现象）",
+  "scope": "固定源码上的调查诊断：保留8道原问题作为代码细节/技术流程对照，新增3道不提供代码标识的业务现象题。修正策略码和并发预设；无主干、仅总览、完整主干分别对照。业务实现尚未运行验证，结论限源码证据。",
+  "origin": "synthetic",
+  "projectConfig": "../project.config.json",
+  "cases": [
+    {
+      "id": "v2-callback-twice",
+      "question": "一笔提款的付款成功回调被模拟服务重复投递了两次。第二次到达时，如果第一次触发的入账还没有完成（Fineract 还没放款成功），会发生什么？两次投递各自走到哪一步，台账会不会重复变化？",
+      "checks": [
+        "回调入口按业务单号读取实体并比对 extSerialNo，再交给 onPaymentResult",
+        "首次成功处理设置付款成功、外部成功待入账及 TO_BOOK，并同步调用 book；入账包含 Fineract 调用和额度转实占",
+        "区分顺序可见与并发：第二次若读到终态或 paymentStatus=SUCCESS 则返回；若第一次尚未提交，第二次可能读到旧值，不能保证被状态检查拦住",
+        "检查实体/仓库的并发保护；没有版本校验、显式锁或原子状态条件时，不能将 @Transactional 或先查借据 ACTIVE 视为并发幂等保证，不能断言流水必定只写一次",
+        "首次失败后的重试经 CompensationTask 的 TO_BOOK/RETRY_NEEDED 分支；book 先查 isLoanActive，这有顺序重试作用但不消除先查后改的并发窗口"
+      ],
+      "category": "technical_flow"
+    },
+    {
+      "id": "v2-record-count",
+      "question": "同样是提款受理，为什么有的业务单台账里出现 4 条 PRE_OCCUPY 流水，有的只有 3 条？每条流水的 productId 字段分别是什么值？",
+      "checks": [
+        "TOTAL 层流水无条件记录（LimitService.preOccupy 对总授信层总是写入）",
+        "PRODUCT 层仅当该授信配置了该产品的子额度才记（findSubLimit 无结果则跳过该层）",
+        "GROUP 层仅当授信通过 GroupMember 挂在某集团才记（findGroupOf 为空则跳过）",
+        "GUARANTEE 层仅当产品担保要求=开才记（availableForDrawdown 与预占的分支条件）",
+        "productId 只有 PRODUCT 层流水携带，TOTAL/GROUP/GUARANTEE 层流水该字段为空"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "v2-decrease-edge",
+      "question": "企业甲占用 25 万、预占 3 万，此时申请把总授信降到 28 万整——restricted 会置位吗？那笔预占中的提款随后入账成功，结果是什么？如果降到 27 万呢？",
+      "checks": [
+        "restricted 判定是 (occupied+preOccupied) 与新上限的比较（CreditService.effectuate），28 万不大于 28 万，不置位",
+        "预占中的提款入账走 confirmOccupy，该方法不检查 restricted 或 frozen，入账成功、占用变为 28 万",
+        "降到 27 万时 28>27 置位 restricted，但已受理单子仍能入账（confirmOccupy 无资格检查），占用 28 万超过新上限",
+        "effectuate 只改 totalLimit 与 restricted 标志，不取消已预占的单子、不改已有债务",
+        "后续新增提款受 availableForDrawdown 新上限约束"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "v2-approved-limit",
+      "question": "模拟审批返回的批准额度低于申请额度时，INITIAL 申请和 LIMIT_INCREASE 申请分别怎么生效？提额申请被批了比现有授信还低的额度，会出什么结果？",
+      "checks": [
+        "onApprovalResult 用批准额度落 approvedLimit，批准额度为空时回退取申请额度",
+        "INITIAL：totalLimit=批准额度，新建授信并 applyLayers 落集团/子额度/担保覆盖各层配置",
+        "LIMIT_INCREASE：totalLimit 直接设为批准额度，代码不校验批准额度是否高于当前额度",
+        "提额被批了更低额度等于事实降额：occupied+preOccupied 高于新总额度时 restricted 被置位、新增提款受限",
+        "审批结果只是数据：生效、restricted 判定都发生在中台 effectuate，而不是模拟服务"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "v2-strategy-code",
+      "question": "中台创建借据的请求里 transactionProcessingStrategyCode 传的是什么值？这个值在 Fineract 侧由谁消费、怎样决定还款金额的分配顺序？它和 Fineract 贷款产品上配置的策略是什么关系？",
+      "checks": [
+        "FineractClient.createLoan 当前硬编码 mifos-standard-strategy，不能沿用旧值 fineract-style；引用当前冻结源码",
+        "策略保存在贷款账户；还款处理通过贷款策略码及 LoanRepaymentScheduleTransactionProcessorFactory 选择处理器",
+        "区分请求校验与产品是否允许覆盖：仅在 allowOverridingTransactionProcessingStrategy 允许时请求值覆盖产品策略，不可声称传值必然覆盖",
+        "mifos-standard-strategy 对应 FineractStyleLoanRepaymentScheduleTransactionProcessor；结合具体处理器解释金额分配受策略决定，而非由类名猜策略字符串",
+        "中台通过 getRepaymentAllocation 读取本金/利息/费用分配结果，不自行决定 Fineract 分配顺序"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "v2-channel-display",
+      "question": "运营想区分页面上显示\"处理中\"的提款单，到底是\"外部还没结果\"还是\"中台入账失败\"。当前渠道接口能直接支持吗？依据哪些字段？如果只能改一处代码，改哪里收益最大？",
+      "checks": [
+        "渠道详情接口已返回 middleStatus（ChannelService.drawdownDetail 返回中台原始状态），可与展示状态并列使用",
+        "展示状态由 displayOf 把 EXTERNAL_SUCCESS_BOOKING_PENDING、RETRY_NEEDED 等合并为 PROCESSING",
+        "中台原始状态持久化在渠道申请单 middleRawStatus 字段，每次详情查询刷新保存",
+        "区分两类原因还需中台细粒度状态：中台 detail 返回 payments[].status（付款指令）与 booking.status（入账），渠道详情的 detail 字段已透传",
+        "列表场景当前只有 displayStatus，要支持需渠道侧新增按原始状态的筛选或展示字段"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "v2-stale-failed",
+      "question": "补偿任务对一笔付款主动查单拿到 FAILED，但同一时刻这笔单子的入账刚好完成、业务单已经 SUCCESS。系统会出现重复释放预占或\"失败覆盖成功\"吗？靠什么机制避免？",
+      "checks": [
+        "区分当前实体已观察到 SUCCESS 与查单持有旧实体两种时序；onPaymentResult 对已观察到的终态直接返回",
+        "CompensationTask 按 PROCESSING 和超时条件选单，queryAndSettle 传入已有实体处理结果；扫描过滤不能保证结果处理时实体是最新版本",
+        "没有乐观锁/显式锁/原子条件更新的证据时，不得以 @Transactional 推出并发串行安全；源码不足以保证旧 FAILED 不覆盖新成功",
+        "FAILED 分支调用 releasePreOccupied；余额截断为零不等于按业务单防重，不能保证不会误释放其他预占或重复写流水",
+        "模拟服务 query 返回该流水真实终态，正常模拟流程不会构造成功付款又查到失败；明确题设矛盾结果与代码并发保护能力是不同问题"
+      ],
+      "category": "technical_flow"
+    },
+    {
+      "id": "v2-version-edge",
+      "question": "运营把采购贷年利率从 8% 改成 7.5% 后，立刻生成了一张新报价；同时另一人拿着 29 分钟前（旧利率时期）生成的老报价提交申请。两张单各按什么规则执行？什么情况下老报价会被拒绝？",
+      "checks": [
+        "新报价：resolveVersion 比对当前配置与最新版本，利率不同生成新版本行，报价绑定新版本，按 7.5% 一套规则执行",
+        "29 分钟的老报价未过 30 分钟有效期，usable 为真，按其绑定的旧版本规则执行，不受新配置影响",
+        "apply 的校验读报价绑定的 ProductConfigVersion（versionRepo 反查），全程不读当前 ProductConfig 的规则字段",
+        "两张单的额度校验都按申请时点多层口径重新计算：快照只锁定规则与价格，不锁定额度余量",
+        "老报价超过 30 分钟有效期则 usable 为假，提交抛 QUOTE_EXPIRED，必须重新报价"
+      ],
+      "category": "code_detail"
+    },
+    {
+      "id": "biz-payment-pending",
+      "category": "business_investigation",
+      "question": "供应商确认已经收到采购款，但客户查借款进度仍显示处理中，可借额度也没有恢复。请按当前实现说明应该查哪些系统、如何区分正常等待和处理故障，以及系统会怎样继续处理。",
+      "checks": [
+        "区分外部付款成功、中台放款登记完成与渠道展示状态，定位渠道详情、中台提款、外部付款及 Fineract",
+        "额度在受理时预占；付款成功并完成登记后转实占，不应因为供应商收款就恢复可借额度",
+        "渠道详情包含 middleStatus 和透传 detail，可结合 payments 状态与 booking 状态判断付款等待或登记等待",
+        "追到回调和主动查单进入同一结果处理路径；入账 TO_BOOK/RETRY_NEEDED 由补偿任务继续处理",
+        "核对重试次数限制及先查借据 ACTIVE 的顺序防重；不承诺必然自动恢复，也不凭回调成功认定全部完成"
+      ]
+    },
+    {
+      "id": "biz-repaid-limit",
+      "category": "business_investigation",
+      "question": "企业已经还了一笔钱，财务看到扣款成功，但企业反映可借额度没有增加，或者增加金额小于付款金额。请依据源码梳理核查路径，说明哪些情况符合规则、哪些环节需要继续调查。",
+      "checks": [
+        "覆盖渠道还款详情、外部扣款、中台还款入账、Fineract 分配和额度台账的职责链",
+        "扣款成功不等于中台入账完成；查回调/查单和扣款成功仍处理中订单的补偿分支",
+        "额度恢复使用 Fineract 交易分配中的本金，不是整笔付款；利息费用不恢复",
+        "冻结或其他额度层仍可限制新借款；担保层恢复按覆盖比例折算，不能把占用减少直接等同最终可借额度增加",
+        "核对 RepaymentService.book 实际代码：入账与读取分配分两步，重试再次调用 repayLoan；不能仅按注释承诺已实现外部还款幂等"
+      ]
+    },
+    {
+      "id": "biz-same-credit",
+      "category": "business_investigation",
+      "question": "同一集团的两家企业反馈：本企业没有新增借款，总授信也没变，可申请的金额却减少了；另外，换成客户经理入口后可选条件又不同。请解释当前代码支持哪些原因，以及调查时如何区分它们。",
+      "checks": [
+        "中台可借金额按企业总额度、产品子额度、集团余量和适用的担保支持金额计算，不仅看总授信",
+        "集团成员共享 GroupLimit；其他成员预占或实占减少共同余量，本企业无新借款仍可能受影响",
+        "渠道 ChannelService 按渠道产品规则收窄金额/期限/开关，不能放大中台条件",
+        "担保支持金额由覆盖余量除以覆盖比例；仅要求担保的产品施加该约束，冻结另外阻止新增提款",
+        "结合渠道规则、中台额度分层视图与相关台账核查；按当前数据决定实际原因，不把题述现象断言为某个已确认故障"
+      ]
+    }
+  ]
+}

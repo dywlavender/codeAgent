@@ -19,26 +19,44 @@ from pathlib import Path
 from ..indexing import CodeIndexer
 from ..schema import connect
 
-MAX_DOC_LINES = 2400
+MAX_DOC_LINES = 240
+MAX_DOC_CHARS = 16000
 MAX_METHODS_PER_TYPE = 40
 TYPE_KINDS = {"CLASS", "INTERFACE", "ENUM", "RECORD", "PAGE", "COMPONENT"}
 METHOD_KINDS = {"METHOD", "API", "FUNCTION"}
-ENDPOINT_FACTS = {"HTTP_ENDPOINT", "HTTP_CALL"}
+ENDPOINT_FACTS = {"HTTP_ENDPOINT", "HTTP_CALL", "RPC_CALL"}
 SKIP_TEST_PARTS = {"test", "tests", "__tests__"}
 
 
-def generate_ast_documents(inputs_dir: Path) -> dict[str, str]:
+def generate_ast_documents(inputs_dir: Path, repository_names=None) -> dict[str, str]:
     """Index the frozen repo copies and return {file_name: markdown}."""
     documents: dict[str, str] = {}
+    names = dict((snapshot, name) for name, snapshot in (repository_names or []))
+    overview = ["# AST 结构总览", "", "这是从冻结源码生成的结构导航，不含人工业务主干和题库答案。",
+                "先按仓库目录选择结构索引；需要类型、方法或端点线索时按需读取，不要求每题读取。",
+                "相对源码路径属于对应 repo-N；实际授权路径见本轮检索范围。结构条目不是已验证调用链，行为仍须读取源码。", "",
+                "| 源码目录 | 仓库标识 | 主源码结构索引 |", "| --- | --- | --- |"]
     with tempfile.TemporaryDirectory(prefix="ast-docs-") as folder:
         db = connect(str(Path(folder) / "ast.db"))
         try:
             for repo_dir in sorted(p for p in Path(inputs_dir).iterdir()
                                    if p.is_dir() and p.name.startswith("repo-")):
                 CodeIndexer(db).ingest(str(repo_dir), repo_dir.name)
-                documents.update(_render_repository(db, repo_dir.name))
+                rendered = _render_repository(db, repo_dir.name)
+                documents.update({f"ast/{key}": value for key, value in rendered.items()})
+                entries = [f"# {names.get(repo_dir.name, repo_dir.name)} 结构索引", "",
+                           f"源码目录：{repo_dir.name}。以下按源码模块分片，使用类型、方法、HTTP路径检索；不代表业务职责。", ""]
+                for key, value in sorted(rendered.items()):
+                    area = value.splitlines()[0].split(" · ", 1)[-1]
+                    entries.append(f"- [{area} / {key}]({key})")
+                index_name = f"ast/{repo_dir.name}-index.md"
+                documents[index_name] = "\n".join(entries) + "\n"
+                overview.append(f"| {repo_dir.name} | {names.get(repo_dir.name, repo_dir.name)} | [{len(rendered)} 份分片]({index_name}) |")
         finally:
             db.close()
+    overview += ["", "Java 类型与方法使用 tree-sitter；Web 条目使用现有模式解析。测试仍可从源码读取，但不进入此结构地图。",
+                 "方法清单有上限，截断处明确标记；没有条目不等于源码不存在。"]
+    documents["project-overview.md"] = "\n".join(overview) + "\n"
     return documents
 
 
@@ -68,17 +86,25 @@ def _render_repository(db, repo_id: str) -> dict[str, str]:
              FROM code_symbol cs JOIN code_file cf ON cf.id=cs.file_id
             WHERE cf.repository_id=? ORDER BY cf.path, cs.line_start""", (repo_id,)).fetchall()
     endpoints = defaultdict(list)
-    for row in db.execute(
-            """SELECT cs.qualified_name AS qualified_name, cs.line_start AS line_start,
+    facts = db.execute(
+            """SELECT cf.path AS path, cs.kind AS kind, cs.qualified_name AS qualified_name, cs.line_start AS line_start,
                       f.fact_type AS fact_type, f.subject AS subject, f.target AS target
                  FROM code_fact f JOIN code_symbol cs ON cs.id=f.symbol_id
                  JOIN code_file cf ON cf.id=cs.file_id
-                WHERE cf.repository_id=?""", (repo_id,)):
+                WHERE cf.repository_id=?""", (repo_id,)).fetchall()
+    bases = {(row["path"], row["qualified_name"]): row["target"] for row in facts
+             if row["fact_type"] == "HTTP_BASE_PATH"}
+    for row in facts:
+        owner = row["qualified_name"].rsplit(".", 1)[0] if row["kind"] in METHOD_KINDS else row["qualified_name"]
+        key = (row["path"], owner)
         if row["fact_type"] in ENDPOINT_FACTS:
-            endpoints[row["qualified_name"]].append(
-                f"{row['subject']} {row['target']} (L{row['line_start']})")
+            target = row["target"]
+            if row["fact_type"] in {"HTTP_ENDPOINT", "RPC_CALL"} and bases.get(key):
+                target = bases[key].rstrip("/") + "/" + target.lstrip("/")
+            endpoints[key].append(
+                f"{row['fact_type']} {row['subject']} {target} (L{row['line_start']})")
         elif row["fact_type"] == "ROUTE":
-            endpoints[row["qualified_name"]].append(
+            endpoints[key].append(
                 f"ROUTE {row['subject']} → {row['target']} (L{row['line_start']})")
 
     areas: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
@@ -89,19 +115,19 @@ def _render_repository(db, repo_id: str) -> dict[str, str]:
             continue
         area = _area(row["path"])
         if row["kind"] in TYPE_KINDS:
-            key = row["qualified_name"]
+            key = (row["path"], row["qualified_name"])
             type_rows[key] = (row["kind"], row["name"], row["path"], row["line_start"])
             areas[area][_group_key(row["kind"], row["qualified_name"], row["path"])].append(key)
         elif row["kind"] in METHOD_KINDS:
             owner = row["qualified_name"].rsplit(".", 1)[0] if "." in row["qualified_name"] else row["qualified_name"]
-            type_methods[owner].append(f"{row['name']}(L{row['line_start']})")
+            type_methods[(row["path"], owner)].append(f"{row['name']}(L{row['line_start']})")
 
     documents: dict[str, str] = {}
     for area in sorted(areas):
         sections = []
         for group in sorted(areas[area]):
-            lines = [f"## {group}", ""]
             for key in areas[area][group]:
+                lines = [f"## {group}", ""]
                 kind, name, path, line_start = type_rows[key]
                 lines.append(f"- {name} — {kind} ({path}:{line_start})")
                 endpoint_list = endpoints.get(key)
@@ -115,7 +141,7 @@ def _render_repository(db, repo_id: str) -> dict[str, str]:
                     method_line += f" …（另有 {len(methods) - MAX_METHODS_PER_TYPE} 个方法）"
                 if method_line:
                     lines.append(f"  - 方法: {method_line}")
-            sections.append("\n".join(lines))
+                sections.append("\n".join(lines))
 
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", area).strip("-") or "root"
         header = (f"# AST 结构地图 — {repo_id} · {area}\n\n"
@@ -128,16 +154,14 @@ def _render_repository(db, repo_id: str) -> dict[str, str]:
 def _split(base_name: str, header: str, sections: list[str]) -> dict[str, str]:
     documents: dict[str, str] = {}
     current: list[str] = []
-    current_lines = 0
     part = 1
     for section in sections:
-        section_lines = section.count("\n") + 1
-        if current and current_lines + section_lines > MAX_DOC_LINES:
+        candidate = _join(header, [*current, section])
+        if current and (len(candidate.splitlines()) > MAX_DOC_LINES or len(candidate) > MAX_DOC_CHARS):
             documents[f"{base_name}-{part:02d}.md"] = _join(header, current)
             part += 1
-            current, current_lines = [], 0
+            current = []
         current.append(section)
-        current_lines += section_lines
     if current:
         name = f"{base_name}.md" if part == 1 else f"{base_name}-{part:02d}.md"
         documents[name] = _join(header, current)

@@ -24,7 +24,7 @@ const TYPE_OPTIONS = [
   { label: "入口", value: "ENTRY_ANCHOR", countKey: "entryAnchors" },
 ];
 
-export function GraphPage({ workspace }) {
+export function GraphPage({ workspace, projectId }) {
   const [query, setQuery] = useState("");
   const [nodeType, setNodeType] = useState("");
   const [data, setData] = useState(null);
@@ -49,7 +49,7 @@ export function GraphPage({ workspace }) {
     }
   }
 
-  useEffect(() => { load("", ""); }, []);
+  useEffect(() => { load("", ""); }, [projectId]);
 
   const nodes = data?.nodes || [];
   const edges = data?.edges || [];

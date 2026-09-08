@@ -55,6 +55,47 @@ Python 不再执行问题分类、业务检索、Anchor 路由、Code Candidate 
 
 业务基线可额外提供 `project-overview.md`。Runtime 每轮读取当前总览，连同检索范围通过 `--append-system-prompt` 提供；总览正文不写入 `CLAUDE.md`，其余业务流程文档保留在资料目录中供模型按需搜索。这是轻量项目上下文，不执行 Python 侧问题分类、图谱检索或固定调查流程。
 
+查询和实验共用三种资料模式：无主干工作区只挂载正常项目资料（源码、README、需求等）；有主干工作区再挂载人工业务主干；AST 工作区挂载用户手动生成的 AST 结构资料，不挂载人工业务主干。三种模式分别位于注册工程的 `workspaces/<project-id>/modes/{none,backbone,ast}`（兼容单工程仍使用 `agent-workspaces`），模式变化不会复用另一模式的 Claude 会话。
+
+AST 由 `evaluation/ast_service.py` 管理。服务启动、读取评测就绪状态、进入 AST 页面、切换 AST 问答模式和启动实验都只读取状态，不生成 AST；只有用户在 AST 管理页点击生成或重新生成才会创建新版本。源码变化会将当前版本标为待更新，历史查询和已开始的实验仍引用它们各自记录的版本。
+
+## 工程注册与隔离
+
+兼容启动方式仍可用 `--db` 加 `--project-config` 运行单个工程。平台模式通过
+`ProjectRegistry` 登记多个工程，并由 `ProjectContext` 为当前请求提供配置文件、数据库和资料目录：
+
+```text
+<platform-data>/
+├── registry.json
+└── projects/<project-id>/
+    ├── project.json
+    ├── knowledge.db
+    ├── ast/
+    ├── evaluation-suites/
+    ├── evaluations/
+    ├── snapshots/
+    └── workspaces/
+```
+
+每个注册工程使用独立数据库，因此会话、索引、业务知识、题库和评测批次不会因为切换配置而共用。请求可以使用规范路径
+`/api/projects/<project-id>/...`；为兼容现有页面，也接受 `X-Project-Id` 或 `projectId`。注册工程生成的会话和运行编号带工程前缀，收到其他工程的会话编号会拒绝，不能把旧会话改写到当前工作区。
+
+服务启动、工程切换、查询模式切换和实验启动都只读取 AST 状态。注册表创建目录不会生成知识主干、索引或 AST；登记时只会在工程资料目录为空时，把配置中已有的业务基线和需求原文复制一份作为工程私有初始资料，后续由该工程维护。源码仓库仍按配置引用外部目录，源码同步和索引仍是后续独立任务，不能被工程注册动作伪装成已完成。
+
+登记不会覆盖已有工程资料，也不会自动迁移旧数据库、题库或评测记录；已有数据需要保留时，应在登记时显式指定原数据目录。配置中的业务基线和需求原文会作为一次性初始副本进入工程数据目录，之后查询、知识维护和实验均使用该副本；源码仓库仍由配置明确指定，若多个工程共享同一外部仓库，应显式改为独立源码快照或接受共享。
+
+项目示例题库也由配置显式声明，例如 `evaluation.examples: ["evaluations/cases.json"]`；未声明时平台仍可使用上传入口，但不会按贷款演示目录猜测题库。
+
+注册与同步示例：
+
+```text
+python -m business_code_agent.cli project-register --registry .data/platform --config project.config.json
+python -m business_code_agent.cli sync-project --project-registry .data/platform --project-id loan-system --config project.config.json
+python -m business_code_agent.cli serve-query --db .data/unused.db --project-registry .data/platform
+```
+
+已有单工程数据需要保留时，应在登记时显式指定原数据目录；系统不会猜测并搬移历史库。
+
 ## Runtime
 
 `AgentRuntime` 是最小接口：
@@ -81,11 +122,13 @@ ask(question, *, workspace, session_id=None, event_callback=None)
 
 ```text
 query_conversation
-  id, runtime, runtime_session_id, workspace_id, created_at, updated_at
+  id, runtime, runtime_session_id, workspace_id, scope_json, mode, ast_version_id,
+  created_at, updated_at
 
 query_run
   id, conversation_id, runtime, runtime_session_id, question, status,
-  answer, error, usage_json, started_at, completed_at, duration_ms
+  answer, error, usage_json, scope_json, mode, ast_version_id,
+  started_at, completed_at, duration_ms
 
 query_event
   id, run_id, sequence, event_type, payload_json, created_at
@@ -98,7 +141,7 @@ query_feedback
 
 一次请求的顺序：
 
-1. 创建或读取 Conversation，准备工作区；
+1. 根据无主干／有主干／AST 模式创建或读取对应 Conversation，准备模式工作区；模式、调查范围或 AST 资料版本变化时清空可恢复的 Claude Session；
 2. 创建 `running` 的 Query Run，并保存用户消息；
 3. 调用 Runtime，实时保存并转发事件；
 4. 成功后保存 Session、回答、用量和 assistant 消息；
@@ -149,8 +192,11 @@ business_code_agent/evaluation/
 ```
 
 - 每个批次是 `.data/evaluations/eval-<时间戳>/` 下的一个目录：`protocol.json`（冻结的题库、设置与仓库快照）、`inputs/`（冻结代码与主干文档）、`runs/<run-id>/`（逐次结果、事件、评分及修订历史）、`state.json`（页面进度）、`results.json`、`reviews.json`（人工复核修订）。
+- 新建批次固定本轮题目、参考答案、评分要点、源码以及资料版本。三组默认是无主干、有主干、AST；AST 组只引用 AST 管理页已经生成的版本，`protocol.json` 记录版本号和独立生成耗时，实验启动不会隐式生成 AST。
+- 启用自动初评时，所有启用案例必须先有固定评分要点；没有要点的案例会在启动前列出并阻止批次。用户可以明确选择“仅答题”，此时不创建空评审，也不把质量指标当作零分。
 - `EvaluationService` 在 HTTP 请求之外的后台线程运行批次（批内并发 2），每个任务落盘后更新状态；页面约 2 秒轮询批次摘要，任务结束停止轮询。服务重启时运行中的批次标记为 `interrupted`，保留已完成结果，不自动追加调用。
 - 取消停止安排新任务并取消受本批次管理的模型调用；答题失败不评分，评分失败不记零分。质量汇总按明确评分来源（模型初评 / 复核记录）分别计算配对分母，不把未复核答案的模型分数混入复核视图。
+- “重试失败答题”创建独立子批次，只复制原批次冻结的 `protocol.json` 与 `inputs/`，并按案例、轮次、模式精确保留失败任务；不重新读取当前题库、源码或 AST 状态，原批次结果不被覆盖。三组汇总使用共同完成样本，各两组比较独立构造自己的配对集合。
 - 页面入口为 `#/evaluation`（「效果验证」）；启动、停止、重新初评、题库修改和复核保存复用管理员凭证，读取接口公开。
 - CLI 入口保留：`scripts/evaluate_backbone.py`（对照执行与 `--rejudge`）、`scripts/backbone_report.py`（报告重生成）调用同一模块。结果目录兼容旧脚本读取。
 

@@ -60,9 +60,12 @@ class BaselineKnowledgeService:
     by the caller; a model error is never silently converted to another mode.
     """
 
-    def __init__(self, db, *, project_config: str | Path | None = None, extractor: BaselineExtractor | None = None):
+    def __init__(self, db, *, project_config: str | Path | None = None,
+                 baseline_root: str | Path | None = None,
+                 extractor: BaselineExtractor | None = None):
         self.db = db
         self.project_config = Path(project_config).resolve() if project_config else None
+        self._baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
         self.config = self._load_config()
         self._extractor = extractor
 
@@ -180,6 +183,8 @@ class BaselineKnowledgeService:
         return self._relation_dict(row)
 
     def knowledge_root(self) -> Path:
+        if self._baseline_root:
+            return self._baseline_root
         knowledge = self.config.get("knowledge") or {}
         configured = knowledge.get("baselineRoot") or "knowledge/baseline"
         base = self.project_config.parent if self.project_config else Path.cwd()

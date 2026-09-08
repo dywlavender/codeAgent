@@ -37,11 +37,15 @@ def main() -> None:
     ingest.add_argument("--repository-id", default="repo-main")
     sync = sub.add_parser("sync-project", help="按项目配置同步 Git 仓库并增量索引")
     sync.add_argument("--config", required=True)
-    sync.add_argument("--db", required=True)
+    sync.add_argument("--db")
+    sync.add_argument("--project-registry", help="从注册表解析工程数据库")
+    sync.add_argument("--project-id", help="注册表工程 ID")
     sync.add_argument("--offline", action="store_true", help="只索引配置中的包内源码，不调用 Git 或网络")
     baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线和调查入口")
     baseline.add_argument("--config", required=True)
-    baseline.add_argument("--db", required=True)
+    baseline.add_argument("--db")
+    baseline.add_argument("--project-registry", help="从注册表解析工程数据库")
+    baseline.add_argument("--project-id", help="注册表工程 ID")
     baseline.add_argument(
         "--parser", choices=("model", "markdown"), default="model",
         help="结构化方式：默认使用配置的大模型；markdown 仅在明确需要本地解析时使用",
@@ -113,6 +117,15 @@ def main() -> None:
     serve_query.add_argument("--host", default="127.0.0.1")
     serve_query.add_argument("--port", type=int, default=8082)
     serve_query.add_argument("--project-config", help="项目和仓库配置，用于生成 Claude 工作区")
+    serve_query.add_argument("--project-registry", help="平台工程注册表目录；启用后按工程独立路由数据库和资料")
+    serve_query.add_argument("--project-id", help="注册表模式下的默认工程 ID")
+    project_register = sub.add_parser("project-register", help="把项目配置登记到平台工程注册表")
+    project_register.add_argument("--registry", required=True, help="平台数据目录")
+    project_register.add_argument("--config", required=True, help="项目配置文件")
+    project_register.add_argument("--data-root", help="可选的工程数据目录；默认使用注册表 projects/<projectId>")
+    project_register.add_argument("--name", help="覆盖展示名称")
+    project_list = sub.add_parser("project-list", help="列出平台工程注册表中的工程")
+    project_list.add_argument("--registry", required=True, help="平台数据目录")
     args = parser.parse_args()
     try:
         load_env_file()
@@ -120,6 +133,16 @@ def main() -> None:
         parser.error(str(exc))
     if args.command == "serve-query":
         _warn_runtime_configuration()
+    project_context = None
+    if args.command in {"sync-project", "baseline-refresh"} and args.project_registry:
+        if not args.project_id:
+            parser.error(f"{args.command} 使用 --project-registry 时必须提供 --project-id")
+        from .project_context import ProjectRegistry
+        project_context = ProjectRegistry(args.project_registry).get(args.project_id)
+        if not args.db:
+            args.db = str(project_context.db_path)
+    elif args.command in {"sync-project", "baseline-refresh"} and not args.db:
+        parser.error(f"{args.command} 需要 --db，或同时提供 --project-registry 和 --project-id")
     if args.command == "init-db":
         db = connect(args.db)
         db.close()
@@ -136,7 +159,10 @@ def main() -> None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "baseline-refresh":
         from .knowledge_update.baseline_service import BaselineKnowledgeService
-        service = BaselineKnowledgeService(connect(args.db), project_config=args.config)
+        service = BaselineKnowledgeService(
+            connect(args.db), project_config=args.config,
+            baseline_root=(project_context.knowledge_root / "baseline" if project_context else None),
+        )
         print(json.dumps(service.refresh(parser=args.parser), ensure_ascii=False, indent=2))
     elif args.command == "ingest-requirement":
         builder = RequirementBuilder(connect(args.db))
@@ -214,7 +240,19 @@ def main() -> None:
         print(json.dumps(QueryService(connect(args.db), db_path=args.db).get_run(args.run_id), ensure_ascii=False, indent=2))
     elif args.command == "serve-query":
         from .query_agent.api import serve
-        serve(args.db, args.host, args.port, project_config=args.project_config)
+        serve(
+            args.db, args.host, args.port, project_config=args.project_config,
+            project_registry=args.project_registry, project_id=args.project_id,
+        )
+    elif args.command == "project-register":
+        from .project_context import ProjectRegistry
+        context = ProjectRegistry(args.registry).register(
+            args.config, data_root=args.data_root, name=args.name,
+        )
+        print(json.dumps(context.to_dict(), ensure_ascii=False, indent=2))
+    elif args.command == "project-list":
+        from .project_context import ProjectRegistry
+        print(json.dumps({"items": ProjectRegistry(args.registry).list()}, ensure_ascii=False, indent=2))
 
 
 def _print_analysis(result: dict, as_json: bool) -> None:

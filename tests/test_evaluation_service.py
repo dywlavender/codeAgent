@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from business_code_agent.evaluation.service import EvaluationError, EvaluationService
+from business_code_agent.evaluation.service import FINISHED_STATUSES, EvaluationError, EvaluationService
 from business_code_agent.query_agent.runtime import RuntimeResult
 
 
@@ -143,7 +143,12 @@ class EvaluationServiceTest(unittest.TestCase):
         defaults = dict(project_config=str(self.config), data_root=str(self.root / ".data" / "evaluations"),
                         timeout_seconds=5, workers=2)
         defaults.update(kwargs)
-        return EvaluationService(runtime_factory=lambda job=None: runtime, **defaults)
+        service = EvaluationService(runtime_factory=lambda job=None: runtime, **defaults)
+        # AST is now a user-triggered preparation step; tests make that step
+        # explicit instead of relying on batch startup to generate it.
+        service.ast_service.generate()
+        self.assertTrue(wait_for(lambda: service.ast_service.status().get("status") == "available"))
+        return service
 
     def start_and_wait(self, service, payload=None, expect="completed"):
         body = {"suiteId": self.create_suite(service), "repeats": 1}
@@ -160,6 +165,21 @@ class EvaluationServiceTest(unittest.TestCase):
 
     def create_suite(self, service, **overrides):
         return service.create_suite(suite_payload(**overrides))["id"]
+
+    def test_example_import_uses_project_declared_path(self):
+        example = self.root / "fixtures" / "cases.json"
+        example.parent.mkdir(parents=True)
+        example.write_text(json.dumps({
+            "name": "配置示例",
+            "cases": [{"id": "declared", "question": "配置问题", "referenceAnswer": "参考", "checks": ["结论"]}],
+        }, ensure_ascii=False), encoding="utf-8")
+        config = json.loads(self.config.read_text(encoding="utf-8"))
+        config["evaluation"] = {"examples": ["fixtures/cases.json"]}
+        self.config.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        service = EvaluationService(project_config=str(self.config), data_root=str(self.root / ".data" / "evaluations"))
+        imported = service.create_suite({"example": True})
+        self.assertEqual("配置示例", imported["name"])
+        self.assertEqual("declared", imported["cases"][0]["id"])
 
     def test_start_completes_with_paired_state_and_report(self):
         self.service = self.make_service(ScriptedRuntime())
@@ -178,7 +198,102 @@ class EvaluationServiceTest(unittest.TestCase):
         self.assertEqual(3, summary["aggregates"]["code_only"]["possible"])
         results = json.loads((self.service.root / eval_id / "results.json").read_text())
         self.assertEqual(6, len(results))
+        self.assertIsNotNone(results[0]["toolTrace"][0]["firstEventSeconds"])
         self.assertTrue((self.service.root / eval_id / "report.md").is_file())
+
+    def test_auto_judge_requires_fixed_rubric_and_answer_only_is_explicit(self):
+        self.service = self.make_service(ScriptedRuntime())
+        suite_id = self.create_suite(self.service, cases=[
+            {"id": "without-rubric", "question": "没有要点的问题", "referenceAnswer": "参考答案", "checks": []},
+        ])
+        with self.assertRaisesRegex(EvaluationError, "没有评分要点"):
+            self.service.start({"suiteId": suite_id, "repeats": 1, "judge": True})
+        started = self.service.start({"suiteId": suite_id, "repeats": 1, "judge": False})
+        eval_id = started["evaluationId"]
+        self.assertTrue(wait_for(lambda: self.service.get_evaluation(eval_id)["status"] in FINISHED_STATUSES))
+        self.assertTrue(wait_for(lambda: eval_id not in self.service._active))
+        state = self.service.get_evaluation(eval_id)
+        self.assertEqual("completed", state["status"])
+        self.assertIsNone(state["progress"]["judge"])
+        self.assertEqual(3, state["progress"]["answers"]["completed"])
+        self.assertEqual(0, state["summaries"]["model"]["qualityBlocks"])
+
+    def test_retry_failed_keeps_exact_failed_arm_and_frozen_inputs(self):
+        class JobRuntime(ScriptedRuntime):
+            def __init__(self, job):
+                super().__init__()
+                self.job = job or {}
+
+            def ask(self, question, **kwargs):
+                if not question.startswith("你是代码问答评审") and self.job.get("case", {}).get("id") == "flow" \
+                        and self.job.get("arm") == "ast":
+                    raise RuntimeError("controlled answer failure")
+                return super().ask(question, **kwargs)
+
+        self.service = EvaluationService(
+            project_config=str(self.config), data_root=str(self.root / ".data" / "evaluations"),
+            timeout_seconds=5, workers=2,
+            runtime_factory=lambda job=None: JobRuntime(job),
+        )
+        self.service.ast_service.generate()
+        self.assertTrue(wait_for(lambda: self.service.ast_service.status().get("status") == "available"))
+        suite_id = self.create_suite(self.service)
+        started = self.service.start({"suiteId": suite_id, "repeats": 1,
+                                      "astVersionId": self.service.ast_service.status()["currentVersionId"]})
+        eval_id = started["evaluationId"]
+        self.assertTrue(wait_for(lambda: self.service.get_evaluation(eval_id)["status"] in FINISHED_STATUSES))
+        self.assertTrue(wait_for(lambda: eval_id not in self.service._active))
+        original_dir = self.service.root / eval_id
+        original_protocol = json.loads((original_dir / "protocol.json").read_text(encoding="utf-8"))
+        frozen_text = (original_dir / "inputs" / "repo-0" / "src" / "Main.java").read_text(encoding="utf-8")
+        self.assertEqual("failed", next(row for row in self.service.get_evaluation(eval_id)["rows"]
+                                         if row["caseId"] == "flow")["runs"]["ast"]["status"])
+        suite_path = self.service._suite_path(suite_id)
+        suite = json.loads(suite_path.read_text(encoding="utf-8"))
+        suite["cases"][0]["question"] = "当前题库已被修改"
+        suite_path.write_text(json.dumps(suite, ensure_ascii=False), encoding="utf-8")
+        (self.root / "repo-a" / "src" / "Main.java").write_text("class Main { int current; }\n", encoding="utf-8")
+
+        retry = self.service.retry_failed(eval_id)
+        retry_id = retry["evaluationId"]
+        retry_protocol = json.loads((self.service.root / retry_id / "protocol.json").read_text(encoding="utf-8"))
+        self.assertEqual(["flow-r1-ast"], [f"{job['case']}-r{job['repeat']}-{job['arm']}"
+                                            for job in retry_protocol["jobs"]])
+        self.assertEqual(["flow"], [case["id"] for case in retry_protocol["cases"]])
+        self.assertEqual(original_protocol["referencePreparation"], retry_protocol["referencePreparation"])
+        self.assertEqual(frozen_text, (self.service.root / retry_id / "inputs" / "repo-0" / "src" / "Main.java").read_text(encoding="utf-8"))
+        self.assertEqual("失败任务重试", self.service.get_evaluation(retry_id)["suite"]["name"].split(" · ")[-1])
+        self.assertEqual(eval_id, self.service.get_evaluation(retry_id)["settings"]["retryOf"])
+        self.assertEqual("failed", next(row for row in self.service.get_evaluation(eval_id)["rows"]
+                                        if row["caseId"] == "flow")["runs"]["ast"]["status"])
+        self.assertTrue(wait_for(lambda: retry_id not in self.service._active))
+
+    def test_five_arm_batch_shares_ast_and_isolates_business_flows(self):
+        self.service = self.make_service(ScriptedRuntime())
+        ast_version_id = self.service.ast_service.status()["currentVersionId"]
+        eval_id, state = self.start_and_wait(self.service, {"comparison": "diagnostic_ast",
+                                                             "astVersionId": ast_version_id})
+        self.assertEqual(5, len(state["arms"]))
+        batch = self.service.root / eval_id
+        ast = batch / "inputs/baselines/ast"
+        hybrid = batch / "inputs/baselines/overview_ast"
+        self.assertEqual((ast / "ast/repo-0-index.md").read_text(),
+                         (hybrid / "ast/repo-0-index.md").read_text())
+        self.assertFalse((hybrid / "withdraw-flow.md").exists())
+        self.assertIn("项目总览", (hybrid / "project-overview.md").read_text())
+
+    def test_diagnostic_batch_freezes_only_overview_and_preserves_requirements(self):
+        self.service = self.make_service(ScriptedRuntime())
+        eval_id, state = self.start_and_wait(self.service, {"comparison": "diagnostic"})
+        self.assertEqual("diagnostic", state["settings"]["comparison"])
+        self.assertEqual({"code_only", "overview", "optional"}, set(state["arms"]))
+        root = self.service.root / eval_id
+        self.assertEqual(["project-overview.md"], sorted(p.name for p in (root / "inputs/baselines/overview").iterdir()))
+        self.assertTrue((root / "inputs/baselines/optional/withdraw-flow.md").is_file())
+        self.assertTrue((root / "inputs/requirements/需求.md").is_file())
+        self.assertTrue((root / "investigation-review.json").is_file())
+        summary = json.loads((root / "diagnosis-summary.json").read_text())
+        self.assertEqual("overview", summary["fullVsOverview"]["controlArm"])
 
     def test_review_source_never_borrows_model_scores(self):
         self.service = self.make_service(ScriptedRuntime())

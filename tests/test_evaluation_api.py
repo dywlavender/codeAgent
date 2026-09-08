@@ -67,6 +67,8 @@ class EvaluationApiTest(unittest.TestCase):
                                     data_root=str(self.root / ".data" / "evaluations"),
                                     timeout_seconds=5,
                                     runtime_factory=lambda job=None: ScriptedRuntime())
+        service.ast_service.generate()
+        self.assertTrue(wait_for(lambda: service.ast_service.status().get("status") == "available"))
         base = self.serve(service)
         setup = self.get(base, "/api/evaluations/setup")
         self.assertEqual("演示项目", setup["project"]["name"])
@@ -142,6 +144,8 @@ class EvaluationApiTest(unittest.TestCase):
                                     data_root=str(self.root / ".data" / "evaluations"),
                                     timeout_seconds=5,
                                     runtime_factory=lambda job=None: ScriptedRuntime())
+        service.ast_service.generate()
+        self.assertTrue(wait_for(lambda: service.ast_service.status().get("status") == "available"))
         with patch.dict(os.environ, {"EVAL_TEST_TOKEN": "secret-1"}):
             base = self.serve(service, project_config=config)
             suite_id = service.create_suite(suite_payload())["id"]

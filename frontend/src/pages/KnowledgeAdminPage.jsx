@@ -12,7 +12,7 @@ const PARSERS = [
   { value: "markdown", label: "Markdown 规则解析（无需模型）" },
 ];
 
-export function KnowledgeAdminPage({ onRequireUnlock }) {
+export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
   const [items, setItems] = useState([]);
   const [relations, setRelations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -40,7 +40,7 @@ export function KnowledgeAdminPage({ onRequireUnlock }) {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { load("", ""); }, []);
+  useEffect(() => { load("", ""); }, [projectId]);
 
   async function refresh() {
     setRunning("refresh"); setError("");

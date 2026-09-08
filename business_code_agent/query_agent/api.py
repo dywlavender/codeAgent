@@ -10,10 +10,12 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from ..schema import connect
 from ..evaluation.service import EvaluationService
+from ..evaluation.ast_service import AstService
+from ..project_context import ProjectContext, ProjectRegistry, ProjectRegistryError
 from .service import QueryBusyError, QueryRuntimeError, QueryService
 
 
@@ -60,14 +62,104 @@ def make_server(
     *,
     project_config: str | None = None,
     evaluation_service: EvaluationService | None = None,
+    project_registry: ProjectRegistry | str | Path | None = None,
+    project_id: str | None = None,
 ):
     static_root = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-    admin_access = _admin_access(project_config)
+    registry = (project_registry if isinstance(project_registry, ProjectRegistry)
+                else ProjectRegistry(project_registry) if project_registry else None)
+    legacy_context = ProjectContext.legacy(db_path, project_config)
+    if registry:
+        try:
+            default_context = registry.default(project_id)
+        except ProjectRegistryError:
+            default_context = None
+    else:
+        default_context = legacy_context
+    admin_access = _admin_access(str(default_context.config_path) if default_context and default_context.config_path else project_config)
     if host not in {"127.0.0.1", "localhost", "::1"} and not admin_access["token"]:
         raise ValueError("non-loopback binding requires admin.apiTokenEnv and its environment variable")
-    evaluations = evaluation_service or EvaluationService(project_config=project_config)
+    evaluation_services: dict[str, EvaluationService] = {}
+    ast_services: dict[str, AstService] = {}
+    admin_accesses: dict[str, dict] = {legacy_context.project_id: admin_access}
+    if default_context:
+        admin_accesses.setdefault(default_context.project_id, admin_access)
+
+    def context_for(project_key: str | None) -> ProjectContext:
+        if registry:
+            return registry.get(project_key or (default_context.project_id if default_context else ""))
+        if project_key and project_key != legacy_context.project_id:
+            raise KeyError(project_key)
+        return legacy_context
+
+    def evaluation_for(context: ProjectContext) -> EvaluationService:
+        if not context.registered and evaluation_service is not None:
+            return evaluation_service
+        key = context.project_id
+        if key not in evaluation_services:
+            evaluation_services[key] = EvaluationService(
+                project_config=str(context.config_path) if context.config_path else None,
+                data_root=context.evaluations_root,
+                ast_data_root=context.ast_root,
+                baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                requirements_root=context.requirements_root if context.registered else None,
+            )
+        return evaluation_services[key]
+
+    def ast_for(context: ProjectContext) -> AstService:
+        key = context.project_id
+        if key not in ast_services:
+            ast_services[key] = AstService(
+                project_config=str(context.config_path) if context.config_path else None,
+                data_root=context.ast_root,
+            )
+        return ast_services[key]
 
     class Handler(BaseHTTPRequestHandler):
+        def _project_route(self, parsed):
+            """Return the project-relative path and its immutable context.
+
+            Registered deployments accept the explicit URL form
+            ``/api/projects/<projectId>/...`` as well as the ``projectId``
+            query/header form used by the existing browser client.  The URL
+            form is canonical; the other two keep old links and SSE clients
+            working while the UI migrates.
+            """
+            path = parsed.path
+            if path in {"/api/projects", "/api/projects/"}:
+                return "/api/projects", None
+            project_match = re.fullmatch(r"/api/projects/([^/]+)(/.*)?", path)
+            if project_match:
+                if not registry:
+                    raise ValueError("当前服务未启用工程注册表")
+                context = context_for(unquote(project_match.group(1)))
+                return project_match.group(2) or "/api/project", context
+            if not path.startswith("/api/"):
+                return path, None
+            query_project = parse_qs(parsed.query).get("projectId", [None])[0]
+            header_project = self.headers.get("X-Project-Id")
+            return path, context_for(query_project or header_project or (default_context.project_id if default_context else None))
+
+        def _project_admin(self, context):
+            key = context.project_id if context else legacy_context.project_id
+            if key not in admin_accesses:
+                config_path = str(context.config_path) if context and context.config_path else project_config
+                admin_accesses[key] = _admin_access(config_path)
+            return admin_accesses[key]
+
+        def _query_service(self, context):
+            return QueryService(
+                connect(str(context.db_path)),
+                db_path=str(context.db_path),
+                project_config=str(context.config_path) if context.config_path else None,
+                workspace_root=context.workspace_root,
+                ast_data_root=context.ast_root,
+                baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                requirements_root=context.requirements_root if context.registered else None,
+                project_id=context.project_id,
+                project_scoped=context.registered,
+            )
+
         def _json(self, status, payload):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
@@ -112,8 +204,8 @@ def make_server(
                 raise ValueError("请求体必须是 JSON 对象")
             return value
 
-        def _require_admin(self):
-            expected = admin_access["token"]
+        def _require_admin(self, context):
+            expected = self._project_admin(context)["token"]
             if expected is None:
                 return True
             authorization = self.headers.get("Authorization", "")
@@ -127,24 +219,54 @@ def make_server(
             service = None
             stream_started = False
             try:
-                path = urlparse(self.path).path
+                parsed = urlparse(self.path)
+                if parsed.path == "/api/projects":
+                    if not registry:
+                        self._json(400, {"error": "当前启动方式未启用工程注册表"})
+                        return
+                    body = self._body()
+                    config_path = str(body.get("configPath") or body.get("projectConfig") or "").strip()
+                    if not config_path:
+                        raise ValueError("configPath is required")
+                    context = registry.register(
+                        config_path,
+                        data_root=body.get("dataRoot"),
+                        name=body.get("name"),
+                    )
+                    self._json(201, {"project": context.to_dict(), "projects": registry.list()})
+                    return
+
+                path, context = self._project_route(parsed)
+                db_path = str(context.db_path)
+                project_config = str(context.config_path) if context.config_path else None
+                evaluations = evaluation_for(context)
+                ast = ast_for(context)
                 if path == "/api/knowledge/baselines/refresh":
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    service = BaselineKnowledgeService(
+                        connect(db_path), project_config=project_config,
+                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                    )
                     body = self._body()
                     self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
                     return
 
+                if path == "/api/ast/generate":
+                    if not self._require_admin(context):
+                        return
+                    self._json(202, ast.generate())
+                    return
+
                 cancel_match = re.fullmatch(r"/api/query/([^/]+)/cancel", path)
                 if cancel_match:
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     self._json(200, service.cancel_run(cancel_match.group(1)))
                     return
                 feedback_match = re.fullmatch(r"/api/query/([^/]+)/feedback", path)
                 if feedback_match:
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     body = self._body()
                     self._json(201, service.record_feedback(
                         feedback_match.group(1), str(body.get("rating") or ""), str(body.get("comment") or "")
@@ -152,25 +274,27 @@ def make_server(
                     return
 
                 if path == "/api/evaluations":
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     body = self._body()
                     result = evaluations.start(body)
                     self._json(202 if not result.get("duplicate") else 200, result)
                     return
                 if path == "/api/evaluation-suites":
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     body = self._body()
                     self._json(201, evaluations.create_suite(body))
                     return
-                evaluation_action = re.fullmatch(r"/api/evaluations/([^/]+)/(cancel|rejudge)", path)
+                evaluation_action = re.fullmatch(r"/api/evaluations/([^/]+)/(cancel|rejudge|retry)", path)
                 if evaluation_action:
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     eval_id, action = evaluation_action.group(1), evaluation_action.group(2)
                     body = self._body() if action == "rejudge" else {}
-                    result = evaluations.cancel(eval_id) if action == "cancel" else evaluations.rejudge(eval_id)
+                    result = (evaluations.cancel(eval_id) if action == "cancel"
+                              else evaluations.rejudge(eval_id) if action == "rejudge"
+                              else evaluations.retry_failed(eval_id))
                     self._json(202, result)
                     return
 
@@ -182,9 +306,10 @@ def make_server(
                 question = body.get("question")
                 conversation_id = body.get("conversationId")
                 scope = body.get("scope")
+                mode = body.get("mode")
                 if scope is not None and not isinstance(scope, dict):
                     raise ValueError("scope 必须是对象，形如 {systemIds: [], repositoryIds: []}")
-                service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                service = self._query_service(context)
                 if path == "/api/query/stream":
                     stream_started = True
                     self._start_sse()
@@ -193,6 +318,7 @@ def make_server(
                             question,
                             conversation_id=conversation_id,
                             scope=scope,
+                            mode=mode,
                             event_callback=lambda event: self._sse("event", event),
                             run_callback=lambda value: self._sse("run", value),
                         )
@@ -207,7 +333,7 @@ def make_server(
                             pass
                     return
 
-                self._json(200, service.query(question, conversation_id=conversation_id, scope=scope))
+                self._json(200, service.query(question, conversation_id=conversation_id, scope=scope, mode=mode))
             except QueryBusyError as exc:
                 self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
@@ -233,17 +359,21 @@ def make_server(
 
         def do_PUT(self):
             try:
-                path = urlparse(self.path).path
+                parsed = urlparse(self.path)
+                path, context = self._project_route(parsed)
+                db_path = str(context.db_path)
+                project_config = str(context.config_path) if context.config_path else None
+                evaluations = evaluation_for(context)
                 suite_match = re.fullmatch(r"/api/evaluation-suites/([^/]+)", path)
                 if suite_match:
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     body = self._body()
                     self._json(200, evaluations.update_suite(suite_match.group(1), body))
                     return
                 review_match = re.fullmatch(r"/api/evaluations/([^/]+)/reviews/([^/]+)", path)
                 if review_match:
-                    if not self._require_admin():
+                    if not self._require_admin(context):
                         return
                     body = self._body()
                     self._json(200, evaluations.save_review(review_match.group(1), review_match.group(2), body))
@@ -259,23 +389,59 @@ def make_server(
             service = None
             try:
                 parsed = urlparse(self.path)
-                if parsed.path == "/api/evaluations/setup":
+                if parsed.path == "/api/projects":
+                    if registry:
+                        self._json(200, {"items": registry.list()})
+                    else:
+                        self._json(200, {"items": [{**legacy_context.to_dict(), "registered": False}]})
+                    return
+                path, context = self._project_route(parsed)
+                if path == "/api/project":
+                    self._json(200, context.to_dict())
+                    return
+                if context is None:
+                    # Static files do not belong to a project context.
+                    if not path.startswith("/api/"):
+                        relative = path.lstrip("/")
+                        target = (static_root / relative).resolve() if relative else static_root / "index.html"
+                        if static_root.resolve() not in target.parents or not target.is_file():
+                            target = static_root / "index.html"
+                        self._file(target)
+                        return
+                    raise ValueError("未选择工程")
+                db_path = str(context.db_path)
+                project_config = str(context.config_path) if context.config_path else None
+                evaluations = evaluation_for(context)
+                ast = ast_for(context)
+                admin_access = self._project_admin(context)
+                if path == "/api/evaluations/setup":
                     setup = evaluations.setup()
                     setup["adminAuthRequired"] = admin_access["token"] is not None
                     self._json(200, setup)
                     return
-                if parsed.path == "/api/evaluation-suites":
+                if path == "/api/ast":
+                    self._json(200, ast.status())
+                    return
+                if path == "/api/ast/documents":
+                    version_id = parse_qs(parsed.query).get("versionId", [None])[0]
+                    self._json(200, ast.list_documents(version_id))
+                    return
+                if path == "/api/ast/document":
+                    params = parse_qs(parsed.query)
+                    self._json(200, ast.read_document(params.get("versionId", [""])[0], params.get("path", [""])[0]))
+                    return
+                if path == "/api/evaluation-suites":
                     self._json(200, evaluations.list_suites())
                     return
-                if parsed.path == "/api/evaluations":
+                if path == "/api/evaluations":
                     self._json(200, evaluations.list_evaluations())
                     return
-                case_match = re.fullmatch(r"/api/evaluations/([^/]+)/cases/([^/]+)/repeats/(\d+)", parsed.path)
+                case_match = re.fullmatch(r"/api/evaluations/([^/]+)/cases/([^/]+)/repeats/(\d+)", path)
                 if case_match:
                     self._json(200, evaluations.get_case(case_match.group(1), case_match.group(2),
                                                         int(case_match.group(3))))
                     return
-                source_match = re.fullmatch(r"/api/evaluations/([^/]+)/sources/([^/]+)", parsed.path)
+                source_match = re.fullmatch(r"/api/evaluations/([^/]+)/sources/([^/]+)", path)
                 if source_match:
                     params = parse_qs(parsed.query)
                     self._json(200, evaluations.read_source(
@@ -285,82 +451,93 @@ def make_server(
                         int(params.get("end", ["0"])[0]) or None,
                     ))
                     return
-                report_match = re.fullmatch(r"/api/evaluations/([^/]+)/report", parsed.path)
+                report_match = re.fullmatch(r"/api/evaluations/([^/]+)/report", path)
                 if report_match:
                     source = parse_qs(parsed.query).get("source", ["review"])[0]
                     self._json(200, evaluations.export_report(report_match.group(1), source))
                     return
-                evaluation_match = re.fullmatch(r"/api/evaluations/([^/]+)", parsed.path)
+                evaluation_match = re.fullmatch(r"/api/evaluations/([^/]+)", path)
                 if evaluation_match:
                     self._json(200, evaluations.get_evaluation(evaluation_match.group(1)))
                     return
-                if parsed.path == "/api/workspace":
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
-                    self._json(200, {**service.workspace_summary(), "adminAuthRequired": admin_access["token"] is not None})
+                if path == "/api/workspace":
+                    service = self._query_service(context)
+                    self._json(200, {**service.workspace_summary(), "projectId": context.project_id,
+                                     "projectName": context.project_name,
+                                     "adminAuthRequired": admin_access["token"] is not None})
                     return
-                if parsed.path == "/api/conversations":
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                if path == "/api/conversations":
+                    service = self._query_service(context)
                     params = parse_qs(parsed.query)
                     self._json(200, service.list_conversations(int(params.get("limit", ["20"])[0]), params.get("cursor", [None])[0]))
                     return
-                conversation_match = re.fullmatch(r"/api/conversations/([^/]+)", parsed.path)
+                conversation_match = re.fullmatch(r"/api/conversations/([^/]+)", path)
                 if conversation_match:
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     self._json(200, service.get_conversation(conversation_match.group(1)))
                     return
-                if parsed.path == "/api/runs":
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                if path == "/api/runs":
+                    service = self._query_service(context)
                     limit = parse_qs(parsed.query).get("limit", ["30"])[0]
                     self._json(200, {"items": service.list_runs(int(limit))})
                     return
-                if parsed.path == "/api/code/search":
+                if path == "/api/code/search":
                     from ..tools import EvidenceTools
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     query = parse_qs(parsed.query).get("q", [""])[0]
                     self._json(200, {"items": EvidenceTools(service.db).search_code(query or "_", 50) if query else []})
                     return
-                if parsed.path == "/api/knowledge-graph":
+                if path == "/api/knowledge-graph":
                     from ..knowledge_graph import KnowledgeGraphService
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     params = parse_qs(parsed.query)
                     self._json(200, KnowledgeGraphService(service.db).search(params.get("q", [""])[0], params.get("type", [""])[0]))
                     return
-                if parsed.path == "/api/knowledge/entities":
+                if path == "/api/knowledge/entities":
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    service = BaselineKnowledgeService(
+                        connect(db_path), project_config=project_config,
+                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                    )
                     params = parse_qs(parsed.query)
                     query = params.get("q", [""])[0]
                     entity_type = params.get("type", [""])[0]
                     self._json(200, {"items": service.list_entities(query, entity_type), "relations": service.list_relations(query)})
                     return
-                entity_match = re.fullmatch(r"/api/knowledge/entities/([^/]+)", parsed.path)
+                entity_match = re.fullmatch(r"/api/knowledge/entities/([^/]+)", path)
                 if entity_match:
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    service = BaselineKnowledgeService(
+                        connect(db_path), project_config=project_config,
+                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                    )
                     self._json(200, service.get_entity(entity_match.group(1)))
                     return
-                relation_match = re.fullmatch(r"/api/knowledge/relations/([^/]+)", parsed.path)
+                relation_match = re.fullmatch(r"/api/knowledge/relations/([^/]+)", path)
                 if relation_match:
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(connect(db_path), project_config=project_config)
+                    service = BaselineKnowledgeService(
+                        connect(db_path), project_config=project_config,
+                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                    )
                     self._json(200, service.get_relation(relation_match.group(1)))
                     return
-                run_match = re.fullmatch(r"/api/query/([^/]+)", parsed.path)
+                run_match = re.fullmatch(r"/api/query/([^/]+)", path)
                 if run_match:
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     self._json(200, service.get_run(run_match.group(1)))
                     return
-                symbol_match = re.fullmatch(r"/api/code/symbol/([^/]+)", parsed.path)
+                symbol_match = re.fullmatch(r"/api/code/symbol/([^/]+)", path)
                 if symbol_match:
                     from ..tools import EvidenceTools
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     tools = EvidenceTools(service.db)
                     detail = tools.read_source(symbol_match.group(1))
                     detail["relations"] = tools.get_symbol_relations(symbol_match.group(1))
                     self._json(200, detail)
                     return
-                if not parsed.path.startswith("/api/"):
-                    relative = parsed.path.lstrip("/")
+                if not path.startswith("/api/"):
+                    relative = path.lstrip("/")
                     target = (static_root / relative).resolve() if relative else static_root / "index.html"
                     if static_root.resolve() not in target.parents or not target.is_file():
                         target = static_root / "index.html"
@@ -378,10 +555,11 @@ def make_server(
         def do_DELETE(self):
             service = None
             try:
-                path = urlparse(self.path).path
+                parsed = urlparse(self.path)
+                path, context = self._project_route(parsed)
                 conversation_match = re.fullmatch(r"/api/conversations/([^/]+)", path)
                 if conversation_match:
-                    service = QueryService(connect(db_path), db_path=db_path, project_config=project_config)
+                    service = self._query_service(context)
                     self._json(200, service.delete_conversation(conversation_match.group(1)))
                     return
                 self._json(404, {"error": "not found"})
@@ -408,11 +586,18 @@ def serve(
     port: int = 8082,
     *,
     project_config: str | None = None,
+    project_registry: ProjectRegistry | str | Path | None = None,
+    project_id: str | None = None,
 ):
-    server = make_server(db_path, host, port, project_config=project_config)
+    server = make_server(
+        db_path, host, port, project_config=project_config,
+        project_registry=project_registry, project_id=project_id,
+    )
     logger.info("工作台已启动: http://%s:%s/  (db=%s)", host, port, db_path)
     if project_config:
         logger.info("项目配置: %s", project_config)
+    if project_registry:
+        logger.info("工程注册表: %s", project_registry)
     server.serve_forever()
 
 

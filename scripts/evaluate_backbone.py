@@ -22,6 +22,10 @@ from business_code_agent.evaluation import (ARMS_AB, ARM_DESCRIPTIONS_AB, freeze
 
 def _comparison_setup(args, documents):
     """Arm list, frozen baseline variants and descriptions for one comparison mode."""
+    if args.comparison in ("diagnostic", "abc", "diagnostic_ast"):
+        from business_code_agent.evaluation.runner import COMPARISONS
+        descriptions = COMPARISONS[args.comparison]
+        return list(descriptions), None, dict(descriptions)
     if args.comparison == "rewrite":
         return (["code_only", "legacy", "revised"],
                 {"code_only": {}, "legacy": {"withdraw-flow.md": args.legacy_baseline.read_text(encoding="utf-8")},
@@ -40,6 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", help="新建结果目录，默认使用时间戳")
     parser.add_argument("--rejudge", type=Path, help="仅对已有结果重新评审，保留旧评分")
+    parser.add_argument("--rubric-suite", type=Path, help="重评时使用修订题库；必须同时指定独立 --output")
     parser.add_argument("--suite", type=Path, help="题库 JSON（含 projectConfig、cases）")
     parser.add_argument("--judge", action="store_true", help="独立会话读取源码进行模型初评")
     parser.add_argument("--repeats", type=int, default=2)
@@ -48,14 +53,26 @@ def main():
     parser.add_argument("--cases", nargs="+")
     parser.add_argument("--start-repeat", type=int, default=1)
     parser.add_argument("--blocks", nargs="+", help="Optional case:repeat blocks, each including all comparison arms")
-    parser.add_argument("--comparison", choices=["ab", "current", "rewrite"], default="ab")
+    parser.add_argument("--comparison", choices=["ab", "abc", "diagnostic", "diagnostic_ast", "current", "rewrite"], default="ab")
     parser.add_argument("--legacy-baseline", type=Path, help="Frozen baseline file to compare against a rewrite")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("workers 必须大于 0")
     if args.rejudge:
-        results = rejudge_output(args.rejudge.resolve(), workers=args.workers)
+        target = args.rejudge.resolve()
+        if args.rubric_suite:
+            if not args.output:
+                parser.error("修订标准重评必须指定独立 --output，以保留旧批次")
+            from business_code_agent.evaluation.diagnosis import prepare_reassessment
+            revised = json.loads(args.rubric_suite.read_text(encoding="utf-8"))
+            target = prepare_reassessment(target, args.output, revised, args.cases)
+        elif args.cases:
+            parser.error("重评子集需要 --rubric-suite 和独立 --output")
+        if args.prepare_only:
+            print(target)
+            return 0
+        results = rejudge_output(target, workers=args.workers)
         return 2 if any(r.get("status") != "completed" or r.get("review", {}).get("status") != "completed"
                         for r in results) else 0
     if args.comparison == "rewrite" and not args.legacy_baseline:
@@ -76,6 +93,38 @@ def main():
             parser.error("业务基线目录不存在")
         documents = baseline_documents(baseline_root)
         arms, variants, arm_descriptions = _comparison_setup(args, documents)
+        ast_version_id = None
+        ast_generation_seconds = None
+        if any(arm in ("ast", "overview_ast") for arm in arms) and variants is None:
+            from business_code_agent.evaluation.ast_service import AstService
+            ast_current = AstService(project_config=config_path).current_version()
+            if not ast_current:
+                parser.error("AST 对照必须先在 AST 管理页手动生成可用版本")
+            ast_version_id, ast_metadata, ast_root = ast_current
+            ast_generation_seconds = ast_metadata.get("generationSeconds")
+            ast_documents = {str(path.relative_to(ast_root)): path.read_text(encoding="utf-8")
+                             for path in ast_root.rglob("*.md")}
+            variants = {}
+            for arm in arms:
+                if arm == "code_only":
+                    variants[arm] = {}
+                elif arm == "optional":
+                    variants[arm] = documents
+                elif arm == "overview":
+                    variants[arm] = {"project-overview.md": documents.get("project-overview.md", "") +
+                                     "\n\n## 本轮资料范围\n\n本轮只提供业务总览，未提供人工流程主干文件；请从源码确认实现。\n"}
+                elif arm == "ast":
+                    variants[arm] = ast_documents
+                elif arm == "overview_ast":
+                    overview = (documents.get("project-overview.md", "") +
+                                "\n\n## 本轮资料范围\n\n本轮只提供业务总览，未提供人工流程主干文件；请从源码确认实现。\n")
+                    variants[arm] = {**{key: value for key, value in ast_documents.items()
+                                       if key != "project-overview.md"},
+                                     "ast-overview.md": ast_documents.get("project-overview.md", ""),
+                                     "project-overview.md": overview +
+                                     "\n\n## 可选代码结构资料\n\n[AST结构导航](ast-overview.md)：仅含机械提取的代码结构，实际行为以源码为准。\n"}
+                else:
+                    variants[arm] = documents
         output = Path(args.output or root / ".data/evaluations"
                       / datetime.now().strftime("backbone-%Y%m%d-%H%M%S")).resolve()
         freeze_batch(output, suite=suite, cases=cases, project_config=config_path,
@@ -83,7 +132,8 @@ def main():
                      comparison=args.comparison, repeats=args.repeats,
                      case_ids=set(args.cases) if args.cases else None, judge=args.judge,
                      workers=args.workers, start_repeat=args.start_repeat, blocks=args.blocks,
-                     limit_jobs=args.limit_jobs)
+                     limit_jobs=args.limit_jobs, ast_version_id=ast_version_id,
+                     ast_generation_seconds=ast_generation_seconds)
     except ValueError as exc:
         parser.error(str(exc))
     # Freeze the harness scripts alongside the data for later inspection.

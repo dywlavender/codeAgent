@@ -1,30 +1,56 @@
 export class RequestAborted extends Error {}
 
+export function activeProjectId() {
+  if (typeof window !== "undefined") {
+    const fromUrl = new URLSearchParams(window.location.search).get("projectId");
+    if (fromUrl) return fromUrl;
+  }
+  return typeof sessionStorage === "undefined" ? "" : sessionStorage.getItem("activeProjectId") || "";
+}
+
+function adminStorageKey(projectId = activeProjectId()) {
+  return projectId ? `knowledgeAdminToken:${projectId}` : "knowledgeAdminToken";
+}
+
+function projectPath(path) {
+  const projectId = activeProjectId();
+  if (!projectId || path.startsWith("/api/projects")) return path;
+  return `/api/projects/${encodeURIComponent(projectId)}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export async function request(path, options = {}, signal) {
-  const adminToken = sessionStorage.getItem("knowledgeAdminToken");
+  const storage = typeof sessionStorage === "undefined" ? null : sessionStorage;
+  const projectId = activeProjectId();
+  const adminToken = storage?.getItem(adminStorageKey(projectId))
+    || (!projectId ? storage?.getItem("knowledgeAdminToken") : "");
   const headers = { ...(options.headers || {}) };
+  if (projectId) headers["X-Project-Id"] = projectId;
   const adminPath = path.startsWith("/api/knowledge-admin/") || path.startsWith("/api/knowledge/")
+    || path.startsWith("/api/ast/generate")
     || path.startsWith("/api/evaluations") || path.startsWith("/api/evaluation-suites");
   if (adminToken && adminPath) headers.Authorization = `Bearer ${adminToken}`;
   let response;
   try {
-    response = await fetch(path, { ...(options || {}), headers, signal });
+    response = await fetch(projectPath(path), { ...(options || {}), headers, signal });
   } catch (error) {
     if (error?.name === "AbortError") throw new RequestAborted("请求已中止");
     throw error;
   }
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 && adminPath) {
-    sessionStorage.removeItem("knowledgeAdminToken");
+    storage?.removeItem(adminStorageKey(projectId));
   }
   if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);
   return body;
 }
 
 export async function streamQuery(path, payload, { signal, onEvent, onRun } = {}) {
-  const response = await fetch(path, {
+  const projectId = activeProjectId();
+  const headers = { "Content-Type": "application/json" };
+  if (projectId) headers["X-Project-Id"] = projectId;
+  const response = await fetch(projectPath(path), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
     signal,
   }).catch((error) => {

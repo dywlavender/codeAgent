@@ -14,13 +14,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
 from ..query_agent.workspace import WorkspaceManager
-from .ast_docs import generate_ast_documents
+from .ast_docs import generate_ast_documents  # compatibility export; web batches receive a manual AST version
 from .harness import (EvaluationRuntime, judge_answer, judge_workspace_for, metadata_capture,
                       run_answer_job, write_json)
 from .scoring import human_review_score, model_review_score
@@ -33,7 +34,15 @@ ARM_DESCRIPTIONS_AB = {
 AST_ARM_DESCRIPTION = "同一资料 + AST 代码解析结构地图（tree-sitter 机械生成，无业务解释）"
 ARMS_ABC = ("code_only", "optional", "ast")
 ARM_DESCRIPTIONS_ABC = {**ARM_DESCRIPTIONS_AB, "ast": AST_ARM_DESCRIPTION}
+ARMS_DIAGNOSTIC = ("code_only", "overview", "optional")
+ARM_DESCRIPTIONS_DIAGNOSTIC = {**ARM_DESCRIPTIONS_AB, "overview": "同一资料 + 仅项目总览（不提供流程主干）"}
+COMPARISONS = {"ab": ARM_DESCRIPTIONS_AB, "abc": ARM_DESCRIPTIONS_ABC,
+               "diagnostic": {arm: ARM_DESCRIPTIONS_DIAGNOSTIC[arm] for arm in ARMS_DIAGNOSTIC}}
+COMPARISONS["diagnostic_ast"] = {**COMPARISONS["diagnostic"], "ast": AST_ARM_DESCRIPTION,
+    "overview_ast": "同一资料 + 相同业务总览 + AST结构地图（不提供人工流程文档）"}
 COMPARISON_NOTES = {
+    "diagnostic_ast": "五组诊断：独立AST与无主干比较；总览+AST与仅总览比较，隔离结构地图的增量作用。",
+    "diagnostic": "无主干、仅总览、完整主干；分别比较定位收益与流程文档的额外收益。",
     "ab": "结构化图谱不参与该对照；结果只反映文档主干的整体接入效果。",
     "abc": "三臂对照：文档主干与 AST 代码解析地图分别与无主干组对比；结构化图谱不参与。",
 }
@@ -55,25 +64,29 @@ def validate_suite(suite):
         if not str(case.get("question") or "").strip():
             raise ValueError(f"题目 {case.get('id')} 缺少 question")
         checks = case.get("checks")
-        if not isinstance(checks, list) or not checks or any(not str(check or "").strip() for check in checks):
-            raise ValueError(f"题目 {case.get('id')} 需要非空 checks 判分标准")
+        if not isinstance(checks, list) or any(not str(check or "").strip() for check in checks):
+            raise ValueError(f"题目 {case.get('id')} 的 checks 必须是字符串数组；没有评分要点时可留空")
     return cases
 
 
-def resolve_project_sources(project_config):
-    """Resolve repositories, baseline and requirement roots from a project config."""
-    manager = WorkspaceManager(project_config=project_config)
+def resolve_project_sources(project_config, *, baseline_root=None, requirements_root=None):
+    """Resolve repositories and material roots for one frozen project input."""
+    manager = WorkspaceManager(
+        project_config=project_config,
+        baseline_root=baseline_root,
+        requirements_root=requirements_root,
+    )
     repository_sources = manager._repository_sources()
     if not repository_sources or any(not path.is_dir() for _, path in repository_sources):
         raise ValueError("请先准备项目配置中的本地代码仓库")
-    baseline_root = manager._configured_path(
+    resolved_baseline_root = manager.baseline_root or manager._configured_path(
         (manager.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")
     requirements_config = manager.config.get("requirements")
-    requirements_root = manager._configured_path(
+    resolved_requirements_root = manager.requirements_root or manager._configured_path(
         manager.config.get("requirementsRoot") or manager.config.get("requirementRoot")
         or (requirements_config.get("root") if isinstance(requirements_config, dict) else None)
         or "requirements")
-    return manager, repository_sources, baseline_root, requirements_root
+    return manager, repository_sources, resolved_baseline_root, resolved_requirements_root
 
 
 def baseline_documents(baseline_root):
@@ -83,12 +96,27 @@ def baseline_documents(baseline_root):
             for path in sorted(baseline_root.rglob("*.md"))}
 
 
-def _arm_documents(arm, documents, inputs):
+def _arm_documents(arm, documents, inputs, ast_documents=None):
     """Per-arm reference documents: none, the human baseline, or the AST map."""
     if arm == "code_only":
         return {}
-    if arm == "ast":
-        return generate_ast_documents(inputs)
+    if arm == "overview":
+        if not documents.get("project-overview.md", "").strip():
+            raise ValueError("仅总览对照需要非空 project-overview.md")
+        return {"project-overview.md": documents["project-overview.md"] +
+                "\n\n## 本轮资料范围\n\n本轮提供业务总览，未提供总览中链接的人工流程主干文件；"
+                "这些链接仅保留项目认知背景，不是本轮可读取入口，请从授权源码确认流程。"
+                "若本轮还提供机械结构资料，其入口会单独列在下方。\n"}
+    if arm in ("ast", "overview_ast"):
+        if ast_documents is None:
+            raise ValueError("AST 实验必须引用已经手动生成的资料版本")
+        generated = ast_documents
+        if arm == "ast":
+            return generated
+        overview = _arm_documents("overview", documents, inputs)["project-overview.md"]
+        return {**{key: value for key, value in generated.items() if key != "project-overview.md"},
+                "ast-overview.md": generated["project-overview.md"],
+                "project-overview.md": overview + "\n\n## 可选代码结构资料\n\n[AST结构导航](ast-overview.md)：仅含机械提取的代码结构，可按需读取，实际行为以源码为准。\n"}
     return documents
 
 
@@ -112,15 +140,18 @@ def plan_jobs(cases, *, arms, repeats, case_ids=None, start_repeat=1, blocks=Non
     return jobs
 
 
-def freeze_batch(output, *, suite, cases, project_config, arms=ARMS_ABC, arm_descriptions=None,
+def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=ARMS_ABC, arm_descriptions=None,
                  variants=None, comparison="abc", repeats=2, case_ids=None, judge=True, workers=2,
-                 start_repeat=1, blocks=None, limit_jobs=None, suite_ref=None, timeout_seconds=240):
+                 start_repeat=1, blocks=None, limit_jobs=None, suite_ref=None, timeout_seconds=240,
+                 ast_version_id=None, ast_generation_seconds=None, baseline_root=None,
+                 requirements_root=None):
     """Create the output directory, freeze sources/rubric and write ``protocol.json``."""
     arm_descriptions = arm_descriptions or {arm: ARM_DESCRIPTIONS_ABC.get(arm, arm) for arm in arms}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    manager, repository_sources, baseline_root, requirements_root = resolve_project_sources(project_config)
-    documents = baseline_documents(baseline_root)
+    manager, repository_sources, resolved_baseline_root, resolved_requirements_root = resolve_project_sources(
+        project_config, baseline_root=baseline_root, requirements_root=requirements_root)
+    documents = baseline_documents(resolved_baseline_root)
     inputs = output / "inputs"
     repository_names = []
     for number, (repository_id, source) in enumerate(repository_sources):
@@ -128,10 +159,12 @@ def freeze_batch(output, *, suite, cases, project_config, arms=ARMS_ABC, arm_des
         repository_names.append((repository_id, name))
         shutil.copytree(source, inputs / name,
                         ignore=shutil.ignore_patterns(".git", "node_modules", "target", ".venv", "__pycache__"))
-    if requirements_root.is_dir():
-        shutil.copytree(requirements_root, inputs / "requirements")
+    if resolved_requirements_root.is_dir():
+        shutil.copytree(resolved_requirements_root, inputs / "requirements")
+    if variants is None and any(a in arms for a in ("ast", "overview_ast")):
+        raise ValueError("AST 实验必须引用已经手动生成的资料版本，不能在实验启动时生成")
     variants = variants if variants is not None else {
-        arm: _arm_documents(arm, documents, inputs) for arm in arms}
+        arm: _arm_documents(arm, documents, inputs, None) for arm in arms}
     for arm, files in variants.items():
         for name, content in files.items():
             target = inputs / "baselines" / arm / name
@@ -144,9 +177,15 @@ def freeze_batch(output, *, suite, cases, project_config, arms=ARMS_ABC, arm_des
     except (OSError, subprocess.SubprocessError):
         cli_version = None
     write_json(output / "protocol.json", {
+        "projectId": project_id,
         "suite": suite,
         "suiteRef": suite_ref,
         "sourceRepositories": [{"id": rid, "snapshot": name} for rid, name in repository_names],
+        "referencePreparation": {"astGenerationSeconds": ast_generation_seconds,
+            "astGenerationInBatch": False, "astVersionId": ast_version_id,
+            "astGeneratorVersion": 2 if ast_version_id else None,
+            "arms": {arm: {"documents": len(files), "characters": sum(len(v) for v in files.values()),
+                            "overviewCharacters": len(files.get("project-overview.md", ""))} for arm, files in variants.items()}},
         "judgeEnabled": judge,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "cases": cases,
@@ -319,10 +358,34 @@ def summarize_pairs(results, cases, arms, *, source="model", reviews=None):
             return human_review_score(entry, cases[result["questionId"]]) if entry else None
         return model_review_score(result, cases[result["questionId"]])
 
+    def check_values(result):
+        case = cases[result["questionId"]]
+        if source == "review":
+            entry = latest_review((reviews or {}).get(result.get("id")))
+            values = (entry or {}).get("checks") if entry else None
+            return list(values) if values is not None and all(value in (0, 1) for value in values) else None
+        review = result.get("review") or {}
+        if review.get("status") != "completed":
+            return None
+        checks = review.get("checks") or []
+        return [1 if item.get("met") else 0 for item in checks] if len(checks) == len(case.get("checks") or []) else None
+
+    def check_kind(label):
+        text = str(label or "")
+        if re.search(r"依据|引用|源码|文件|行号|证据", text):
+            return "evidence"
+        if re.search(r"覆盖|阶段|流程|链路|入口|职责|环节", text):
+            return "coverage"
+        return "core"
+
     eligible = [b for b in complete if all(score(indexed[(*b, arm)]) is not None for arm in arm_list)]
+    completed_by_arm = {
+        arm: [b for b in blocks if indexed.get((*b, arm), {}).get("status") == "completed"]
+        for arm in arm_list
+    }
     aggregates = {}
     for arm in arm_list:
-        runs = [indexed[(*b, arm)] for b in complete]
+        runs = [indexed[(*b, arm)] for b in completed_by_arm[arm]]
         scores = [score(indexed[(*b, arm)]) for b in eligible]
         aggregates[arm] = {
             "meanSeconds": round(mean(r["elapsedSeconds"] for r in runs), 2) if runs else None,
@@ -332,17 +395,38 @@ def summarize_pairs(results, cases, arms, *, source="model", reviews=None):
             "possible": sum(s[1] for s in scores) if scores else None,
             "issues": sum(s[2] for s in scores) if scores else None,
         }
-    pairs = []
-    for block in complete:
-        control = indexed[(*block, "code_only")]
-        control_score = score(control)
-        for arm in arm_list:
-            if arm == "code_only":
+        metrics = {kind: {"score": 0, "possible": 0} for kind in ("core", "coverage", "evidence")}
+        for block in eligible:
+            result = indexed[(*block, arm)]
+            values = check_values(result)
+            if values is None:
                 continue
-            treatment = indexed[(*block, arm)]
+            labels = cases[block[0]].get("checks") or []
+            for index, value in enumerate(values):
+                kind = check_kind(labels[index] if index < len(labels) else "")
+                metrics[kind]["score"] += int(value)
+                metrics[kind]["possible"] += 1
+        aggregates[arm]["metrics"] = metrics
+    pairs = []
+
+    def append_pairs(control_arm, treatment_arm):
+        if control_arm not in arm_list or treatment_arm not in arm_list:
+            return
+        # Pair eligibility belongs to this comparison. A failed third arm
+        # must not erase a valid control/treatment pair.
+        pair_blocks = [block for block in blocks
+                       if indexed.get((*block, control_arm), {}).get("status") == "completed"
+                       and indexed.get((*block, treatment_arm), {}).get("status") == "completed"]
+        for block in pair_blocks:
+            control = indexed[(*block, control_arm)]
+            treatment = indexed[(*block, treatment_arm)]
+            control_score = score(control)
             treatment_score = score(treatment)
+            control_seconds = control.get("elapsedSeconds")
+            treatment_seconds = treatment.get("elapsedSeconds")
             pairs.append({
-                "questionId": block[0], "repeat": block[1], "arm": arm,
+                "questionId": block[0], "repeat": block[1], "arm": treatment_arm,
+                "controlArm": control_arm,
                 "category": cases[block[0]].get("category", "未分类"),
                 "scored": bool(control_score and treatment_score),
                 "scoreDelta": treatment_score[0] - control_score[0] if control_score and treatment_score else None,
@@ -350,8 +434,15 @@ def summarize_pairs(results, cases, arms, *, source="model", reviews=None):
                 "controlScore": f"{control_score[0]}/{control_score[1]}" if control_score else None,
                 "treatmentScore": f"{treatment_score[0]}/{treatment_score[1]}" if treatment_score else None,
                 "toolDelta": treatment.get("toolCalls", 0) - control.get("toolCalls", 0),
-                "secondsDelta": round(treatment["elapsedSeconds"] - control["elapsedSeconds"], 2),
+                "secondsDelta": round(treatment_seconds - control_seconds, 2)
+                if treatment_seconds is not None and control_seconds is not None else None,
             })
+
+    if "code_only" in arm_list:
+        for arm in arm_list:
+            if arm != "code_only":
+                append_pairs("code_only", arm)
+    append_pairs("optional", "ast")
     return {
         "scoreSource": source,
         "plannedBlocks": len(blocks),

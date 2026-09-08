@@ -3,9 +3,9 @@ import {
   BookOpen, ChatCircleDots, Check, Flask, Graph, Lock, MinusCircle, Plus, ShieldCheck, SidebarSimple, Trash, WarningCircle,
 } from "@phosphor-icons/react";
 import {
-  Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Popconfirm, Typography,
+  Avatar, Badge, Button, Flex, Input, Layout, Menu, Modal, Popconfirm, Select, Typography,
 } from "antd";
-import { RequestAborted, request, streamQuery } from "./lib/api.js";
+import { RequestAborted, activeProjectId, request, streamQuery } from "./lib/api.js";
 import { formatRelative } from "./lib/format.js";
 import { isActiveRun, mergeConversations, RUN_STATUS_LABEL, turnFromRun, watchRun } from "./lib/query-state.js";
 import { AgentPage } from "./pages/AgentPage.jsx";
@@ -13,18 +13,31 @@ import { LibraryPage } from "./pages/LibraryPage.jsx";
 import { GraphPage } from "./pages/GraphPage.jsx";
 import { KnowledgeAdminPage } from "./pages/KnowledgeAdminPage.jsx";
 import { EvaluationPage } from "./pages/EvaluationPage.jsx";
+import { AstPage } from "./pages/AstPage.jsx";
 
 const { Sider, Content } = Layout;
 
-const PAGE_IDS = ["agent", "library", "graph", "evaluation", "admin"];
+const PAGE_IDS = ["agent", "library", "graph", "evaluation", "ast", "admin"];
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, "");
   return PAGE_IDS.includes(id) ? id : "agent";
 }
 
+function setProjectInUrl(projectId) {
+  const url = new URL(window.location.href);
+  if (projectId) url.searchParams.set("projectId", projectId);
+  else url.searchParams.delete("projectId");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 export default function App() {
   const [page, setPage] = useState(pageFromHash);
+  const [projects, setProjects] = useState([]);
+  const [projectId, setProjectId] = useState(() => activeProjectId());
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [projectForm, setProjectForm] = useState({ configPath: "", name: "", dataRoot: "" });
   const [workspace, setWorkspace] = useState(null);
   const [runs, setRuns] = useState([]);
   const [result, setResult] = useState(null);
@@ -35,10 +48,19 @@ export default function App() {
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [activeTurnId, setActiveTurnId] = useState(null);
-  const [adminUnlocked, setAdminUnlocked] = useState(() => Boolean(sessionStorage.getItem("knowledgeAdminToken")));
+  const [adminUnlocked, setAdminUnlocked] = useState(() => {
+    const savedProject = activeProjectId();
+    return Boolean(sessionStorage.getItem(savedProject ? `knowledgeAdminToken:${savedProject}` : "knowledgeAdminToken"));
+  });
   const [lockOpen, setLockOpen] = useState(false);
   const [lockToken, setLockToken] = useState("");
   const [scope, setScope] = useState(null);
+  const [mode, setMode] = useState(() => {
+    const savedProject = activeProjectId();
+    return sessionStorage.getItem(`queryMode:${savedProject || "default"}`)
+      || sessionStorage.getItem("queryMode") || "backbone";
+  });
+  const [modeNotice, setModeNotice] = useState("");
   const queryAbortRef = useRef(null);
   const [cancelling, setCancelling] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
@@ -47,9 +69,11 @@ export default function App() {
   const [nextCursor, setNextCursor] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const projectStorageKey = (name, id = projectId) => `${name}:${id || "default"}`;
+
   useEffect(() => {
-    if (conversationId) sessionStorage.setItem("queryConversationId", conversationId);
-  }, [conversationId]);
+    if (conversationId && projectId) sessionStorage.setItem(projectStorageKey("queryConversationId"), conversationId);
+  }, [conversationId, projectId]);
 
   useEffect(() => () => queryAbortRef.current?.abort(), []);
 
@@ -79,21 +103,40 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([request("/api/workspace"), refreshRuns()])
-      .then(([space]) => {
-        setWorkspace(space);
-        const saved = sessionStorage.getItem("queryConversationId");
-        if (saved && pageFromHash() === "agent" && restoreRef.current === 0 && !queryAbortRef.current) doRestore({ conversationId: saved });
+    request("/api/projects")
+      .then((data) => {
+        const items = data.items || [];
+        setProjects(items);
+        const saved = activeProjectId();
+        const selected = items.find((item) => item.id === saved) || items[0];
+        if (selected) {
+          sessionStorage.setItem("activeProjectId", selected.id);
+          setProjectInUrl(selected.id);
+          setProjectId(selected.id);
+          setAdminUnlocked(Boolean(sessionStorage.getItem(`knowledgeAdminToken:${selected.id}`)));
+        }
       })
       .catch((reason) => setError(reason.message));
   }, []);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    Promise.all([request("/api/workspace"), refreshRuns()])
+      .then(([space]) => {
+        setWorkspace(space);
+        const saved = sessionStorage.getItem(projectStorageKey("queryConversationId"));
+        if (saved && pageFromHash() === "agent" && restoreRef.current === 0 && !queryAbortRef.current) doRestore({ conversationId: saved });
+      })
+      .catch((reason) => setError(reason.message));
+    return undefined;
+  }, [projectId]);
 
   async function submit(nextQuestion = question) {
     const normalized = nextQuestion.trim();
     if (!normalized || status === "loading" || queryAbortRef.current) return;
     const turnId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setQuestion("");
-    setTurns((current) => [...current, { id: turnId, question: normalized, status: "loading", events: [] }]);
+    setTurns((current) => [...current, { id: turnId, question: normalized, mode, status: "loading", events: [] }]);
     setActiveTurnId(turnId);
     setResult(null);
     setRunDetail(null);
@@ -108,12 +151,14 @@ export default function App() {
         question: normalized,
         conversationId,
         scope: scope || undefined,
+        mode,
       }, {
         signal: controller.signal,
         onRun: (value) => {
           if (queryAbortRef.current !== controller) return;
           controller.runId = value.runId;
           setConversationId(value.conversationId);
+          setTurns((current) => current.map((turn) => turn.id === turnId ? { ...turn, mode: value.mode || mode, astVersionId: value.astVersionId } : turn));
           if (controller.cancelRequested) requestCancellation(controller);
         },
         onEvent: (event) => queryAbortRef.current === controller && setTurns((current) => current.map((turn) => (
@@ -212,12 +257,17 @@ export default function App() {
         status: detail.status,
         answer: detail.answer || "",
         events: detail.events || [],
+        mode: detail.mode,
+        modeLabel: detail.modeLabel,
+        astVersionId: detail.astVersionId,
       };
       setResult(restoredResult);
       setTurns(history.map(turnFromRun));
       setConversationId(detail.conversationId || null);
       setActiveTurnId(detail.id);
       setScope(detail.scope || null);
+      setMode(detail.mode || "backbone");
+      sessionStorage.setItem(projectStorageKey("queryMode"), detail.mode || "backbone");
       if (isActiveRun(detail)) {
         const controller = new AbortController();
         controller.runId = detail.runId || detail.id;
@@ -274,11 +324,21 @@ export default function App() {
     setQuestion("");
     setConversationId(null);
     setScope(null);
-    sessionStorage.removeItem("queryConversationId");
+    sessionStorage.removeItem(projectStorageKey("queryConversationId"));
     setError("");
     setStatus("idle");
     setActiveTurnId(null);
     navigate("agent");
+  }
+
+  function changeMode(nextMode) {
+    if (!nextMode || nextMode === mode || queryAbortRef.current || status === "loading") return;
+    newConversation();
+    setMode(nextMode);
+    sessionStorage.setItem(projectStorageKey("queryMode"), nextMode);
+    const label = nextMode === "none" ? "无主干" : nextMode === "ast" ? "AST" : "有主干";
+    setModeNotice(`已切换到${label}模式，已开始新对话。`);
+    window.setTimeout(() => setModeNotice(""), 4200);
   }
 
   function selectTurn(turn) {
@@ -287,13 +347,62 @@ export default function App() {
     setRunDetail(turn.detail || null);
   }
 
+  function switchProject(nextProjectId) {
+    if (!nextProjectId || nextProjectId === projectId || status === "loading" || queryAbortRef.current) return;
+    restoreRef.current += 1;
+    setProjectId(nextProjectId);
+    sessionStorage.setItem("activeProjectId", nextProjectId);
+    setProjectInUrl(nextProjectId);
+    setAdminUnlocked(Boolean(sessionStorage.getItem(`knowledgeAdminToken:${nextProjectId}`)));
+    setWorkspace(null);
+    setRuns([]);
+    setNextCursor(null);
+    setTurns([]);
+    setResult(null);
+    setRunDetail(null);
+    setQuestion("");
+    setConversationId(null);
+    setScope(null);
+    setActiveTurnId(null);
+    setError("");
+    setStatus("idle");
+    setMode(sessionStorage.getItem(projectStorageKey("queryMode", nextProjectId)) || "backbone");
+    navigate("agent");
+  }
+
+  async function registerProject() {
+    const configPath = projectForm.configPath.trim();
+    if (!configPath || projectSaving) return;
+    setProjectSaving(true);
+    try {
+      const data = await request("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          configPath,
+          name: projectForm.name.trim() || undefined,
+          dataRoot: projectForm.dataRoot.trim() || undefined,
+        }),
+      });
+      const selected = data.project;
+      setProjects(data.projects || []);
+      setProjectModalOpen(false);
+      setProjectForm({ configPath: "", name: "", dataRoot: "" });
+      if (selected?.id) switchProject(selected.id);
+    } catch (reason) {
+      setError(`登记工程失败：${reason.message}`);
+    } finally {
+      setProjectSaving(false);
+    }
+  }
+
   const adminRequired = Boolean(workspace?.adminAuthRequired);
   const showAdminZone = !adminRequired || adminUnlocked;
 
   async function unlockAdmin() {
     const token = lockToken.trim();
     if (!token) return;
-    sessionStorage.setItem("knowledgeAdminToken", token);
+    sessionStorage.setItem(`knowledgeAdminToken:${projectId || "default"}`, token);
     setAdminUnlocked(true);
     setLockOpen(false);
     setLockToken("");
@@ -328,6 +437,23 @@ export default function App() {
           </div>
           <Button type="text" className="side-collapse" icon={<SidebarSimple size={18} />} onClick={() => setSidebarOpen(false)} aria-label="收起侧栏" />
         </div>
+        <div className="project-switcher">
+          <Typography.Text type="secondary" className="zone-label">当前工程</Typography.Text>
+          <Flex gap={6}>
+            <Select
+              aria-label="选择工程"
+              value={projectId || undefined}
+              placeholder="选择工程"
+              loading={!projects.length && !workspace}
+              options={projects.map((item) => ({ label: item.name || item.id, value: item.id }))}
+              onChange={switchProject}
+              disabled={status === "loading" || Boolean(queryAbortRef.current)}
+              style={{ width: "100%" }}
+              size="small"
+            />
+            <Button type="text" size="small" icon={<Plus size={15} />} aria-label="登记工程" onClick={() => setProjectModalOpen(true)} />
+          </Flex>
+        </div>
         <Button
           block
           icon={<Plus size={14} weight="bold" />}
@@ -347,6 +473,7 @@ export default function App() {
             { key: "library", icon: <BookOpen size={16.5} />, label: "项目资料" },
             { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
             { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
+            { key: "ast", icon: <Graph size={16.5} />, label: "AST 管理" },
             ...(showAdminZone ? [{
               type: "group",
               label: "管理",
@@ -387,6 +514,8 @@ export default function App() {
                   <span className="task-q">{run.question}</span>
                   <small className="task-meta">
                     {RUN_STATUS_LABEL[run.status] || run.status || "未知状态"} · {formatRelative(run.startedAt || run.created_at)}
+                    {run.modeLabel && ` · ${run.modeLabel}`}
+                    {run.astVersionId && ` · ${run.astVersionId}`}
                     {scopeText(run.scope) && ` · ${scopeText(run.scope)}`}
                     {showProject && ` · ${run.workspaceId}`}
                   </small>
@@ -432,6 +561,7 @@ export default function App() {
         {page !== "agent" && !sidebarOpen && <Button className="reopen-sidebar" icon={<SidebarSimple size={18} />} onClick={() => setSidebarOpen(true)}>导航</Button>}
         {page === "agent" && (
           <AgentPage
+            projectId={projectId}
             workspace={workspace}
             runs={runs}
             question={question}
@@ -450,12 +580,16 @@ export default function App() {
             toggleSidebar={() => setSidebarOpen((open) => !open)}
             scope={scope}
             setScope={setScope}
+            mode={mode}
+            setMode={changeMode}
+            modeNotice={modeNotice}
           />
         )}
-        {page === "library" && <LibraryPage workspace={workspace} />}
-        {page === "graph" && <GraphPage workspace={workspace} />}
-        {page === "evaluation" && <EvaluationPage onRequireUnlock={() => setLockOpen(true)} />}
-        {page === "admin" && <KnowledgeAdminPage onRequireUnlock={() => setLockOpen(true)} />}
+        {page === "library" && <LibraryPage workspace={workspace} projectId={projectId} />}
+        {page === "graph" && <GraphPage workspace={workspace} projectId={projectId} />}
+        {page === "evaluation" && <EvaluationPage projectId={projectId} onRequireUnlock={() => setLockOpen(true)} />}
+        {page === "ast" && <AstPage projectId={projectId} onRequireUnlock={() => setLockOpen(true)} />}
+        {page === "admin" && <KnowledgeAdminPage projectId={projectId} onRequireUnlock={() => setLockOpen(true)} />}
       </Content>
 
       <Modal
@@ -478,6 +612,39 @@ export default function App() {
             placeholder="管理员口令"
             autoComplete="current-password"
             onPressEnter={unlockAdmin}
+          />
+        </Flex>
+      </Modal>
+
+      <Modal
+        open={projectModalOpen}
+        title="登记工程"
+        okText="登记并切换"
+        cancelText="取消"
+        confirmLoading={projectSaving}
+        okButtonProps={{ disabled: !projectForm.configPath.trim() }}
+        onCancel={() => { if (!projectSaving) setProjectModalOpen(false); }}
+        onOk={registerProject}
+        width={470}
+      >
+        <Flex vertical gap={10} style={{ paddingTop: 6 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>
+            配置路径由服务端读取。登记只创建独立工程数据目录，不自动同步仓库、生成主干或生成 AST。
+          </Typography.Text>
+          <Input
+            value={projectForm.configPath}
+            onChange={(event) => setProjectForm((current) => ({ ...current, configPath: event.target.value }))}
+            placeholder="服务器上的 project.config.json 路径"
+          />
+          <Input
+            value={projectForm.name}
+            onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="展示名称（可选）"
+          />
+          <Input
+            value={projectForm.dataRoot}
+            onChange={(event) => setProjectForm((current) => ({ ...current, dataRoot: event.target.value }))}
+            placeholder="工程数据目录（可选；已有历史库可显式填写）"
           />
         </Flex>
       </Modal>

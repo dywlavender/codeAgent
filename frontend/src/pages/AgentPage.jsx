@@ -1,21 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, CaretDown, CaretRight, Check, Code, Copy, FileText, FolderOpen, MagnifyingGlass, SidebarSimple, Stop, ThumbsDown, ThumbsUp, WarningCircle } from "@phosphor-icons/react";
-import { Alert, Button, Checkbox, Flex, Input, Popover, Tag, Tooltip } from "antd";
+import { Alert, Button, Checkbox, Flex, Input, Popover, Segmented, Tag, Tooltip } from "antd";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { request } from "../lib/api.js";
 import { buildProgress, fileEvidence, toolTarget, toolTitle } from "../lib/progress.js";
 
 const EXAMPLES = ["梳理一个业务功能的入口和调用流程", "解释这段代码为什么这样校验", "结合业务基线，定位需求对应的实现"];
+const MODE_LABEL = { none: "无主干", backbone: "有主干", ast: "AST" };
 
 export function AgentPage(props) {
-  const { turns = [], status } = props;
+  const { turns = [], status, projectId } = props;
   const loading = status === "loading";
   const empty = turns.length === 0;
   const scrollRef = useRef(null);
   const bottomRef = useRef(null);
   const followRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  const [astInfo, setAstInfo] = useState(null);
+  useEffect(() => { setAstInfo(null); request("/api/ast").then(setAstInfo).catch(() => {}); }, [projectId]);
   useEffect(() => {
     if (empty) return undefined;
     const observer = new IntersectionObserver(([entry]) => setAtBottom(entry.isIntersecting), { root: scrollRef.current, threshold: 0 });
@@ -44,7 +47,8 @@ export function AgentPage(props) {
             <h1 className="home-title">今天想弄清楚什么？</h1>
             <p className="home-sub">基于工作区里的业务基线、需求原文和代码仓库一起找答案。</p>
             {props.error && <Alert type="error" showIcon title={props.error} style={{ marginBottom: 12 }} />}
-            <Composer {...props} loading={loading} home />
+            {props.modeNotice && <div className="mode-notice">{props.modeNotice}</div>}
+            <Composer {...props} loading={loading} home astInfo={astInfo} />
             <div className="home-chips">
               {EXAMPLES.map((item) => <button key={item} onClick={() => props.submit(item)}>{item}</button>)}
             </div>
@@ -74,7 +78,8 @@ export function AgentPage(props) {
         <div className="composer-stick">
           {!atBottom && <Button className="jump-bottom" shape="circle" icon={<ArrowDown size={16} />} aria-label="回到底部" onClick={jumpToBottom} />}
           {props.error && <Alert type="error" showIcon title={props.error} />}
-          <Composer {...props} loading={loading} />
+          {props.modeNotice && <div className="mode-notice">{props.modeNotice}</div>}
+          <Composer {...props} loading={loading} astInfo={astInfo} />
         </div>
       </div>
     </section>
@@ -89,7 +94,7 @@ export function TurnBlock({ turn }) {
   const live = turn.status === "loading";
   const answer = ["success", "cancelled"].includes(turn.status) ? result.answer : progress.text;
   return <article className="turn-block">
-    <div className="user-row"><div className="user-bubble">{turn.question}</div></div>
+    <div className="user-row"><div className="user-bubble"><span className="turn-mode">{MODE_LABEL[result.mode || turn.mode || "backbone"] || "有主干"}</span>{(result.astVersionId || turn.astVersionId) && <span className="turn-version">{result.astVersionId || turn.astVersionId}</span>}{turn.question}</div></div>
     <div className="answer-row"><div className="answer-copy">
       <Investigation progress={progress} files={files} live={live} status={turn.status} />
       {!live && files.length > 0 && <FileCards files={files} />}
@@ -251,7 +256,7 @@ function ContextChip({ workspace, scope, setScope }) {
   </Popover>;
 }
 
-function Composer({ question, setQuestion, submit, stopQuery, loading, cancelling, workspace, home, scope, setScope }) {
+function Composer({ question, setQuestion, submit, stopQuery, loading, cancelling, workspace, home, scope, setScope, mode, setMode, astInfo }) {
   const inputRef = useRef(null);
   const composing = useRef(false);
   useEffect(() => {
@@ -271,6 +276,22 @@ function Composer({ question, setQuestion, submit, stopQuery, loading, cancellin
       <Flex align="center" gap={8}>
         <ContextChip workspace={workspace} scope={scope} setScope={setScope} />
         <span className="composer-mode"><Code size={14} /> Claude Code</span>
+        <Segmented
+          size="small"
+          className="mode-selector"
+          value={mode || "backbone"}
+          onChange={(value) => setMode?.(value)}
+          options={[
+            { value: "none", label: "无主干" },
+            { value: "backbone", label: "有主干" },
+            { value: "ast", label: "AST" },
+          ]}
+        />
+        <small className="mode-version">
+          {mode === "ast"
+            ? ["available", "stale"].includes(astInfo?.status) ? `AST ${astInfo.currentVersionId}${astInfo.status === "stale" ? " · 待更新" : ""}` : "AST 未生成"
+            : mode === "none" ? "仅项目资料" : "业务主干当前版本"}
+        </small>
         <Tag bordered={false} color="default" style={{ margin: 0, fontSize: 10.5 }}>只读</Tag>
       </Flex>
       <Flex align="center" gap={12}><small className="keyboard-hint">Enter 发送</small>{loading ?

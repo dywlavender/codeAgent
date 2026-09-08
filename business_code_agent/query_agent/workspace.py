@@ -92,6 +92,8 @@ class Workspace:
     knowledge_path: Path
     requirements_path: Path
     repositories_path: Path
+    mode: str | None = None
+    ast_version_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +103,8 @@ class Workspace:
             "knowledgePath": str(self.knowledge_path),
             "requirementsPath": str(self.requirements_path),
             "repositoriesPath": str(self.repositories_path),
+            "mode": self.mode,
+            "astVersionId": self.ast_version_id,
         }
 
 
@@ -113,12 +117,16 @@ class WorkspaceManager:
         *,
         project_config: str | Path | None = None,
         workspace_root: str | Path | None = None,
+        baseline_root: str | Path | None = None,
+        requirements_root: str | Path | None = None,
     ):
         self.db = db
         self.project_config = Path(project_config).expanduser().resolve() if project_config else None
         self.config = self._load_config()
         self.project_id = str((self.config.get("project") or {}).get("id") or "default").strip() or "default"
         self.project_name = str((self.config.get("project") or {}).get("name") or self.project_id).strip()
+        self.baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
+        self.requirements_root = Path(requirements_root).expanduser().resolve() if requirements_root else None
         if workspace_root:
             base = Path(workspace_root).expanduser().resolve()
         elif self.project_config:
@@ -127,18 +135,32 @@ class WorkspaceManager:
             base = Path.cwd() / ".data" / "agent-workspaces"
         self.root = base / _safe_name(self.project_id)
 
-    def ensure(self) -> Workspace:
-        self.root.mkdir(parents=True, exist_ok=True)
-        knowledge = self.root / "knowledge"
-        repositories = self.root / "repos"
+    def _mode_root(self, mode: str | None = None) -> Path:
+        return self.root if not mode else self.root / "modes" / _safe_name(mode)
+
+    def ensure(self, *, mode: str | None = None, baseline_source: str | Path | None = None,
+               mode_description: str | None = None,
+               ast_version_id: str | None = None) -> Workspace:
+        root = self._mode_root(mode)
+        root.mkdir(parents=True, exist_ok=True)
+        knowledge = root / "knowledge"
+        repositories = root / "repos"
         knowledge.mkdir(exist_ok=True)
         repositories.mkdir(exist_ok=True)
         baseline_link = knowledge / "baseline"
-        requirements_link = self.root / "requirements"
-        baseline_source = self._configured_path(
-            ((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")
-        )
-        requirements_source = self._configured_path(
+        requirements_link = root / "requirements"
+        if baseline_source is None:
+            baseline_source = self.baseline_root or self._configured_path(
+                ((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")
+            )
+        else:
+            baseline_source = Path(baseline_source).expanduser().resolve()
+        if mode == "none":
+            baseline_source = self.root / "mode-sources" / "none"
+            baseline_source.mkdir(parents=True, exist_ok=True)
+        elif mode == "ast" and not baseline_source.is_dir():
+            raise WorkspaceError("AST 资料目录不可用，请先手动生成 AST")
+        requirements_source = self.requirements_root or self._configured_path(
             self.config.get("requirementsRoot")
             or self.config.get("requirementRoot")
             or ((self.config.get("requirements") or {}).get("root") if isinstance(self.config.get("requirements"), dict) else None)
@@ -156,15 +178,17 @@ class WorkspaceManager:
                 child.unlink()
         for repository_id, source in linked_repositories:
             self._link_directory(repositories / _safe_name(repository_id), source)
-        claude_file = self.root / "CLAUDE.md"
-        claude_file.write_text(self._claude_instructions(), encoding="utf-8")
+        claude_file = root / "CLAUDE.md"
+        claude_file.write_text(self._claude_instructions(root, mode, mode_description), encoding="utf-8")
         return Workspace(
             id=self.project_id,
-            path=self.root,
+            path=root,
             claude_file=claude_file,
             knowledge_path=baseline_link,
             requirements_path=requirements_link,
             repositories_path=repositories,
+            mode=mode,
+            ast_version_id=ast_version_id,
         )
 
     def refresh(self) -> Workspace:
@@ -175,9 +199,9 @@ class WorkspaceManager:
         """Report filesystem readiness separately from CLI permission setup."""
         slots = [
             ("baseline", "业务基线", self.root / "knowledge" / "baseline",
-             self._configured_path((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")),
+             self.baseline_root or self._configured_path((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")),
             ("requirements", "需求原文", self.root / "requirements",
-             self._configured_path(self.config.get("requirementsRoot") or self.config.get("requirementRoot")
+             self.requirements_root or self._configured_path(self.config.get("requirementsRoot") or self.config.get("requirementRoot")
                                    or ((self.config.get("requirements") or {}).get("root") if isinstance(self.config.get("requirements"), dict) else None)
                                    or "requirements")),
         ]
@@ -308,8 +332,10 @@ class WorkspaceManager:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise WorkspaceError(f"无法创建工作区目录链接 {link} -> {source}: {detail}")
 
-    def _claude_instructions(self) -> str:
-        sources = workspace_sources(self.root)
+    def _claude_instructions(self, root: Path | None = None, mode: str | None = None,
+                             mode_description: str | None = None) -> str:
+        root = root or self.root
+        sources = workspace_sources(root)
         source_lines = [f"- {label}：`{path}`" for label, path in sources]
         labels = {label for label, _ in sources}
         for label in ("业务基线", "需求原文"):
@@ -322,9 +348,16 @@ class WorkspaceManager:
         if not configured:
             source_lines.append("- 代码仓库：不可用（未配置或未同步）。")
         source_description = "\n".join(source_lines)
+        mode_note = mode_description or {
+            "none": "当前模式：无主干。不要读取或假设业务基线；正常项目 README、需求原文和源码仍可用。",
+            "backbone": "当前模式：有主干。业务总览自动提供，业务流程主干按问题需要读取；源码仍是当前实现依据。",
+            "ast": "当前模式：AST。仅提供自动生成的简短结构总览与 AST 索引，未提供人工业务主干；结构条目只用于定位，行为仍须读取源码。",
+        }.get(mode or "", "")
         return f"""# CodeAgent
 
 你正在回答项目「{self.project_name}」的业务和代码问题。
+
+{mode_note}
 
 ## 可用信息
 
