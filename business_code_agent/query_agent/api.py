@@ -130,15 +130,27 @@ def make_server(
                 return "/api/projects", None
             project_match = re.fullmatch(r"/api/projects/([^/]+)(/.*)?", path)
             if project_match:
-                if not registry:
-                    raise ValueError("当前服务未启用工程注册表")
-                context = context_for(unquote(project_match.group(1)))
-                return project_match.group(2) or "/api/project", context
+                project_key = unquote(project_match.group(1))
+                if registry:
+                    context = context_for(project_key)
+                else:
+                    if project_key != legacy_context.project_id:
+                        raise ValueError("当前服务未启用工程注册表，且工程 ID 与兼容工程不一致")
+                    context = legacy_context
+                relative = project_match.group(2) or "/api/project"
+                if relative == "/api":
+                    relative = "/api/project"
+                elif not relative.startswith("/api/"):
+                    relative = f"/api{relative}"
+                return relative, context
             if not path.startswith("/api/"):
                 return path, None
             query_project = parse_qs(parsed.query).get("projectId", [None])[0]
             header_project = self.headers.get("X-Project-Id")
-            return path, context_for(query_project or header_project or (default_context.project_id if default_context else None))
+            project_key = query_project or header_project
+            if registry and not project_key:
+                raise ValueError("注册表模式的工程请求必须明确携带 projectId 或 X-Project-Id")
+            return path, context_for(project_key or (default_context.project_id if default_context else None))
 
         def _project_admin(self, context):
             key = context.project_id if context else legacy_context.project_id

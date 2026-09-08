@@ -65,8 +65,8 @@ class ProjectContextTest(unittest.TestCase):
             self.assertNotEqual(alpha.evaluations_root, beta.evaluations_root)
             self.assertEqual({"alpha", "beta"}, {item["id"] for item in registry.list()})
             self.assertTrue((alpha.data_root / "project.json").is_file())
-            self.assertEqual("alpha overview", (alpha.knowledge_root / "baseline" / "project-overview.md").read_text(encoding="utf-8"))
-            self.assertEqual("alpha requirement", (alpha.requirements_root / "requirement.md").read_text(encoding="utf-8"))
+            self.assertFalse((alpha.knowledge_root / "baseline").exists())
+            self.assertEqual([], list(alpha.requirements_root.iterdir()))
             self.assertEqual("missing", AstService(project_config=configs["alpha"], data_root=alpha.ast_root).status()["status"])
             self.assertEqual("missing", AstService(project_config=configs["beta"], data_root=beta.ast_root).status()["status"])
 
@@ -92,6 +92,20 @@ class ProjectContextTest(unittest.TestCase):
                 beta_service.query("must reject", conversation_id=first["conversationId"])
             beta_db.close()
 
+    def test_material_import_is_explicit_after_registration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            registry, _ = self._projects(root)
+            alpha = registry.get("alpha")
+            result = registry.import_materials(
+                "alpha",
+                baseline_root=root / "alpha-baseline",
+                requirements_root=root / "alpha-requirements",
+            )
+            self.assertEqual({"baseline", "requirements"}, set(result["copied"]))
+            self.assertEqual("alpha overview", (alpha.knowledge_root / "baseline" / "project-overview.md").read_text(encoding="utf-8"))
+            self.assertEqual("alpha requirement", (alpha.requirements_root / "requirement.md").read_text(encoding="utf-8"))
+
     def test_http_routes_and_rejects_cross_project_conversation(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -108,6 +122,12 @@ class ProjectContextTest(unittest.TestCase):
                 try:
                     projects = json.loads(urlopen(base + "/api/projects").read())["items"]
                     self.assertEqual({"alpha", "beta"}, {item["id"] for item in projects})
+
+                    workspace = json.loads(urlopen(base + "/api/projects/alpha/workspace").read())
+                    self.assertEqual("alpha", workspace["projectId"])
+                    with self.assertRaises(HTTPError) as missing_context:
+                        urlopen(base + "/api/workspace")
+                    self.assertEqual(400, missing_context.exception.code)
 
                     first_request = Request(
                         base + "/api/projects/alpha/api/query", method="POST",
@@ -132,6 +152,25 @@ class ProjectContextTest(unittest.TestCase):
                     server.shutdown()
                     server.server_close()
                     thread.join(timeout=2)
+
+    def test_legacy_server_accepts_explicit_project_prefix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            _, configs = self._projects(root)
+            server = make_server(str(root / "legacy.db"), port=0, project_config=str(configs["alpha"]))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            try:
+                direct = json.loads(urlopen(base + "/api/workspace").read())
+                prefixed = json.loads(urlopen(base + "/api/projects/alpha/api/workspace").read())
+                normalized = json.loads(urlopen(base + "/api/projects/alpha/workspace").read())
+                self.assertEqual(direct["projectId"], prefixed["projectId"])
+                self.assertEqual(direct["projectId"], normalized["projectId"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
 
 if __name__ == "__main__":

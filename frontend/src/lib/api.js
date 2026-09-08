@@ -15,7 +15,8 @@ function adminStorageKey(projectId = activeProjectId()) {
 function projectPath(path) {
   const projectId = activeProjectId();
   if (!projectId || path.startsWith("/api/projects")) return path;
-  return `/api/projects/${encodeURIComponent(projectId)}${path.startsWith("/") ? path : `/${path}`}`;
+  const relative = path.startsWith("/api/") ? path.slice(4) : path.startsWith("/") ? path : `/${path}`;
+  return `/api/projects/${encodeURIComponent(projectId)}${relative}`;
 }
 
 export async function request(path, options = {}, signal) {

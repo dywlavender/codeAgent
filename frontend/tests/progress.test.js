@@ -63,7 +63,7 @@ test("project-scoped SSE uses the canonical project route from the page URL", as
   const originalWindow = globalThis.window;
   globalThis.window = { location: { search: "?projectId=alpha" } };
   globalThis.fetch = async (url) => {
-    assert.equal(url, "/api/projects/alpha/api/query/stream");
+    assert.equal(url, "/api/projects/alpha/query/stream");
     return new Response('event: result\ndata: {"answer":"ok"}\n\n');
   };
   try {

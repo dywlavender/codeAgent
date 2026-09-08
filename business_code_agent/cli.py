@@ -36,13 +36,13 @@ def main() -> None:
     ingest.add_argument("--db", required=True)
     ingest.add_argument("--repository-id", default="repo-main")
     sync = sub.add_parser("sync-project", help="按项目配置同步 Git 仓库并增量索引")
-    sync.add_argument("--config", required=True)
+    sync.add_argument("--config", help="单工程模式必填；注册表模式默认使用登记工程的配置")
     sync.add_argument("--db")
     sync.add_argument("--project-registry", help="从注册表解析工程数据库")
     sync.add_argument("--project-id", help="注册表工程 ID")
     sync.add_argument("--offline", action="store_true", help="只索引配置中的包内源码，不调用 Git 或网络")
     baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线和调查入口")
-    baseline.add_argument("--config", required=True)
+    baseline.add_argument("--config", help="单工程模式必填；注册表模式默认使用登记工程的配置")
     baseline.add_argument("--db")
     baseline.add_argument("--project-registry", help="从注册表解析工程数据库")
     baseline.add_argument("--project-id", help="注册表工程 ID")
@@ -126,6 +126,11 @@ def main() -> None:
     project_register.add_argument("--name", help="覆盖展示名称")
     project_list = sub.add_parser("project-list", help="列出平台工程注册表中的工程")
     project_list.add_argument("--registry", required=True, help="平台数据目录")
+    project_import = sub.add_parser("project-import-materials", help="显式导入工程业务基线或需求原文")
+    project_import.add_argument("--registry", required=True, help="平台数据目录")
+    project_import.add_argument("--project-id", required=True, help="注册表工程 ID")
+    project_import.add_argument("--baseline-root", help="业务基线源目录")
+    project_import.add_argument("--requirements-root", help="需求原文源目录")
     args = parser.parse_args()
     try:
         load_env_file()
@@ -139,10 +144,19 @@ def main() -> None:
             parser.error(f"{args.command} 使用 --project-registry 时必须提供 --project-id")
         from .project_context import ProjectRegistry
         project_context = ProjectRegistry(args.project_registry).get(args.project_id)
-        if not args.db:
-            args.db = str(project_context.db_path)
-    elif args.command in {"sync-project", "baseline-refresh"} and not args.db:
-        parser.error(f"{args.command} 需要 --db，或同时提供 --project-registry 和 --project-id")
+        expected_config = project_context.config_path
+        expected_db = project_context.db_path
+        if not expected_config:
+            parser.error(f"工程 {args.project_id} 没有登记配置文件")
+        if args.config and Path(args.config).expanduser().resolve() != expected_config.resolve():
+            parser.error(f"--config 与工程 {args.project_id} 的登记配置不一致")
+        if args.db and Path(args.db).expanduser().resolve() != expected_db.resolve():
+            parser.error(f"--db 与工程 {args.project_id} 的登记数据库不一致")
+        args.config = str(expected_config)
+        args.db = str(expected_db)
+    elif args.command in {"sync-project", "baseline-refresh"}:
+        if not args.db or not args.config:
+            parser.error(f"{args.command} 需要同时提供 --config 和 --db，或使用工程注册表")
     if args.command == "init-db":
         db = connect(args.db)
         db.close()
@@ -253,6 +267,14 @@ def main() -> None:
     elif args.command == "project-list":
         from .project_context import ProjectRegistry
         print(json.dumps({"items": ProjectRegistry(args.registry).list()}, ensure_ascii=False, indent=2))
+    elif args.command == "project-import-materials":
+        from .project_context import ProjectRegistry
+        result = ProjectRegistry(args.registry).import_materials(
+            args.project_id,
+            baseline_root=args.baseline_root,
+            requirements_root=args.requirements_root,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def _print_analysis(result: dict, as_json: bool) -> None:

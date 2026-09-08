@@ -216,7 +216,6 @@ class ProjectRegistry:
                 raise ProjectRegistryError(f"工程数据目录已被其他工程占用: {root}")
         context = ProjectContext(project_id, project_name, config, root, root / "knowledge.db", True)
         context.ensure_layout()
-        _seed_project_materials(payload, config.parent, context)
         record = {
             "id": project_id,
             "name": project_name,
@@ -233,6 +232,34 @@ class ProjectRegistry:
         _write_json(self.path, {"version": 1, "projects": records})
         _write_json(root / "project.json", record)
         return context
+
+    def import_materials(
+        self,
+        project_id: str,
+        *,
+        baseline_root: str | Path | None = None,
+        requirements_root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly copy selected text materials into a project data root.
+
+        Registration itself only creates the project boundary.  This method is
+        the separate, user-invoked migration/import step and refuses to merge
+        into a non-empty managed directory.
+        """
+        if baseline_root is None and requirements_root is None:
+            raise ProjectRegistryError("至少提供 baseline_root 或 requirements_root")
+        context = self.get(project_id)
+        copied: dict[str, str] = {}
+        for name, source_value, target in (
+            ("baseline", baseline_root, context.knowledge_root / "baseline"),
+            ("requirements", requirements_root, context.requirements_root),
+        ):
+            if source_value is None:
+                continue
+            source = Path(source_value).expanduser().resolve()
+            _copy_material_tree(source, target, name)
+            copied[name] = str(target)
+        return {"project": context.to_dict(), "copied": copied}
 
     def get(self, project_id: str) -> ProjectContext:
         project_id = _safe_project_id(project_id)
@@ -271,40 +298,18 @@ class ProjectRegistry:
         )
 
 
+def _copy_material_tree(source: Path, target: Path, label: str) -> None:
+    if not source.is_dir():
+        raise ProjectRegistryError(f"{label}资料目录不存在或不可读: {source}")
+    if source == target.resolve():
+        raise ProjectRegistryError(f"{label}资料源目录不能与工程托管目录相同: {source}")
+    try:
+        if target.exists() and any(target.iterdir()):
+            raise ProjectRegistryError(f"工程 {label}资料目录已有内容，请先明确迁移到新工程目录: {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+    except OSError as exc:
+        raise ProjectRegistryError(f"无法导入工程 {label}资料 {source} -> {target}: {exc}") from exc
+
+
 __all__ = ["ProjectContext", "ProjectRegistry", "ProjectRegistryError", "PROJECT_ID_RE"]
-
-
-def _seed_project_materials(payload: Mapping[str, Any], config_parent: Path, context: ProjectContext) -> None:
-    """Seed managed text materials once, without overwriting an existing copy.
-
-    Repositories remain external live sources.  Baseline and requirement
-    documents are small, user-managed project materials, so an initial copy
-    gives a newly registered project an independent starting point while
-    keeping re-registration non-destructive.
-    """
-    knowledge = payload.get("knowledge") if isinstance(payload, dict) else None
-    baseline_value = knowledge.get("baselineRoot") if isinstance(knowledge, dict) else None
-    requirements = payload.get("requirements") if isinstance(payload, dict) else None
-    requirements_value = payload.get("requirementsRoot") or payload.get("requirementRoot")
-    if requirements_value is None and isinstance(requirements, dict):
-        requirements_value = requirements.get("root")
-
-    sources = (
-        (_resolve_config_path(config_parent, baseline_value or "knowledge/baseline"), context.knowledge_root / "baseline"),
-        (_resolve_config_path(config_parent, requirements_value or "requirements"), context.requirements_root),
-    )
-    for source, target in sources:
-        if not source.is_dir() or source.resolve() == target.resolve():
-            continue
-        try:
-            if target.exists() and any(target.iterdir()):
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source, target, dirs_exist_ok=True)
-        except OSError as exc:
-            raise ProjectRegistryError(f"无法初始化工程资料目录 {target}: {exc}") from exc
-
-
-def _resolve_config_path(config_parent: Path, value: object) -> Path:
-    candidate = Path(str(value or "")).expanduser()
-    return candidate.resolve() if candidate.is_absolute() else (config_parent / candidate).resolve()
