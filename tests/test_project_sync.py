@@ -139,11 +139,15 @@ class OfflineProjectSyncTest(unittest.TestCase):
             }), encoding="utf-8")
             database = root / "knowledge.db"
 
-            result = sync_project(config, database, offline=True)
+            code_map = root / "generated-code-map"
+            result = sync_project(config, database, offline=True, code_map_root=code_map)
 
             self.assertEqual("OFFLINE_BUNDLED", result["repositories"][0]["syncStatus"])
             self.assertGreater(result["repositories"][0]["indexed"]["symbols"], 0)
             self.assertFalse((repository / ".git").exists())
+            self.assertEqual(1, result["codeMap"]["repositories"])
+            self.assertTrue((code_map / "project-index.md").is_file())
+            self.assertTrue((code_map / "repositories" / "core.md").is_file())
 
 
 if __name__ == "__main__":

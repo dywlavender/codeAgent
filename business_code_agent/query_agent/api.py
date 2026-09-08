@@ -101,7 +101,8 @@ def make_server(
                 project_config=str(context.config_path) if context.config_path else None,
                 data_root=context.evaluations_root,
                 ast_data_root=context.ast_root,
-                baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                business_context_root=context.business_context_root if context.registered else None,
+                code_map_root=context.code_map_root,
                 requirements_root=context.requirements_root if context.registered else None,
             )
         return evaluation_services[key]
@@ -166,7 +167,8 @@ def make_server(
                 project_config=str(context.config_path) if context.config_path else None,
                 workspace_root=context.workspace_root,
                 ast_data_root=context.ast_root,
-                baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                business_context_root=context.business_context_root if context.registered else None,
+                code_map_root=context.code_map_root,
                 requirements_root=context.requirements_root if context.registered else None,
                 project_id=context.project_id,
                 project_scoped=context.registered,
@@ -259,7 +261,7 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(
                         connect(db_path), project_config=project_config,
-                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                        business_context_root=context.business_context_root if context.registered else None,
                     )
                     body = self._body()
                     self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
@@ -509,7 +511,7 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(
                         connect(db_path), project_config=project_config,
-                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                        business_context_root=context.business_context_root if context.registered else None,
                     )
                     params = parse_qs(parsed.query)
                     query = params.get("q", [""])[0]
@@ -521,7 +523,7 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(
                         connect(db_path), project_config=project_config,
-                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                        business_context_root=context.business_context_root if context.registered else None,
                     )
                     self._json(200, service.get_entity(entity_match.group(1)))
                     return
@@ -530,7 +532,7 @@ def make_server(
                     from ..knowledge_update.baseline_service import BaselineKnowledgeService
                     service = BaselineKnowledgeService(
                         connect(db_path), project_config=project_config,
-                        baseline_root=context.knowledge_root / "baseline" if context.registered else None,
+                        business_context_root=context.business_context_root if context.registered else None,
                     )
                     self._json(200, service.get_relation(relation_match.group(1)))
                     return

@@ -61,11 +61,16 @@ class BaselineKnowledgeService:
     """
 
     def __init__(self, db, *, project_config: str | Path | None = None,
+                 business_context_root: str | Path | None = None,
                  baseline_root: str | Path | None = None,
                  extractor: BaselineExtractor | None = None):
         self.db = db
         self.project_config = Path(project_config).resolve() if project_config else None
-        self._baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
+        if business_context_root is not None and baseline_root is not None:
+            raise ValueError("business_context_root 与 baseline_root 不能同时提供")
+        self._baseline_root = Path(
+            business_context_root or baseline_root
+        ).expanduser().resolve() if (business_context_root or baseline_root) else None
         self.config = self._load_config()
         self._extractor = extractor
 
@@ -186,7 +191,8 @@ class BaselineKnowledgeService:
         if self._baseline_root:
             return self._baseline_root
         knowledge = self.config.get("knowledge") or {}
-        configured = knowledge.get("baselineRoot") or "knowledge/baseline"
+        configured = (knowledge.get("businessContextRoot") or knowledge.get("baselineRoot")
+                      or "knowledge/business-context")
         base = self.project_config.parent if self.project_config else Path.cwd()
         path = Path(str(configured)).expanduser()
         return path.resolve() if path.is_absolute() else (base / path).resolve()

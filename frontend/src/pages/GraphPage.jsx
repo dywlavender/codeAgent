@@ -108,7 +108,7 @@ export function GraphPage({ workspace, projectId }) {
           <Splitter.Panel defaultSize="24%" min="16%" max="36%">
             <div className="result-list">
               {nodes.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>导入业务基线后，业务关系和调查入口会出现在这里。</span>} style={{ marginTop: 90 }} />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>没有匹配的节点。<br/>导入业务补充知识后，业务关系和调查入口会出现在这里。</span>} style={{ marginTop: 90 }} />
               ) : nodes.map((node) => (
                 <GraphRow key={node.id} node={node} active={node.id === selectedId} onSelect={() => setSelectedId(node.id)} />
               ))}

@@ -68,6 +68,8 @@ class QueryService:
         runtime=None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_root: str | Path | None = None,
+        business_context_root: str | Path | None = None,
+        code_map_root: str | Path | None = None,
         ast_data_root: str | Path | None = None,
         baseline_root: str | Path | None = None,
         requirements_root: str | Path | None = None,
@@ -84,6 +86,8 @@ class QueryService:
             db,
             project_config=project_config,
             workspace_root=workspace_root or self._default_workspace_root(project_config, db_path),
+            business_context_root=business_context_root,
+            code_map_root=code_map_root,
             baseline_root=baseline_root,
             requirements_root=requirements_root,
         )
@@ -292,7 +296,8 @@ class QueryService:
         return value
 
     def _workspace_for_mode(self, mode: str) -> Workspace:
-        baseline_source = None
+        business_context_source = None
+        code_map_source = None
         description = None
         ast_version_id = None
         if mode == "ast":
@@ -300,14 +305,15 @@ class QueryService:
             current = AstService(project_config=self.project_config, data_root=self.ast_data_root).current_version()
             if not current:
                 raise ValueError("AST 资料尚未生成或已经待更新，请先在 AST 管理页手动生成")
-            version_id, metadata, baseline_source = current
+            version_id, metadata, code_map_source = current
             ast_version_id = version_id
-            description = f"当前模式：AST（资料版本 {version_id}，生成时间 {metadata.get('generatedAt') or '未知'}）。仅提供自动结构资料，不提供人工业务主干。"
+            description = f"当前模式：AST（资料版本 {version_id}，生成时间 {metadata.get('generatedAt') or '未知'}）。仅提供用户手动生成的结构资料，不提供人工业务补充知识。"
         elif mode == "none":
-            description = "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务基线或 AST 结构资料。"
+            description = "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务补充知识或自动代码地图。"
         else:
-            description = "当前模式：有主干。项目总览自动提供，业务流程主干按需读取；源码仍是当前实现依据。"
-        return self.workspace_manager.ensure(mode=mode, baseline_source=baseline_source,
+            description = "当前模式：有主干。提供项目特有的业务补充知识，按问题需要读取；源码仍是当前实现依据。"
+        return self.workspace_manager.ensure(mode=mode, business_context_source=business_context_source,
+                                             code_map_source=code_map_source,
                                              mode_description=description, ast_version_id=ast_version_id)
 
     def _normalize_scope(self, scope: Any) -> dict[str, list[str]] | None:

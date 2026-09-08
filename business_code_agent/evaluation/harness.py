@@ -163,24 +163,33 @@ def tool_statistics(events):
 
 def baseline_read_calls(trace):
     return sum(t.get("name") == "Read" and t.get("status") == "completed"
-               and "/baseline/" in str(t.get("input", {}).get("file_path", "")) for t in trace)
+               and _is_material_path(t.get("input", {}).get("file_path", "")) for t in trace)
 
 
 def baseline_content_calls(trace):
     return sum(bool(
         t.get("status") == "completed"
-        and "/baseline" in str(t.get("input", {}).get("file_path") or t.get("input", {}).get("path") or "")
+        and _is_material_path(t.get("input", {}).get("file_path")
+                              or t.get("input", {}).get("path") or "")
         and (t.get("name") == "Read" or (t.get("name") == "Grep"
             and t.get("input", {}).get("output_mode") == "content"
             and t.get("output") and "No matches found" not in str(t.get("output")))))
         for t in trace)
 
 
+def _is_material_path(value):
+    path = str(value or "").replace("\\", "/")
+    return "/baseline/" in path or "/business-context/" in path or "/generated-code-map/" in path
+
+
 def reference_usage(trace, baseline, command):
     """Observable delivery/use only; never equates access with effectiveness."""
     baseline = Path(baseline)
+    structural_root = baseline.name == "generated-code-map"
     overview = baseline / "project-overview.md"
+    index = baseline / "project-index.md"
     content = overview.read_text().strip() if overview.is_file() else ""
+    index_content = index.read_text().strip() if index.is_file() else ""
     ast_calls = 0
     accessed = set()
     for tool in trace:
@@ -195,9 +204,11 @@ def reference_usage(trace, baseline, command):
         if not baseline_content_calls([tool]):
             continue
         accessed.add(relative)
-        if relative == "ast-overview.md" or relative == "ast" or relative.startswith("ast/"):
+        if structural_root or relative == "ast-overview.md" or relative == "ast" or relative.startswith("ast/"):
             ast_calls += 1
-    return {"overviewInjected": bool(content and content in "\n".join(command)),
+    command_text = "\n".join(command)
+    return {"overviewInjected": bool(content and content in command_text),
+            "projectIndexInjected": bool(index_content and index_content in command_text),
             "astContentCalls": ast_calls, "referencePathsAccessed": sorted(accessed)}
 
 
@@ -232,12 +243,22 @@ def run_answer_job(job, *, output, inputs, repository_names, judge_enabled, runt
         if (inputs / "requirements").is_dir():
             shutil.copytree(inputs / "requirements", base / "requirements")
         baseline_dir = inputs / "baselines" / arm
-        if baseline_dir.is_dir():
+        current_mode = {"code_only": "none", "optional": "backbone", "ast": "ast"}.get(arm)
+        if current_mode == "backbone" and baseline_dir.is_dir():
+            shutil.copytree(baseline_dir, base / "business-context")
+        elif current_mode == "ast" and baseline_dir.is_dir():
+            shutil.copytree(baseline_dir, base / "generated-code-map")
+        elif current_mode is None and baseline_dir.is_dir():
             shutil.copytree(baseline_dir, base / "baseline")
         config = base / "project.json"
+        knowledge = ({"businessContextRoot": "business-context", "codeMapRoot": "generated-code-map"}
+                     if current_mode is not None else {"baselineRoot": "baseline"})
         write_json(config, {"project": {"id": "evaluation", "name": "知识主干评测"},
-                            "repositories": repositories, "knowledge": {"baselineRoot": "baseline"}})
-        workspace = WorkspaceManager(project_config=config).ensure()
+                            "repositories": repositories, "knowledge": knowledge})
+        workspace = WorkspaceManager(project_config=config).ensure(
+            mode=current_mode,
+            code_map_source=base / "generated-code-map" if current_mode == "ast" else None,
+        )
         run_dir = output / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "CLAUDE.md").write_text(workspace.claude_file.read_text(), encoding="utf-8")
@@ -277,7 +298,10 @@ def run_answer_job(job, *, output, inputs, repository_names, judge_enabled, runt
         value["toolErrors"] = tool_errors
         value["baselineReadCalls"] = baseline_read_calls(trace)
         value["baselineContentCalls"] = baseline_content_calls(trace)
-        value["referenceUsage"] = reference_usage(trace, base / "baseline", command)
+        material_root = (base / "business-context" if current_mode == "backbone"
+                         else base / "generated-code-map" if current_mode == "ast"
+                         else base / "baseline")
+        value["referenceUsage"] = reference_usage(trace, material_root, command)
         if judge_enabled and value.get("status") == "completed" and not (cancel_check and cancel_check()):
             judge_workspace = judge_workspace_for(base, repositories, inputs)
             value["review"] = judge_answer(case, value.get("answer", ""), judge_workspace.path,

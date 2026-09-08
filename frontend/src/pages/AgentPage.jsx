@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { request } from "../lib/api.js";
 import { buildProgress, fileEvidence, toolTarget, toolTitle } from "../lib/progress.js";
 
-const EXAMPLES = ["梳理一个业务功能的入口和调用流程", "解释这段代码为什么这样校验", "结合业务基线，定位需求对应的实现"];
+const EXAMPLES = ["梳理一个业务功能的入口和调用流程", "解释这段代码为什么这样校验", "结合业务补充知识，定位需求对应的实现"];
 const MODE_LABEL = { none: "无主干", backbone: "有主干", ast: "AST" };
 
 export function AgentPage(props) {
@@ -45,7 +45,7 @@ export function AgentPage(props) {
         <div className="home-shell">
           <div className="home-inner">
             <h1 className="home-title">今天想弄清楚什么？</h1>
-            <p className="home-sub">基于工作区里的业务基线、需求原文和代码仓库一起找答案。</p>
+            <p className="home-sub">基于工作区里的业务补充知识、需求原文和代码仓库一起找答案。</p>
             {props.error && <Alert type="error" showIcon title={props.error} style={{ marginBottom: 12 }} />}
             {props.modeNotice && <div className="mode-notice">{props.modeNotice}</div>}
             <Composer {...props} loading={loading} home astInfo={astInfo} />
@@ -290,7 +290,7 @@ function Composer({ question, setQuestion, submit, stopQuery, loading, cancellin
         <small className="mode-version">
           {mode === "ast"
             ? ["available", "stale"].includes(astInfo?.status) ? `AST ${astInfo.currentVersionId}${astInfo.status === "stale" ? " · 待更新" : ""}` : "AST 未生成"
-            : mode === "none" ? "仅项目资料" : "业务主干当前版本"}
+            : mode === "none" ? "仅项目资料" : "业务补充知识当前资料"}
         </small>
         <Tag bordered={false} color="default" style={{ margin: 0, fontSize: 10.5 }}>只读</Tag>
       </Flex>

@@ -12,6 +12,7 @@ from pathlib import Path
 from .code_intelligence import JavaIndexer
 from .env import EnvFileError, load_env_file
 from .requirements import RequirementBuilder
+from .project_context import ProjectContext
 from .schema import connect
 
 
@@ -41,7 +42,7 @@ def main() -> None:
     sync.add_argument("--project-registry", help="从注册表解析工程数据库")
     sync.add_argument("--project-id", help="注册表工程 ID")
     sync.add_argument("--offline", action="store_true", help="只索引配置中的包内源码，不调用 Git 或网络")
-    baseline = sub.add_parser("baseline-refresh", help="导入自然语言业务基线和调查入口")
+    baseline = sub.add_parser("baseline-refresh", help="导入业务补充知识和调查入口")
     baseline.add_argument("--config", help="单工程模式必填；注册表模式默认使用登记工程的配置")
     baseline.add_argument("--db")
     baseline.add_argument("--project-registry", help="从注册表解析工程数据库")
@@ -126,10 +127,11 @@ def main() -> None:
     project_register.add_argument("--name", help="覆盖展示名称")
     project_list = sub.add_parser("project-list", help="列出平台工程注册表中的工程")
     project_list.add_argument("--registry", required=True, help="平台数据目录")
-    project_import = sub.add_parser("project-import-materials", help="显式导入工程业务基线或需求原文")
+    project_import = sub.add_parser("project-import-materials", help="显式导入工程业务补充知识或需求原文")
     project_import.add_argument("--registry", required=True, help="平台数据目录")
     project_import.add_argument("--project-id", required=True, help="注册表工程 ID")
-    project_import.add_argument("--baseline-root", help="业务基线源目录")
+    project_import.add_argument("--business-context-root", help="业务补充知识源目录")
+    project_import.add_argument("--baseline-root", help="旧参数别名：业务补充知识源目录")
     project_import.add_argument("--requirements-root", help="需求原文源目录")
     args = parser.parse_args()
     try:
@@ -166,7 +168,9 @@ def main() -> None:
     elif args.command == "sync-project":
         from .project_sync import ProjectSyncError, sync_project
         try:
-            result = sync_project(args.config, args.db, offline=args.offline)
+            sync_context = project_context or ProjectContext.legacy(args.db, args.config)
+            result = sync_project(args.config, args.db, offline=args.offline,
+                                  code_map_root=sync_context.code_map_root)
         except ProjectSyncError as exc:
             print(f"[ERROR] {exc}", file=sys.stderr)
             raise SystemExit(1) from None
@@ -175,7 +179,7 @@ def main() -> None:
         from .knowledge_update.baseline_service import BaselineKnowledgeService
         service = BaselineKnowledgeService(
             connect(args.db), project_config=args.config,
-            baseline_root=(project_context.knowledge_root / "baseline" if project_context else None),
+            business_context_root=(project_context.business_context_root if project_context else None),
         )
         print(json.dumps(service.refresh(parser=args.parser), ensure_ascii=False, indent=2))
     elif args.command == "ingest-requirement":
@@ -192,7 +196,11 @@ def main() -> None:
         from .query_agent.service import QueryService
         db = connect(args.db)
         try:
-            print(json.dumps(QueryService(db, db_path=args.db, project_config=args.project_config).query(args.question), ensure_ascii=False, indent=2))
+            runtime_context = ProjectContext.legacy(args.db, args.project_config)
+            print(json.dumps(QueryService(
+                db, db_path=args.db, project_config=args.project_config,
+                code_map_root=runtime_context.code_map_root,
+            ).query(args.question), ensure_ascii=False, indent=2))
         finally:
             db.close()
     elif args.command == "discover":
@@ -240,9 +248,11 @@ def main() -> None:
         from .query_agent.service import QueryService
         db = connect(args.db)
         try:
+            runtime_context = ProjectContext.legacy(args.db, args.project_config)
             print(json.dumps(
                 QueryService(
                     db, db_path=args.db, project_config=args.project_config,
+                    code_map_root=runtime_context.code_map_root,
                 ).query(args.question),
                 ensure_ascii=False,
                 indent=2,
@@ -271,6 +281,7 @@ def main() -> None:
         from .project_context import ProjectRegistry
         result = ProjectRegistry(args.registry).import_materials(
             args.project_id,
+            business_context_root=args.business_context_root,
             baseline_root=args.baseline_root,
             requirements_root=args.requirements_root,
         )

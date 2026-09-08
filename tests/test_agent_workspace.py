@@ -5,37 +5,40 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from business_code_agent.query_agent.workspace import WorkspaceManager
+from business_code_agent.query_agent.workspace import WorkspaceManager, workspace_sources
 from business_code_agent.query_agent.claude_runtime import ClaudeCodeRuntime
 
 
 class AgentWorkspaceTest(unittest.TestCase):
-    def test_overview_is_current_on_resume_while_flow_stays_on_demand(self):
+    def test_project_index_is_short_and_business_documents_stay_on_demand(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             baseline = root / "baseline"
             baseline.mkdir()
             overview = baseline / "project-overview.md"
-            overview.write_text("# 项目地图\n渠道负责接入，业务流程见 withdraw.md。", encoding="utf-8")
+            overview.write_text("旧的完整项目总览，不应自动注入。", encoding="utf-8")
+            index = baseline / "project-index.md"
+            index.write_text("短项目索引：渠道负责接入。", encoding="utf-8")
             (baseline / "withdraw.md").write_text("按需读取的流程详情", encoding="utf-8")
             config = root / "project.json"
-            config.write_text(json.dumps({"knowledge": {"baselineRoot": "baseline"}}), encoding="utf-8")
+            config.write_text(json.dumps({"knowledge": {"businessContextRoot": "baseline"}}), encoding="utf-8")
             workspace = WorkspaceManager(project_config=config).ensure()
             runtime = ClaudeCodeRuntime()
             command = runtime.build_command("提款流程", workspace=workspace.path)
             prompt = command[command.index("--append-system-prompt") + 1]
-            self.assertIn("渠道负责接入", prompt)
-            self.assertIn(str(overview.resolve()), prompt)
+            self.assertIn("短项目索引：渠道负责接入", prompt)
+            self.assertNotIn("旧的完整项目总览", prompt)
+            self.assertIn(str(baseline.resolve()), prompt)
             self.assertNotIn("按需读取的流程详情", prompt)
             self.assertNotIn("渠道负责接入", workspace.claude_file.read_text())
-            overview.write_text("# 项目地图\n更新后的系统职责", encoding="utf-8")
+            index.write_text("更新后的短项目索引", encoding="utf-8")
             command = runtime.build_command("继续", workspace=workspace.path, session_id="existing")
             prompt = command[command.index("--append-system-prompt") + 1]
-            self.assertIn("更新后的系统职责", prompt)
-            self.assertNotIn("渠道负责接入", prompt)
-            overview.unlink()
+            self.assertIn("更新后的短项目索引", prompt)
+            self.assertNotIn("短项目索引：渠道负责接入", prompt)
+            index.unlink()
             command = runtime.build_command("继续", workspace=workspace.path, session_id="existing")
-            self.assertNotIn("本轮项目总览", command[command.index("--append-system-prompt") + 1])
+            self.assertNotIn("索引来源", command[command.index("--append-system-prompt") + 1])
 
     def test_source_summary_distinguishes_readable_empty_missing_and_mounts(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -65,7 +68,7 @@ class AgentWorkspaceTest(unittest.TestCase):
             repository.mkdir()
             source = repository / "WithdrawService.java"
             source.write_text("class WithdrawService { boolean validate() { return true; } }", encoding="utf-8")
-            baseline = root / "knowledge" / "baseline"
+            baseline = root / "knowledge" / "business-context"
             baseline.mkdir(parents=True)
             baseline_file = baseline / "withdraw.md"
             baseline_file.write_text("# 提款\n\n银行卡必须存在。", encoding="utf-8")
@@ -76,7 +79,7 @@ class AgentWorkspaceTest(unittest.TestCase):
             config = root / "project.config.json"
             config.write_text(json.dumps({
                 "project": {"id": "loan-withdraw", "name": "贷款提款"},
-                "knowledge": {"baselineRoot": "knowledge/baseline"},
+                "knowledge": {"businessContextRoot": "knowledge/business-context"},
                 "requirementsRoot": "requirements",
                 "repositories": [{"id": "channel-service", "localPath": "channel-service", "gitUrl": "unused"}],
             }), encoding="utf-8")
@@ -84,11 +87,11 @@ class AgentWorkspaceTest(unittest.TestCase):
             workspace = WorkspaceManager(project_config=config).ensure()
             self.assertEqual("loan-withdraw", workspace.id)
             self.assertTrue(workspace.claude_file.is_file())
-            self.assertTrue((workspace.path / "knowledge" / "baseline" / "withdraw.md").is_file())
+            self.assertTrue((workspace.path / "knowledge" / "business-context" / "withdraw.md").is_file())
             self.assertTrue((workspace.path / "requirements" / "withdraw.md").is_file())
             exposed = workspace.path / "repos" / "channel-service" / "WithdrawService.java"
             self.assertTrue(exposed.is_file())
-            self.assertIn("Entry Anchor", workspace.claude_file.read_text(encoding="utf-8"))
+            self.assertIn("业务补充知识", workspace.claude_file.read_text(encoding="utf-8"))
             instructions = workspace.claude_file.read_text(encoding="utf-8")
             for directory in (repository, baseline, requirements):
                 self.assertIn(str(directory.resolve()), instructions)
@@ -159,6 +162,38 @@ class AgentWorkspaceTest(unittest.TestCase):
             directories = command[command.index("--add-dir") + 1:command.index("--resume")]
             self.assertNotIn(str(root.resolve()), directories)
             self.assertNotIn(str(old.resolve()), directories)
+
+    def test_new_modes_separate_business_context_and_code_map(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            context = root / "business-context"
+            context.mkdir()
+            (context / "terminology.md").write_text("项目特有术语", encoding="utf-8")
+            code_map = root / "generated-code-map"
+            code_map.mkdir()
+            (code_map / "project-index.md").write_text("自动结构索引", encoding="utf-8")
+            ast_documents = root / "ast-version"; ast_documents.mkdir()
+            (ast_documents / "project-index.md").write_text("AST 结构索引", encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({"project": {"id": "split"},
+                "knowledge": {"businessContextRoot": "business-context",
+                              "codeMapRoot": "generated-code-map"}}), encoding="utf-8")
+            manager = WorkspaceManager(project_config=config)
+
+            backbone = manager.ensure(mode="backbone")
+            backbone_labels = {label for label, _ in workspace_sources(backbone.path)}
+            self.assertIn("业务补充知识", backbone_labels)
+            self.assertNotIn("自动代码地图", backbone_labels)
+
+            none = manager.ensure(mode="none")
+            none_labels = {label for label, _ in workspace_sources(none.path)}
+            self.assertNotIn("业务补充知识", none_labels)
+            self.assertNotIn("自动代码地图", none_labels)
+
+            ast = manager.ensure(mode="ast", code_map_source=ast_documents, ast_version_id="ast-v1")
+            ast_sources = dict(workspace_sources(ast.path))
+            self.assertNotIn("业务补充知识", ast_sources)
+            self.assertEqual(ast_documents.resolve(), ast_sources["自动代码地图"])
 
 
 if __name__ == "__main__":

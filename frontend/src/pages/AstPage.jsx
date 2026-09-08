@@ -84,7 +84,7 @@ export function AstPage({ projectId, onRequireUnlock }) {
         <div>
           <span className="page-kicker">资料准备</span>
           <h1>AST 管理</h1>
-          <p>AST 只在你点击生成时更新。主对话和三组实验共用当前可用版本。</p>
+          <p>AST 是独立的结构资料，只在你点击生成时更新；主对话和三组实验共用当前可用版本。</p>
         </div>
         <Button type="primary" icon={status?.status === "available" || status?.status === "stale" ? <ArrowClockwise size={15} /> : <Code size={15} />}
           loading={generating || status?.status === "generating"} onClick={generate}>
@@ -113,7 +113,7 @@ export function AstPage({ projectId, onRequireUnlock }) {
         </Card>
         <Card className="panel-card ast-scope-card">
           <Flex align="center" gap={9} className="section-title"><FileText size={17} /><h2>覆盖范围</h2></Flex>
-          <p className="panel-help">结构资料由当前项目配置中的源码仓库生成；不包含人工业务主干、参考答案或评分要点。</p>
+          <p className="panel-help">结构资料由当前项目配置中的源码仓库生成；不包含业务补充知识、参考答案或评分要点。</p>
           <div className="repo-list">{(current.sourceRepositories || []).length ? current.sourceRepositories.map((repo) => <div className="repo-row" key={repo.id}><Code size={14} /><span>{repo.id}</span><small>{repo.path}</small></div>) : <span className="muted-text">生成后显示源码仓库</span>}</div>
           <Button disabled={!['available', 'stale'].includes(status?.status)} onClick={openDocuments}>查看结构资料</Button>
         </Card>

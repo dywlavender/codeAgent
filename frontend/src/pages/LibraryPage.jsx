@@ -2,14 +2,19 @@ import React, { useEffect, useState } from "react";
 import { Alert, Button, Empty, Flex, Input, Segmented, Skeleton, Tag, Typography } from "antd";
 import { request } from "../lib/api.js";
 
-const TYPES = { repository: "代码仓库", baseline: "业务基线", requirements: "需求原文" };
+const TYPES = {
+  repository: "代码仓库", business_context: "业务补充知识", code_map: "自动代码地图",
+  baseline: "旧业务基线", requirements: "需求原文",
+};
 const STATUS = {
   READABLE: ["green", "目录可读"], EMPTY: ["orange", "空目录"],
   MISSING: ["red", "目录不存在"], UNREADABLE: ["red", "目录无法读取"],
 };
 const PURPOSE = {
   repository: "用于核实当前实现、方法逻辑和跨仓库调用关系。",
-  baseline: "用于理解业务含义、系统职责和调查入口。",
+  business_context: "只补充源码难以可靠推断的项目特有语义、边界和术语。",
+  code_map: "用于定位目录、文件和符号，不作为业务结论或实现证据。",
+  baseline: "旧工程兼容目录，迁移后请维护业务补充知识。",
   requirements: "用于查阅需求原文，与当前代码实现对照。",
 };
 
@@ -36,7 +41,7 @@ export function LibraryPage({ projectId }) {
       <div style={{ width: "100%", maxWidth: 1180, margin: "0 auto" }}>
         <Typography.Title level={4} style={{ marginTop: 0 }}>项目资料</Typography.Title>
         <Typography.Paragraph type="secondary">
-          查看 Agent 的资料来源。问答直接读取这些目录中的文件，不依赖代码符号索引或结构化知识条目。
+          查看 Agent 的资料来源。问答按模式读取这些目录中的文件；自动代码地图只负责定位，当前实现仍以源码为准。
         </Typography.Paragraph>
         <Flex gap={12} wrap="wrap" align="center" style={{ marginBottom: 20 }}>
           <Segmented value={type} onChange={setType} options={[
@@ -74,7 +79,7 @@ export function LibraryPage({ projectId }) {
             })}
           <Typography.Paragraph type="secondary" style={{ marginTop: 24 }}>
             目录状态由后端检查；授权状态表示启动参数配置，不代表已经通过模型工具访问验证。
-            结构化知识请在管理员的“业务知识维护”中查看。
+            业务补充知识的结构化维护请在管理员的“业务补充知识维护”中查看。
           </Typography.Paragraph>
         </>}
       </div>

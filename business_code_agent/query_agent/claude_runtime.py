@@ -20,7 +20,7 @@ from typing import Any, Callable, Mapping
 
 from .runtime import EventCallback, RuntimeErrorBase, RuntimeResult
 from .progress import ProgressEvents
-from .workspace import project_overview, search_instructions, workspace_sources
+from .workspace import project_index, search_instructions, workspace_sources
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class ClaudeCodeRuntime:
         sources = workspace_sources(root, repositories)
         # Supply current roots explicitly on every turn, rather than relying
         # only on CLAUDE.md discovery or an older resumed session's context.
-        command.extend(["--append-system-prompt", search_instructions(sources, scoped=repositories is not None) + project_overview(sources)])
+        command.extend(["--append-system-prompt", search_instructions(sources, scoped=repositories is not None) + project_index(sources)])
         directories = list(dict.fromkeys([root, *(path for _, path in sources)]))
         command.extend(["--add-dir", *(str(path) for path in directories)])
         if session_id:

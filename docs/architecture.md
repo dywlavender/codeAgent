@@ -18,8 +18,8 @@ QueryService
           ↓
    Read / Glob / Grep
    ┌───────────────┬───────────────┬───────────────┐
-   │ business docs │ requirements  │ source repos  │
-   └───────────────┴───────────────┴───────────────┘
+   │ business context │ code map │ requirements │ source repos │
+   └──────────────────┴──────────┴─────────────┴──────────────┘
           ↓
    Tool Event + 最终回答
 ```
@@ -29,7 +29,7 @@ QueryService
 Python 只保留：
 
 - 项目配置、Git 同步和代码索引；
-- 业务基线、业务关系和 Entry Anchor 的管理页面；
+- 业务补充知识、业务关系和可选调查入口的管理页面；
 - 工作区链接和固定 `CLAUDE.md`；
 - Query Conversation、Run、Event、Feedback 持久化；
 - Claude Code 子进程调用、超时和错误转换；
@@ -44,18 +44,19 @@ Python 不再执行问题分类、业务检索、Anchor 路由、Code Candidate 
 ```text
 <workspace>/
 ├── CLAUDE.md
-├── knowledge/baseline/  → 配置的 baselineRoot
+├── knowledge/business-context/  → 项目特有的业务补充知识
+├── knowledge/generated-code-map/ → 自动生成的结构导航（按模式挂载）
 ├── requirements/        → 配置的 requirementsRoot（可选）
 └── repos/<repo-id>/     → 同步后的仓库目录
 ```
 
 目录优先使用软链接；Windows 无法创建软链接时使用 Junction。链接始终指向已同步目录，不复制源代码。刷新工作区只重建链接和 `CLAUDE.md`，不会改动仓库。
 
-`CLAUDE.md` 只写资料位置、源码必须实际读取、Anchor 只是导航提示、只读限制等稳定规则，不写固定 Agent Workflow。
+`CLAUDE.md` 只写资料位置、源码必须实际读取、项目索引和代码地图只是导航、只读限制等稳定规则，不写固定 Agent Workflow。
 
-业务基线可额外提供 `project-overview.md`。Runtime 每轮读取当前总览，连同检索范围通过 `--append-system-prompt` 提供；总览正文不写入 `CLAUDE.md`，其余业务流程文档保留在资料目录中供模型按需搜索。这是轻量项目上下文，不执行 Python 侧问题分类、图谱检索或固定调查流程。
+项目资料可提供简短的 `project-index.md`。Runtime 每轮只附加真实来源目录和短索引，不再把历史 `project-overview.md` 全文注入；业务补充知识和代码地图保留在资料目录中供模型按需搜索。这是轻量项目上下文，不执行 Python 侧问题分类、图谱检索或固定调查流程。
 
-查询和实验共用三种资料模式：无主干工作区只挂载正常项目资料（源码、README、需求等）；有主干工作区再挂载人工业务主干；AST 工作区挂载用户手动生成的 AST 结构资料，不挂载人工业务主干。三种模式分别位于注册工程的 `workspaces/<project-id>/modes/{none,backbone,ast}`（兼容单工程仍使用 `agent-workspaces`），模式变化不会复用另一模式的 Claude 会话。
+查询和实验共用三种资料模式：无主干工作区只挂载正常项目资料（源码、README、需求等）；有主干工作区再挂载业务补充知识；AST 工作区挂载用户手动生成的 AST 结构资料和自动代码地图，不挂载业务补充知识。三种模式分别位于注册工程的 `workspaces/<project-id>/modes/{none,backbone,ast}`（兼容单工程仍使用 `agent-workspaces`），模式变化不会复用另一模式的 Claude 会话。
 
 AST 由 `evaluation/ast_service.py` 管理。服务启动、读取评测就绪状态、进入 AST 页面、切换 AST 问答模式和启动实验都只读取状态，不生成 AST；只有用户在 AST 管理页点击生成或重新生成才会创建新版本。源码变化会将当前版本标为待更新，历史查询和已开始的实验仍引用它们各自记录的版本。
 
@@ -70,6 +71,8 @@ AST 由 `evaluation/ast_service.py` 管理。服务启动、读取评测就绪�
 └── projects/<project-id>/
     ├── project.json
     ├── knowledge.db
+    ├── knowledge/business-context/
+    ├── knowledge/generated-code-map/
     ├── ast/
     ├── evaluation-suites/
     ├── evaluations/
@@ -80,16 +83,16 @@ AST 由 `evaluation/ast_service.py` 管理。服务启动、读取评测就绪�
 每个注册工程使用独立数据库，因此会话、索引、业务知识、题库和评测批次不会因为切换配置而共用。请求可以使用规范路径
 `/api/projects/<project-id>/...`；为兼容现有页面，也接受 `X-Project-Id` 或 `projectId`。注册工程生成的会话和运行编号带工程前缀，收到其他工程的会话编号会拒绝，不能把旧会话改写到当前工作区。
 
-服务启动、工程切换、查询模式切换和实验启动都只读取 AST 状态。注册表登记只创建工程边界和空的托管目录，不会同步源码、索引、导入业务资料或生成 AST。业务基线和需求原文必须通过显式资料导入步骤进入工程目录；源码仓库仍按配置引用外部目录，源码同步和索引仍是后续独立任务。
+服务启动、工程切换、查询模式切换和实验启动都只读取 AST 状态。注册表登记只创建工程边界和空的托管目录，不会同步源码、索引、导入业务资料或生成 AST。业务补充知识和需求原文必须通过显式资料导入步骤进入工程目录；源码仓库仍按配置引用外部目录，源码同步和索引仍是后续独立任务。
 
-登记不会覆盖已有工程资料，也不会自动迁移旧数据库、题库或评测记录；已有数据需要保留时，应显式指定原数据目录或执行资料迁移命令。导入后的业务基线和需求原文由工程目录托管，查询、知识维护和实验均使用该目录；源码仓库仍由配置明确指定，若多个工程共享同一外部仓库，应显式改为独立源码快照或接受共享。
+登记不会覆盖已有工程资料，也不会自动迁移旧数据库、题库或评测记录；已有数据需要保留时，应显式指定原数据目录或执行资料迁移命令。导入后的业务补充知识和需求原文由工程目录托管，查询、知识维护和实验均使用该目录；源码仓库仍由配置明确指定。显式执行源码同步／索引后，可以根据索引生成 `knowledge/generated-code-map/`，但这不生成 AST 版本，也不包含人工业务解释；若多个工程共享同一外部仓库，应显式改为独立源码快照或接受共享。
 
 资料迁移示例：
 
 ```text
 python -m business_code_agent.cli project-import-materials \
   --registry .data/platform --project-id loan-system \
-  --baseline-root knowledge/baseline --requirements-root requirements
+  --business-context-root knowledge/business-context --requirements-root requirements
 ```
 
 项目示例题库也由配置显式声明，例如 `evaluation.examples: ["evaluations/cases.json"]`；未声明时平台仍可使用上传入口，但不会按贷款演示目录猜测题库。
@@ -213,5 +216,5 @@ business_code_agent/evaluation/
 - 必须在部署机安装并认证 Claude Code CLI；
 - Claude 只能读取和搜索工作区文件，第一版不能修改源码或执行 Bash；
 - 工作区只提供文件视图，不做 Requirement RAG 或 Python 侧检索；
-- Entry Anchor 可能过时，Claude 可以将其作为起点并自行搜索其他文件；
-- Claude 的回答质量取决于源码、业务基线和需求原文的可读性，管理员仍需维护资料目录。
+- 业务补充知识和代码地图可能过时，Claude 必须回到源码确认当前实现；
+- Claude 的回答质量取决于源码、业务补充知识和需求原文的可读性，管理员仍需维护资料目录。

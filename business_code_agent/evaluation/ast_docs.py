@@ -56,7 +56,11 @@ def generate_ast_documents(inputs_dir: Path, repository_names=None) -> dict[str,
             db.close()
     overview += ["", "Java 类型与方法使用 tree-sitter；Web 条目使用现有模式解析。测试仍可从源码读取，但不进入此结构地图。",
                  "方法清单有上限，截断处明确标记；没有条目不等于源码不存在。"]
-    documents["project-overview.md"] = "\n".join(overview) + "\n"
+    # New workspaces call the generated structural entry a project index. Keep
+    # the historical filename in frozen AST output so old evaluation batches
+    # remain readable and reproducible.
+    documents["project-index.md"] = "\n".join(overview) + "\n"
+    documents["project-overview.md"] = documents["project-index.md"]
     return documents
 
 

@@ -73,6 +73,21 @@ class ProjectContext:
         return self.data_root / "knowledge"
 
     @property
+    def business_context_root(self) -> Path:
+        """Managed project-specific semantic context, not a code index."""
+        return self.knowledge_root / "business-context"
+
+    @property
+    def code_map_root(self) -> Path:
+        """Generated structural navigation material for this project."""
+        return self.knowledge_root / "generated-code-map"
+
+    @property
+    def legacy_baseline_root(self) -> Path:
+        """Historical location kept for reading old single-project data."""
+        return self.knowledge_root / "baseline"
+
+    @property
     def requirements_root(self) -> Path:
         return self.data_root / "requirements"
 
@@ -103,6 +118,8 @@ class ProjectContext:
         self.data_root.mkdir(parents=True, exist_ok=True)
         for path in (
             self.knowledge_root,
+            self.business_context_root,
+            self.code_map_root,
             self.requirements_root,
             self.workspace_root,
             self.ast_root,
@@ -119,6 +136,8 @@ class ProjectContext:
             "configPath": str(self.config_path) if self.config_path else None,
             "dataRoot": str(self.data_root),
             "database": str(self.db_path),
+            "businessContext": str(self.business_context_root),
+            "codeMap": str(self.code_map_root),
             "registered": self.registered,
         }
 
@@ -237,6 +256,7 @@ class ProjectRegistry:
         self,
         project_id: str,
         *,
+        business_context_root: str | Path | None = None,
         baseline_root: str | Path | None = None,
         requirements_root: str | Path | None = None,
     ) -> dict[str, Any]:
@@ -246,12 +266,15 @@ class ProjectRegistry:
         the separate, user-invoked migration/import step and refuses to merge
         into a non-empty managed directory.
         """
-        if baseline_root is None and requirements_root is None:
-            raise ProjectRegistryError("至少提供 baseline_root 或 requirements_root")
+        if business_context_root is not None and baseline_root is not None:
+            raise ProjectRegistryError("business_context_root 与旧参数 baseline_root 不能同时提供")
+        business_context_root = business_context_root or baseline_root
+        if business_context_root is None and requirements_root is None:
+            raise ProjectRegistryError("至少提供 business_context_root 或 requirements_root")
         context = self.get(project_id)
         copied: dict[str, str] = {}
         for name, source_value, target in (
-            ("baseline", baseline_root, context.knowledge_root / "baseline"),
+            ("businessContext", business_context_root, context.business_context_root),
             ("requirements", requirements_root, context.requirements_root),
         ):
             if source_value is None:

@@ -63,10 +63,19 @@ class EvaluationError(ValueError):
 
 class EvaluationService:
     def __init__(self, *, project_config=None, data_root=None, ast_data_root=None,
-                 baseline_root=None, requirements_root=None, runtime_factory=None,
+                 business_context_root=None, code_map_root=None, baseline_root=None,
+                 requirements_root=None, runtime_factory=None,
                  timeout_seconds=240, workers=2, command="claude"):
         self.project_config = Path(project_config).expanduser().resolve() if project_config else None
-        self.baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
+        if business_context_root is not None and baseline_root is not None:
+            raise ValueError("business_context_root 与 baseline_root 不能同时提供")
+        self.business_context_root = Path(
+            business_context_root or baseline_root
+        ).expanduser().resolve() if (business_context_root or baseline_root) else None
+        # Historical field retained because persisted protocols and old callers
+        # still call this material "baseline".
+        self.baseline_root = self.business_context_root
+        self.code_map_root = Path(code_map_root).expanduser().resolve() if code_map_root else None
         self.requirements_root = Path(requirements_root).expanduser().resolve() if requirements_root else None
         if data_root:
             self.root = Path(data_root).expanduser().resolve()
@@ -384,17 +393,27 @@ class EvaluationService:
     def _readiness(self) -> dict:
         repositories = []
         requirements = {"root": None, "readable": False}
+        code_map = {"root": None, "readable": False, "documents": []}
         baseline = {"root": None, "readable": False, "documents": [], "hasOverview": False}
         try:
             from .runner import resolve_project_sources
             manager, repository_sources, baseline_root, requirements_root = resolve_project_sources(
                 self.project_config,
-                baseline_root=self.baseline_root,
+                business_context_root=self.business_context_root,
+                code_map_root=self.code_map_root,
                 requirements_root=self.requirements_root,
             )
             repositories = [{"id": rid, "path": str(path), "readable": path.is_dir()}
                             for rid, path in repository_sources]
             requirements = {"root": str(requirements_root), "readable": requirements_root.is_dir()}
+            code_map_root = manager.code_map_root
+            code_map_documents = []
+            if code_map_root.is_dir():
+                code_map_documents = [{"name": str(path.relative_to(code_map_root)),
+                                       "bytes": path.stat().st_size}
+                                      for path in sorted(code_map_root.rglob("*.md"))]
+            code_map = {"root": str(code_map_root), "readable": code_map_root.is_dir(),
+                        "documents": code_map_documents}
             documents = []
             if baseline_root.is_dir():
                 for path in sorted(baseline_root.rglob("*.md")):
@@ -402,7 +421,10 @@ class EvaluationService:
                                       "bytes": path.stat().st_size})
             baseline = {"root": str(baseline_root), "readable": baseline_root.is_dir(),
                         "documents": documents,
-                        "hasOverview": any(doc["name"] == "project-overview.md" for doc in documents)}
+                        # Keep hasOverview for historical setup consumers;
+                        # new runtime context uses the short project index.
+                        "hasOverview": any(doc["name"] == "project-overview.md" for doc in documents),
+                        "hasIndex": any(doc["name"] == "project-index.md" for doc in documents)}
         except Exception as exc:
             logger.warning("评测就绪检查失败: %s", exc)
             baseline["error"] = str(exc)
@@ -413,7 +435,8 @@ class EvaluationService:
                 cli_version = subprocess.check_output([self.command, "--version"], text=True).strip()
             except (OSError, subprocess.SubprocessError):
                 available = False
-        return {"repositories": repositories, "requirements": requirements, "baseline": baseline,
+        return {"repositories": repositories, "requirements": requirements, "codeMap": code_map,
+                "baseline": baseline, "businessContext": baseline,
                 "cli": {"command": self.command, "available": available, "version": cli_version}}
 
     def setup(self) -> dict:
@@ -421,11 +444,11 @@ class EvaluationService:
         readiness = self._readiness()
         baseline = readiness["baseline"]
         if not baseline.get("readable"):
-            baseline["note"] = "业务基线目录不可读，无法提供知识主干资料。"
-        elif not baseline["hasOverview"]:
-            baseline["note"] = "未提供 project-overview.md，运行时不会自动注入项目总览，仅按需读取流程文档。"
+            baseline["note"] = "业务补充知识目录不可读，无法提供该模式的补充资料。"
+        elif not baseline.get("hasIndex"):
+            baseline["note"] = "未提供 project-index.md；旧项目总览不会自动注入，业务资料按需读取。"
         else:
-            baseline["note"] = "运行时自动提供项目总览，业务流程文档按需读取。"
+            baseline["note"] = "运行时只提供简短项目索引，业务资料按需读取。"
         active = self.active_evaluation()
         return {
             "project": {"id": self.project_id, "name": self.project_name,
@@ -433,9 +456,11 @@ class EvaluationService:
             "suites": suites["items"],
             "lastUsedSuiteId": suites["lastUsedSuiteId"],
             "baseline": baseline,
+            "businessContext": baseline,
             "ast": self.ast_service.status(),
             "repositories": readiness["repositories"],
             "requirements": readiness["requirements"],
+            "codeMap": readiness["codeMap"],
             "cli": readiness["cli"],
             "runtime": {"source": "本地 Claude Code 当前模型设置；实际响应模型名称记录在批次报告中",
                         "timeoutSeconds": self.timeout_seconds, "workers": self.workers,
@@ -522,7 +547,8 @@ class EvaluationService:
                 from .runner import baseline_documents
                 _, _, baseline_root, _ = resolve_project_sources(
                     self.project_config,
-                    baseline_root=self.baseline_root,
+                    business_context_root=self.business_context_root,
+                    code_map_root=self.code_map_root,
                     requirements_root=self.requirements_root,
                 )
                 baseline_docs = baseline_documents(baseline_root)
@@ -562,7 +588,8 @@ class EvaluationService:
                     comparison=comparison, repeats=repeats, case_ids=None, judge=judge,
                     variants=variants, ast_version_id=ast_version_id,
                     ast_generation_seconds=(ast_current[1].get("generationSeconds") if ast_current else None),
-                    baseline_root=self.baseline_root, requirements_root=self.requirements_root,
+                    business_context_root=self.business_context_root, code_map_root=self.code_map_root,
+                    requirements_root=self.requirements_root,
                     workers=self.workers, timeout_seconds=self.timeout_seconds,
                     suite_ref={"id": suite["id"], "revision": suite.get("revision", 1),
                                "name": suite["name"], "origin": suite.get("origin"), "scope": suite.get("scope", "")})

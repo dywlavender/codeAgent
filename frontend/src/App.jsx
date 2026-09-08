@@ -478,7 +478,7 @@ export default function App() {
               type: "group",
               label: "管理",
               children: [
-                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>业务知识维护</span> },
+                { key: "admin", icon: <ShieldCheck size={16.5} />, label: <span>业务补充知识维护</span> },
               ],
             }] : []),
           ]}
@@ -629,7 +629,7 @@ export default function App() {
       >
         <Flex vertical gap={10} style={{ paddingTop: 6 }}>
           <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>
-            配置路径由服务端读取。登记只创建独立工程数据目录，不自动同步仓库、生成主干或生成 AST。
+            配置路径由服务端读取。登记只创建独立工程数据目录，不自动同步仓库、导入业务补充知识或生成 AST。
           </Typography.Text>
           <Input
             value={projectForm.configPath}

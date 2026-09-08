@@ -64,13 +64,13 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
     <div className="page-wrap">
       <Flex justify="space-between" align="center" style={{ maxWidth: 1180, margin: "0 auto 14px", width: "100%" }}>
         <div>
-          <Typography.Title level={4} style={{ margin: 0 }}>业务知识维护</Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>查看和维护基线导入后的结构化知识。问答 Agent 直接读取原始资料，不以这里的条目作为检索入口。</Typography.Text>
+          <Typography.Title level={4} style={{ margin: 0 }}>业务补充知识维护</Typography.Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>查看和维护业务补充知识的结构化索引。问答 Agent 直接读取原始资料，不以这里的条目替代源码调查。</Typography.Text>
         </div>
         <Space>
           <Select value={parser} options={PARSERS} onChange={setParser} style={{ width: 190 }} />
           <Button onClick={() => { window.location.hash = "#/evaluation"; }}>验证问答效果</Button>
-          <Button type="primary" icon={<ArrowClockwise size={15} />} loading={running === "refresh"} onClick={refresh}>导入业务基线</Button>
+          <Button type="primary" icon={<ArrowClockwise size={15} />} loading={running === "refresh"} onClick={refresh}>导入业务补充知识</Button>
         </Space>
       </Flex>
       {error && <Alert type="error" showIcon title="操作未完成" description={error} closable onClose={() => setError("")} style={{ maxWidth: 1180, margin: "0 auto 12px" }} />}
@@ -83,7 +83,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
         <Splitter.Panel defaultSize="38%" min="28%" max="52%">
           <div className="result-list">
             {loading ? <Skeleton active paragraph={{ rows: 8 }} style={{ padding: 16 }} /> : list.length === 0 ? (
-              <Empty description="在业务基线目录放入 Markdown，然后点击导入业务基线。" style={{ marginTop: 90 }} />
+            <Empty description="在业务补充知识目录放入 Markdown，然后点击导入业务补充知识。" style={{ marginTop: 90 }} />
             ) : list.map((item) => <KnowledgeRow key={item.id} item={item} active={item.id === selected?.id} onClick={() => setSelected(item)} />)}
           </div>
         </Splitter.Panel>
@@ -97,7 +97,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
 
 function ImportSummary({ value }) {
   const counts = value.entityCounts || {}; const anchors = value.anchorCounts || {};
-  return <Alert type="success" showIcon title={`已导入 ${value.sourceCount ?? "-"} 份业务基线`} description={`知识 ${Object.values(counts).reduce((sum, item) => sum + Number(item || 0), 0)} 条；调查入口 ${anchors.ACTIVE || 0} 个，候选 ${anchors.CANDIDATE || 0} 个，未解析 ${anchors.UNRESOLVED || 0} 个`} style={{ maxWidth: 1180, margin: "0 auto 12px" }} />;
+  return <Alert type="success" showIcon title={`已导入 ${value.sourceCount ?? "-"} 份业务补充知识`} description={`知识 ${Object.values(counts).reduce((sum, item) => sum + Number(item || 0), 0)} 条；调查入口 ${anchors.ACTIVE || 0} 个，候选 ${anchors.CANDIDATE || 0} 个，未解析 ${anchors.UNRESOLVED || 0} 个`} style={{ maxWidth: 1180, margin: "0 auto 12px" }} />;
 }
 
 function KnowledgeRow({ item, active, onClick }) {

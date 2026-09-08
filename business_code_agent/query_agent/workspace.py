@@ -3,7 +3,8 @@
 The query runtime deliberately exposes files instead of translating business
 knowledge and code into Python-owned retrieval objects. A workspace contains
 only a generated ``CLAUDE.md`` and links to the already synchronised source,
-business baseline and requirement directories.
+project-specific business context, generated code map and requirement
+directories.
 """
 
 from __future__ import annotations
@@ -31,8 +32,19 @@ def workspace_sources(root: Path, repositories: set[str] | None = None) -> list[
     repo; a set keeps only the listed ones — this is what enforces a query
     scope at the CLI permission level.
     """
-    sources = [("业务基线", root / "knowledge" / "baseline"),
-               ("需求原文", root / "requirements")]
+    business_context = root / "knowledge" / "business-context"
+    legacy_baseline = root / "knowledge" / "baseline"
+    code_map = root / "knowledge" / "generated-code-map"
+    sources = []
+    if business_context.is_dir():
+        sources.append(("业务补充知识", business_context))
+    elif legacy_baseline.is_dir():
+        # Old single-project workspaces remain readable while new registered
+        # projects use the explicit business-context directory.
+        sources.append(("业务基线", legacy_baseline))
+    if code_map.is_dir():
+        sources.append(("自动代码地图", code_map))
+    sources.append(("需求原文", root / "requirements"))
     repositories_dir = root / "repos"
     if repositories_dir.is_dir():
         sources.extend((f"代码仓库 {entry.name}", entry)
@@ -63,25 +75,44 @@ Read 用于读取已定位的文件，不要把目录作为 file_path。列文�
 """
 
 
-def project_overview(sources: list[tuple[str, Path]]) -> str:
-    """Load only the small project map; business flow documents stay on demand."""
+def project_index(sources: list[tuple[str, Path]]) -> str:
+    """Add a short source index without injecting a business document.
+
+    ``project-overview.md`` used to be copied into every prompt.  The new
+    contract keeps prompt context limited to a small index and leaves all
+    business-context and code-map documents available for on-demand reads.
+    A deliberately named ``project-index.md`` may provide a short, stable
+    index; the historical overview filename is never auto-injected.
+    """
+    index_path = None
+    index_directory = None
     for label, directory in sources:
-        if label != "业务基线":
+        if label not in {"业务补充知识", "自动代码地图"}:
             continue
-        path = directory / "project-overview.md"
-        if not path.is_file():
-            return ""
+        candidate = directory / "project-index.md"
+        if candidate.is_file():
+            index_path = candidate
+            index_directory = directory
+            break
+    content = ""
+    if index_path:
         try:
-            content = path.read_text(encoding="utf-8-sig").strip()
+            content = index_path.read_text(encoding="utf-8-sig").strip()
         except OSError as exc:
-            logger.warning("无法读取项目总览: path=%s error=%s", path, exc)
-            return ""
-        if content:
-            return (f"\n\n## 本轮项目总览\n\n来源：{json.dumps(str(path), ensure_ascii=False)}\n"
-                    f"文中的相对文档链接位于同一业务基线目录：{directory}。\n"
-                    "以下是项目背景和调查地图；具体流程按问题需要读取，当前实现仍以源码核实。\n\n"
-                    + content)
-    return ""
+            logger.warning("无法读取项目索引: path=%s error=%s", index_path, exc)
+    lines = ["\n\n## 本轮项目资料索引", "", "以下资料按需读取；项目当前实现必须以源码核实。"]
+    for label, directory in sources:
+        lines.append(f"- {label}：{json.dumps(str(directory), ensure_ascii=False)}")
+    if index_path and content:
+        lines.extend(["", f"索引来源：{json.dumps(str(index_path), ensure_ascii=False)}", content])
+        if index_directory:
+            lines.append(f"索引中的相对资料路径位于：{json.dumps(str(index_directory), ensure_ascii=False)}")
+    return "\n".join(lines)
+
+
+def project_overview(sources: list[tuple[str, Path]]) -> str:
+    """Compatibility alias for callers that still use the old function name."""
+    return project_index(sources)
 
 
 @dataclass(frozen=True)
@@ -94,6 +125,8 @@ class Workspace:
     repositories_path: Path
     mode: str | None = None
     ast_version_id: str | None = None
+    business_context_path: Path | None = None
+    code_map_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +134,8 @@ class Workspace:
             "path": str(self.path),
             "claudeFile": str(self.claude_file),
             "knowledgePath": str(self.knowledge_path),
+            "businessContextPath": str(self.business_context_path or self.knowledge_path),
+            "codeMapPath": str(self.code_map_path) if self.code_map_path else None,
             "requirementsPath": str(self.requirements_path),
             "repositoriesPath": str(self.repositories_path),
             "mode": self.mode,
@@ -117,6 +152,8 @@ class WorkspaceManager:
         *,
         project_config: str | Path | None = None,
         workspace_root: str | Path | None = None,
+        business_context_root: str | Path | None = None,
+        code_map_root: str | Path | None = None,
         baseline_root: str | Path | None = None,
         requirements_root: str | Path | None = None,
     ):
@@ -125,7 +162,27 @@ class WorkspaceManager:
         self.config = self._load_config()
         self.project_id = str((self.config.get("project") or {}).get("id") or "default").strip() or "default"
         self.project_name = str((self.config.get("project") or {}).get("name") or self.project_id).strip()
+        knowledge = self.config.get("knowledge") or {}
+        configured_business_context = knowledge.get("businessContextRoot")
+        configured_legacy_baseline = knowledge.get("baselineRoot")
+        configured_code_map = knowledge.get("codeMapRoot") or knowledge.get("generatedCodeMapRoot")
+        legacy_material_requested = bool(baseline_root or configured_legacy_baseline)
+        self._new_material_layout = bool(
+            business_context_root or configured_business_context or
+            ((code_map_root or configured_code_map) and not legacy_material_requested)
+        )
+        business_context_value = (
+            business_context_root or baseline_root or configured_business_context or
+            (configured_legacy_baseline if not self._new_material_layout else None) or
+            ("knowledge/business-context" if self._new_material_layout else "knowledge/baseline")
+        )
+        self.business_context_root = self._resolve_material_path(business_context_value)
+        # Keep this property for internal and external compatibility. New
+        # callers should use business_context_root.
         self.baseline_root = Path(baseline_root).expanduser().resolve() if baseline_root else None
+        self.code_map_root = self._resolve_material_path(
+            code_map_root or configured_code_map or "knowledge/generated-code-map"
+        )
         self.requirements_root = Path(requirements_root).expanduser().resolve() if requirements_root else None
         if workspace_root:
             base = Path(workspace_root).expanduser().resolve()
@@ -138,7 +195,10 @@ class WorkspaceManager:
     def _mode_root(self, mode: str | None = None) -> Path:
         return self.root if not mode else self.root / "modes" / _safe_name(mode)
 
-    def ensure(self, *, mode: str | None = None, baseline_source: str | Path | None = None,
+    def ensure(self, *, mode: str | None = None,
+               business_context_source: str | Path | None = None,
+               code_map_source: str | Path | None = None,
+               baseline_source: str | Path | None = None,
                mode_description: str | None = None,
                ast_version_id: str | None = None) -> Workspace:
         root = self._mode_root(mode)
@@ -147,26 +207,44 @@ class WorkspaceManager:
         repositories = root / "repos"
         knowledge.mkdir(exist_ok=True)
         repositories.mkdir(exist_ok=True)
-        baseline_link = knowledge / "baseline"
+        business_context_link = knowledge / (
+            "business-context" if self._new_material_layout else "baseline"
+        )
+        code_map_link = knowledge / "generated-code-map"
         requirements_link = root / "requirements"
-        if baseline_source is None:
-            baseline_source = self.baseline_root or self._configured_path(
-                ((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")
-            )
+        if baseline_source is not None:
+            # Historical callers used baseline_source for both the human
+            # material and the AST material. Route the latter to the new
+            # structural slot without breaking those callers.
+            if mode == "ast" and code_map_source is None:
+                code_map_source = baseline_source
+            elif business_context_source is None:
+                business_context_source = baseline_source
+        if business_context_source is None:
+            business_context_source = self.business_context_root
         else:
-            baseline_source = Path(baseline_source).expanduser().resolve()
+            business_context_source = Path(business_context_source).expanduser().resolve()
+        if code_map_source is None:
+            code_map_source = self.code_map_root if mode not in {"none", "backbone", "ast"} else None
+        elif code_map_source is not None:
+            code_map_source = Path(code_map_source).expanduser().resolve()
         if mode == "none":
-            baseline_source = self.root / "mode-sources" / "none"
-            baseline_source.mkdir(parents=True, exist_ok=True)
-        elif mode == "ast" and not baseline_source.is_dir():
+            code_map_source = None
+            business_context_source = None
+        elif mode == "backbone":
+            code_map_source = None
+        elif mode == "ast" and (not code_map_source or not code_map_source.is_dir()):
             raise WorkspaceError("AST 资料目录不可用，请先手动生成 AST")
+        if mode == "ast":
+            business_context_source = None
         requirements_source = self.requirements_root or self._configured_path(
             self.config.get("requirementsRoot")
             or self.config.get("requirementRoot")
             or ((self.config.get("requirements") or {}).get("root") if isinstance(self.config.get("requirements"), dict) else None)
             or "requirements"
         )
-        self._link_directory(baseline_link, baseline_source)
+        self._link_directory(business_context_link, business_context_source) if business_context_source else self._unlink_directory(business_context_link)
+        self._link_directory(code_map_link, code_map_source) if code_map_source else self._unlink_directory(code_map_link)
         self._link_directory(requirements_link, requirements_source)
         linked_repositories = self._repository_sources()
         desired_names = {_safe_name(repository_id) for repository_id, _ in linked_repositories}
@@ -184,11 +262,13 @@ class WorkspaceManager:
             id=self.project_id,
             path=root,
             claude_file=claude_file,
-            knowledge_path=baseline_link,
+            knowledge_path=business_context_link,
             requirements_path=requirements_link,
             repositories_path=repositories,
             mode=mode,
             ast_version_id=ast_version_id,
+            business_context_path=business_context_link,
+            code_map_path=code_map_link,
         )
 
     def refresh(self) -> Workspace:
@@ -198,8 +278,10 @@ class WorkspaceManager:
     def source_summary(self) -> list[dict[str, Any]]:
         """Report filesystem readiness separately from CLI permission setup."""
         slots = [
-            ("baseline", "业务基线", self.root / "knowledge" / "baseline",
-             self.baseline_root or self._configured_path((self.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")),
+            (("business_context", "业务补充知识", self.root / "knowledge" / "business-context", self.business_context_root)
+             if self._new_material_layout else
+             ("baseline", "业务基线", self.root / "knowledge" / "baseline", self.business_context_root)),
+            ("code_map", "自动代码地图", self.root / "knowledge" / "generated-code-map", self.code_map_root),
             ("requirements", "需求原文", self.root / "requirements",
              self.requirements_root or self._configured_path(self.config.get("requirementsRoot") or self.config.get("requirementRoot")
                                    or ((self.config.get("requirements") or {}).get("root") if isinstance(self.config.get("requirements"), dict) else None)
@@ -239,6 +321,10 @@ class WorkspaceManager:
         base = self.project_config.parent if self.project_config else Path.cwd()
         candidate = Path(raw).expanduser()
         return candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+
+    def _resolve_material_path(self, value: Any) -> Path:
+        candidate = Path(str(value or "")).expanduser()
+        return candidate.resolve() if candidate.is_absolute() else self._configured_path(candidate)
 
     def _repository_sources(self) -> list[tuple[str, Path]]:
         configured = self.config.get("repositories")
@@ -332,13 +418,22 @@ class WorkspaceManager:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise WorkspaceError(f"无法创建工作区目录链接 {link} -> {source}: {detail}")
 
+    def _unlink_directory(self, link: Path) -> None:
+        """Remove only an empty or manager-created structural link."""
+        if link.is_symlink():
+            link.unlink()
+        elif link.is_dir() and not any(link.iterdir()):
+            link.rmdir()
+
     def _claude_instructions(self, root: Path | None = None, mode: str | None = None,
                              mode_description: str | None = None) -> str:
         root = root or self.root
         sources = workspace_sources(root)
         source_lines = [f"- {label}：`{path}`" for label, path in sources]
         labels = {label for label, _ in sources}
-        for label in ("业务基线", "需求原文"):
+        expected_labels = (("业务补充知识", "自动代码地图", "需求原文")
+                          if self._new_material_layout else ("业务基线", "需求原文"))
+        for label in expected_labels:
             if label not in labels:
                 source_lines.append(f"- {label}：不可用（未配置有效目录或目录不存在）。")
         configured = self._repository_sources()
@@ -349,9 +444,9 @@ class WorkspaceManager:
             source_lines.append("- 代码仓库：不可用（未配置或未同步）。")
         source_description = "\n".join(source_lines)
         mode_note = mode_description or {
-            "none": "当前模式：无主干。不要读取或假设业务基线；正常项目 README、需求原文和源码仍可用。",
-            "backbone": "当前模式：有主干。业务总览自动提供，业务流程主干按问题需要读取；源码仍是当前实现依据。",
-            "ast": "当前模式：AST。仅提供自动生成的简短结构总览与 AST 索引，未提供人工业务主干；结构条目只用于定位，行为仍须读取源码。",
+            "none": "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务补充知识或自动代码地图。",
+            "backbone": "当前模式：有主干。提供项目特有的业务补充知识，按问题需要读取；源码仍是当前实现依据。",
+            "ast": "当前模式：AST。仅提供用户手动生成的结构资料和代码索引，不提供人工业务补充知识；结构条目只用于定位，行为仍须读取源码。",
         }.get(mode or "", "")
         return f"""# CodeAgent
 
@@ -369,14 +464,14 @@ class WorkspaceManager:
 
 ## 调查原则
 
-1. 根据用户问题自行决定是否需要读取业务知识或需求原文。
-2. 项目总览用于建立整体认识；具体业务流程按需读取，用于理解业务含义、系统职责、阶段关系和调查入口，并对照当前调查覆盖了哪些相关环节。
-3. `调查入口` / Entry Anchor 只是代码搜索起点，不代表实际实现。
+1. 根据用户问题自行决定是否需要读取业务补充知识、自动代码地图或需求原文。
+2. 业务补充知识只表达源码难以推断的项目特有语义、边界、术语和跨系统关系；它不是当前实现的替代品。
+3. 自动代码地图和项目索引只用于缩小搜索范围，不等于实现证据；不要把结构条目或入口名称当作业务结论。
 4. 涉及当前代码实现的结论，必须读取以上代码仓库实际目录中的源码确认。
-5. 不要根据类名、方法名或业务知识猜测代码行为。
+5. 不要根据类名、方法名、业务知识或文档中的链接猜测代码行为。
 6. 用户问调用链时重点调查调用关系；用户问业务逻辑时重点读取方法实现、条件、分支、校验、计算、异常和返回逻辑。
 7. 不要为了完整调用链而无止境向下搜索，只调查回答当前问题必要的内容。
-8. 业务知识与代码不一致时分别说明，不要覆盖其中任何一方。
+8. 业务补充知识、需求原文与代码不一致时分别说明；需求描述实现目标，源码确认当前实现。
 9. 回答重要代码结论时给出文件路径和代码行号。
 10. 金额单位、枚举含义和业务前置条件必须有明确依据；只检查字段非 null 不代表验证了真实业务状态。总结不能比正文证据更强。
 

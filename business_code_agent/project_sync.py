@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .application_topology import ApplicationTopologyStore, load_application_config
+from .code_map import generate_code_map
 from .indexing import CodeIndexer
 from .integration_edges import IntegrationEdgeResolver
 from .schema import connect
@@ -66,7 +67,8 @@ def load_project_config(config_path: str | Path) -> tuple[dict, list[RepositoryC
     return project, repositories
 
 
-def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool = False) -> dict:
+def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool = False,
+                 code_map_root: str | Path | None = None) -> dict:
     if not offline and not shutil.which("git"):
         raise ProjectSyncError("没有找到 Git，请先安装 Git")
 
@@ -77,6 +79,7 @@ def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool 
     db = connect(str(db_path))
     results = []
     topology = integration_edges = {}
+    code_map = None
     try:
         indexer = CodeIndexer(db)
         for repository in repositories:
@@ -85,6 +88,8 @@ def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool 
             results.append({**sync_result, "indexed": indexed})
         topology = ApplicationTopologyStore(db).replace(systems, applications)
         integration_edges = IntegrationEdgeResolver(db).rebuild()
+        if code_map_root is not None:
+            code_map = generate_code_map(db, code_map_root, project_name=project.get("name") or project["id"])
     finally:
         db.close()
 
@@ -94,6 +99,7 @@ def sync_project(config_path: str | Path, db_path: str | Path, *, offline: bool 
         "repositories": results,
         "topology": topology,
         "integrationEdges": integration_edges,
+        "codeMap": code_map,
     }
 
 

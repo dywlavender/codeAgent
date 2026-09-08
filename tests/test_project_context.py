@@ -102,8 +102,8 @@ class ProjectContextTest(unittest.TestCase):
                 baseline_root=root / "alpha-baseline",
                 requirements_root=root / "alpha-requirements",
             )
-            self.assertEqual({"baseline", "requirements"}, set(result["copied"]))
-            self.assertEqual("alpha overview", (alpha.knowledge_root / "baseline" / "project-overview.md").read_text(encoding="utf-8"))
+            self.assertEqual({"businessContext", "requirements"}, set(result["copied"]))
+            self.assertEqual("alpha overview", (alpha.business_context_root / "project-overview.md").read_text(encoding="utf-8"))
             self.assertEqual("alpha requirement", (alpha.requirements_root / "requirement.md").read_text(encoding="utf-8"))
 
     def test_http_routes_and_rejects_cross_project_conversation(self):

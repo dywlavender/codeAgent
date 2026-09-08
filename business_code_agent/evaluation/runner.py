@@ -69,18 +69,22 @@ def validate_suite(suite):
     return cases
 
 
-def resolve_project_sources(project_config, *, baseline_root=None, requirements_root=None):
+def resolve_project_sources(project_config, *, business_context_root=None, code_map_root=None,
+                            baseline_root=None, requirements_root=None):
     """Resolve repositories and material roots for one frozen project input."""
+    if business_context_root is not None and baseline_root is not None:
+        raise ValueError("business_context_root 与 baseline_root 不能同时提供")
     manager = WorkspaceManager(
         project_config=project_config,
+        business_context_root=business_context_root,
+        code_map_root=code_map_root,
         baseline_root=baseline_root,
         requirements_root=requirements_root,
     )
     repository_sources = manager._repository_sources()
     if not repository_sources or any(not path.is_dir() for _, path in repository_sources):
         raise ValueError("请先准备项目配置中的本地代码仓库")
-    resolved_baseline_root = manager.baseline_root or manager._configured_path(
-        (manager.config.get("knowledge") or {}).get("baselineRoot") or "knowledge/baseline")
+    resolved_baseline_root = manager.business_context_root
     requirements_config = manager.config.get("requirements")
     resolved_requirements_root = manager.requirements_root or manager._configured_path(
         manager.config.get("requirementsRoot") or manager.config.get("requirementRoot")
@@ -143,14 +147,15 @@ def plan_jobs(cases, *, arms, repeats, case_ids=None, start_repeat=1, blocks=Non
 def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=ARMS_ABC, arm_descriptions=None,
                  variants=None, comparison="abc", repeats=2, case_ids=None, judge=True, workers=2,
                  start_repeat=1, blocks=None, limit_jobs=None, suite_ref=None, timeout_seconds=240,
-                 ast_version_id=None, ast_generation_seconds=None, baseline_root=None,
-                 requirements_root=None):
+                 ast_version_id=None, ast_generation_seconds=None, business_context_root=None,
+                 code_map_root=None, baseline_root=None, requirements_root=None):
     """Create the output directory, freeze sources/rubric and write ``protocol.json``."""
     arm_descriptions = arm_descriptions or {arm: ARM_DESCRIPTIONS_ABC.get(arm, arm) for arm in arms}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     manager, repository_sources, resolved_baseline_root, resolved_requirements_root = resolve_project_sources(
-        project_config, baseline_root=baseline_root, requirements_root=requirements_root)
+        project_config, business_context_root=business_context_root, code_map_root=code_map_root,
+        baseline_root=baseline_root, requirements_root=requirements_root)
     documents = baseline_documents(resolved_baseline_root)
     inputs = output / "inputs"
     repository_names = []
