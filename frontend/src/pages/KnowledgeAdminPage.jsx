@@ -8,7 +8,7 @@ const TYPES = [
   ["CAPABILITY", "业务能力"], ["FLOW", "业务流程"], ["RULE", "业务规则"],
 ];
 const PARSERS = [
-  { value: "model", label: "模型结构化" },
+  { value: "claude", label: "Claude Code 结构化" },
   { value: "markdown", label: "Markdown 规则解析（无需模型）" },
 ];
 
@@ -22,7 +22,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
   const [running, setRunning] = useState("");
   const [error, setError] = useState("");
   const [summary, setSummary] = useState(null);
-  const [parser, setParser] = useState("model");
+  const [parser, setParser] = useState("claude");
 
   async function load(nextQuery = query, nextType = type) {
     setLoading(true); setError("");

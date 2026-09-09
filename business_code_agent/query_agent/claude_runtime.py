@@ -256,6 +256,22 @@ class ClaudeCodeRuntime:
         return RuntimeResult(answer=answer, runtime_session_id=session, events=events, usage=usage)
 
 
+def default_claude_runtime() -> ClaudeCodeRuntime:
+    """Build the configured read-only runtime used by every backend flow."""
+    command = os.environ.get("CLAUDE_CODE_COMMAND", "claude").strip() or "claude"
+    timeout_raw = os.environ.get("CLAUDE_CODE_TIMEOUT", "600")
+    try:
+        timeout = float(timeout_raw)
+    except (TypeError, ValueError):
+        timeout = 600.0
+    tools = tuple(
+        item.strip()
+        for item in os.environ.get("CLAUDE_CODE_READ_TOOLS", "Read,Glob,Grep").split(",")
+        if item.strip()
+    ) or ("Read", "Glob", "Grep")
+    return ClaudeCodeRuntime(command=command, timeout_seconds=timeout, read_tools=tools)
+
+
 def _read_stream(name: str, stream, channel: queue.Queue[tuple[str, str | None]]) -> None:
     try:
         for line in iter(stream.readline, ""):

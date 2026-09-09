@@ -7,8 +7,12 @@ from pathlib import Path
 
 from business_code_agent.business_tools import BusinessTools
 from business_code_agent.code_intelligence import JavaIndexer
-from business_code_agent.knowledge_update.baseline_service import BaselineKnowledgeService
+from business_code_agent.knowledge_update.baseline_service import (
+    BaselineKnowledgeService,
+    ClaudeCodeBaselineExtractor,
+)
 from business_code_agent.knowledge_graph import KnowledgeGraphService
+from business_code_agent.query_agent.runtime import RuntimeResult
 from business_code_agent.schema import connect
 
 
@@ -85,6 +89,31 @@ class _Extractor:
 
 
 class BusinessBaselineMvpTest(unittest.TestCase):
+    def test_claude_code_extractor_uses_shared_runtime_and_parses_json(self):
+        class FakeRuntime:
+            def __init__(self):
+                self.calls = []
+
+            def ask(self, question, *, workspace):
+                self.calls.append((question, workspace))
+                return RuntimeResult(
+                    answer='```json\n{"entities": [], "relations": []}\n```',
+                    runtime_session_id="ignored-for-one-shot-import",
+                )
+
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = FakeRuntime()
+            workspace = Path(folder) / "workspace"
+            extractor = ClaudeCodeBaselineExtractor(runtime=runtime, workspace=workspace)
+            payload = extractor.extract(source_path="/tmp/baseline.md", text="# 业务补充知识\n")
+            extractor.close()
+
+        self.assertEqual({"entities": [], "relations": []}, payload)
+        self.assertEqual(1, len(runtime.calls))
+        self.assertIn("输出必须是一个 JSON 对象", runtime.calls[0][0])
+        self.assertIn("业务补充知识", runtime.calls[0][0])
+        self.assertEqual(str(workspace.resolve()), runtime.calls[0][1])
+
     def test_explicit_markdown_parser_imports_the_six_mvp_knowledge_kinds(self):
         # Keep parser coverage independent from the production knowledge
         # directory, whose examples are intentionally free to evolve or be

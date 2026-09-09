@@ -89,7 +89,7 @@ cp project.config.example.json project.config.json
 
 ## Claude Runtime 配置
 
-查询不读取旧的 `BUSINESS_CODE_MODEL_*` LangChain 配置，而是直接调用本机 Claude Code：
+查询、评测和业务补充知识结构化都直接调用本机 Claude Code：
 
 ```dotenv
 CLAUDE_CODE_COMMAND=claude

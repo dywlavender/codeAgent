@@ -69,7 +69,7 @@ start-windows.bat -Mode Repository -Repository "D:\IdeaProjects\loan-system" -Re
 
 ## 模型和 Claude Code 配置
 
-问答不再使用 Python LangChain Query Agent，而是调用 Claude Code CLI。确认命令行可用：
+问答、评测和业务补充知识结构化都调用 Claude Code CLI。确认命令行可用：
 
 ```powershell
 claude --version
@@ -84,20 +84,20 @@ $env:CLAUDE_CODE_COMMAND = "C:\Tools\Claude\claude.exe"
 
 问答工作区只允许 Claude 使用 `Read`、`Glob`、`Grep`，不会开放编辑、写文件、Shell 或 Git 操作。工作区位于 `.data\agent-workspaces\<project-id>`，其中的仓库目录链接到实际同步目录。
 
-业务基线导入仍可使用 `.env` 中的模型配置：
+业务补充知识导入也直接使用同一个 Claude Code CLI。`.env` 只需要配置 Claude Code：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-需要模型结构化时填写 `BUSINESS_CODE_MODEL_*`；不需要模型时，在管理页面选择 Markdown 规则解析，或使用：
+默认使用 Claude Code 结构化；不需要模型时，在管理页面选择 Markdown 规则解析，或使用：
 
 ```powershell
 .venv-windows\Scripts\python.exe -m business_code_agent.cli baseline-refresh `
   --config project.config.json --db .data\knowledge.db --parser markdown
 ```
 
-模型配置只影响业务基线结构化，不影响 Claude Code 问答运行时。
+Claude Code 的登录、模型和 API 凭据按 CLI 规则配置；Markdown 解析是显式的本地离线选项，不会在 Claude Code 失败后自动切换。
 
 ## 常用参数
 

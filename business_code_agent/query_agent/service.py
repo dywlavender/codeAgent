@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from .claude_runtime import ClaudeCodeRuntime
+from .claude_runtime import ClaudeCodeRuntime, default_claude_runtime
 from .runtime import RuntimeErrorBase, normalize_runtime_result
 from .workspace import Workspace, WorkspaceManager, _safe_name
 
@@ -664,18 +663,7 @@ class QueryService:
 
 
 def _default_runtime() -> ClaudeCodeRuntime:
-    command = os.environ.get("CLAUDE_CODE_COMMAND", "claude").strip() or "claude"
-    timeout_raw = os.environ.get("CLAUDE_CODE_TIMEOUT", "600")
-    try:
-        timeout = float(timeout_raw)
-    except (TypeError, ValueError):
-        timeout = 600.0
-    tools = tuple(
-        item.strip()
-        for item in os.environ.get("CLAUDE_CODE_READ_TOOLS", "Read,Glob,Grep").split(",")
-        if item.strip()
-    ) or ("Read", "Glob", "Grep")
-    return ClaudeCodeRuntime(command=command, timeout_seconds=timeout, read_tools=tools)
+    return default_claude_runtime()
 
 
 __all__ = ["QueryRuntimeError", "QueryService"]

@@ -48,8 +48,8 @@ def main() -> None:
     baseline.add_argument("--project-registry", help="从注册表解析工程数据库")
     baseline.add_argument("--project-id", help="注册表工程 ID")
     baseline.add_argument(
-        "--parser", choices=("model", "markdown"), default="model",
-        help="结构化方式：默认使用配置的大模型；markdown 仅在明确需要本地解析时使用",
+        "--parser", choices=("claude", "markdown", "model"), default="claude",
+        help="结构化方式：默认使用 Claude Code；markdown 仅在明确需要本地解析时使用，model 为旧兼容别名",
     )
     req = sub.add_parser("ingest-requirement")
     req.add_argument("path")

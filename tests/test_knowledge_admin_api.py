@@ -29,14 +29,13 @@ class KnowledgeAdminApiTest(unittest.TestCase):
         self.assertIn("未开通所选模型", message)
         self.assertNotIn("AccessDenied.Unpurchased", message)
 
-    def test_wrapped_deepseek_thinking_tool_choice_error_is_actionable(self):
-        cause = RuntimeError("Thinking mode does not support this tool_choice")
+    def test_claude_auth_error_is_actionable(self):
+        cause = RuntimeError("Claude Code authentication failed")
         error = RuntimeError("query understanding failed")
         error.__cause__ = cause
         message = _user_facing_internal_error(error)
-        self.assertIn("思考模式不支持", message)
-        self.assertIn("BUSINESS_CODE_MODEL_THINKING=disabled", message)
-        self.assertNotIn("tool_choice", message)
+        self.assertIn("Claude Code 未通过认证", message)
+        self.assertNotIn("authentication", message)
 
     def test_wrapped_sqlite_thread_error_is_actionable(self):
         cause = RuntimeError("SQLite objects created in a thread can only be used in that same thread")

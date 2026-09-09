@@ -107,13 +107,13 @@ start-offline-windows.bat
 --database PATH       / -Database PATH
 --host ADDRESS        / -HostAddress ADDRESS
 --port PORT           / -Port PORT
---baseline-parser     / -BaselineParser model|markdown
+--baseline-parser     / -BaselineParser claude|markdown
                       / -NoBrowser
 ```
 
 启动前会检查端口；如果端口已被占用，脚本会结束监听进程并用同一端口重新启动。无法取得 PID 时才需要手工处理。
 
-## Claude Code 和业务基线模型
+## Claude Code
 
 问答运行时要求部署机已经安装并认证 Claude Code：
 
@@ -124,13 +124,13 @@ claude auth status
 
 如果不在 PATH，可设置 `CLAUDE_CODE_COMMAND` 为完整路径。问答工作区只开放 `Read`、`Glob`、`Grep`，不会让 Claude 修改代码、执行 Shell 或操作 Git。
 
-业务基线导入仍使用 `.env` 中的 `BUSINESS_CODE_MODEL_*` 配置进行结构化；这与 Claude Code 问答运行时是两套配置。没有可用模型时，显式选择 Markdown 解析：
+业务补充知识导入、问答和评测共用 Claude Code CLI。`.env` 中配置 `CLAUDE_CODE_COMMAND`、`CLAUDE_CODE_TIMEOUT` 和可选的 `CLAUDE_CODE_READ_TOOLS`。没有可用 Claude Code 时，显式选择 Markdown 解析：
 
 ```bash
 ./start-offline-linux.sh --baseline-parser markdown
 ```
 
-Windows 使用 `-BaselineParser markdown`。模型失败不会静默切换解析器。
+Windows 使用 `-BaselineParser markdown`。Claude Code 失败不会静默切换解析器。
 
 ## 升级和排查
 

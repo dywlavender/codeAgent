@@ -9,7 +9,7 @@ PROJECT_CONFIG=""
 DATABASE=""
 HOST_ADDRESS="127.0.0.1"
 PORT=""
-BASELINE_PARSER="model"
+BASELINE_PARSER="claude"
 
 usage() {
   cat <<'EOF'
@@ -23,7 +23,7 @@ Options:
   --database PATH         SQLite database (default: project startup.database)
   --host ADDRESS          Listen address (default: 127.0.0.1)
   --port PORT             Listen port (default: project startup.port)
-  --baseline-parser MODE  Baseline parser: model (default) or markdown
+  --baseline-parser MODE  Baseline parser: claude (default) or markdown
   -h, --help              Show this help
 EOF
 }
@@ -39,15 +39,15 @@ while [ "$#" -gt 0 ]; do
     --database) [ "$#" -ge 2 ] || fail "--database requires a path"; DATABASE="$2"; shift 2 ;;
     --host) [ "$#" -ge 2 ] || fail "--host requires an address"; HOST_ADDRESS="$2"; shift 2 ;;
     --port) [ "$#" -ge 2 ] || fail "--port requires a number"; PORT="$2"; shift 2 ;;
-    --baseline-parser) [ "$#" -ge 2 ] || fail "--baseline-parser requires model or markdown"; BASELINE_PARSER="$2"; shift 2 ;;
+    --baseline-parser) [ "$#" -ge 2 ] || fail "--baseline-parser requires claude or markdown"; BASELINE_PARSER="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option: $1" ;;
   esac
 done
 
 case "$BASELINE_PARSER" in
-  model|markdown) ;;
-  *) fail "--baseline-parser must be model or markdown" ;;
+  claude|model|markdown) ;;
+  *) fail "--baseline-parser must be claude or markdown" ;;
 esac
 
 if command -v python3 >/dev/null 2>&1; then

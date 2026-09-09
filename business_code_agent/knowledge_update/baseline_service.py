@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from ..query_agent.claude_runtime import default_claude_runtime
+from ..query_agent.runtime import normalize_runtime_result
 from ..util import digest, stable_id
 from .entry_anchor_service import (
     EntryAnchor,
@@ -16,7 +19,6 @@ from .entry_anchor_service import (
     normalize_anchor_payload,
     validate_entry_name,
 )
-from .langchain_adapter import ModelConfig, init_configured_chat_model, model_config_from_environment
 
 
 ENTITY_TYPES = {
@@ -54,10 +56,10 @@ class BaselineKnowledgeService:
 
     Human statements, entry anchors and runtime code facts deliberately remain
     separate. A refresh never derives Business→Code mappings.
-    The configured model may structure source text, but every accepted
-    business item must point back to a literal excerpt in that source.  A
-    deterministic Markdown parser is available only when explicitly selected
-    by the caller; a model error is never silently converted to another mode.
+    Claude Code may structure source text, but every accepted business item
+    must point back to a literal excerpt in that source.  A deterministic
+    Markdown parser is available only when explicitly selected by the caller;
+    a Claude Code error is never silently converted to another mode.
     """
 
     def __init__(self, db, *, project_config: str | Path | None = None,
@@ -74,13 +76,20 @@ class BaselineKnowledgeService:
         self.config = self._load_config()
         self._extractor = extractor
 
-    def refresh(self, *, parser: str = "model") -> dict[str, Any]:
+    def refresh(self, *, parser: str = "claude") -> dict[str, Any]:
         root = self.knowledge_root()
         if not root.is_dir():
             raise ValueError(f"业务基线目录不存在: {root}")
         paths = sorted(root.rglob("*.md"))
+        owns_extractor = self._extractor is None
         extractor = self._extractor or self._extractor_for(parser)
-        documents = [self._read_document(path, extractor) for path in paths]
+        try:
+            documents = [self._read_document(path, extractor) for path in paths]
+        finally:
+            if owns_extractor:
+                close = getattr(extractor, "close", None)
+                if close:
+                    close()
         active_sources: set[str] = set()
         counts = {name: 0 for name in sorted(ALL_KNOWLEDGE_TYPES)}
         anchor_counts = {"ACTIVE": 0, "CANDIDATE": 0, "UNRESOLVED": 0}
@@ -202,9 +211,9 @@ class BaselineKnowledgeService:
         title = _document_title(text, path.stem)
         source_id = stable_id("BKS", str(path.resolve()))
         if extractor is None:
-            raise RuntimeError("业务基线导入需要模型；如需显式使用 Markdown 解析，请传入 parser='markdown'")
+            raise RuntimeError("业务基线导入需要 Claude Code；如需显式使用 Markdown 解析，请传入 parser='markdown'")
         payload = extractor.extract(source_path=str(path.resolve()), text=text)
-        mode = getattr(extractor, "mode", "MODEL")
+        mode = getattr(extractor, "mode", "CLAUDE_CODE")
         entities, relations = _validate_payload(payload, text)
         return BaselineDocument(source_id, str(path.resolve()), title, text, tuple(entities), tuple(relations), mode)
 
@@ -331,22 +340,19 @@ class BaselineKnowledgeService:
         return evidence_id
 
     def _extractor_for(self, parser: str) -> BaselineExtractor:
-        parser = str(parser or "model").strip().lower()
+        parser = str(parser or "claude").strip().lower()
         if parser == "markdown":
             return MarkdownBaselineExtractor()
-        if parser != "model":
-            raise ValueError("parser must be 'model' or 'markdown'")
+        # ``model`` was the old public value. Keep it as a harmless API
+        # compatibility alias, but route it to Claude Code.
+        if parser == "model":
+            parser = "claude"
+        if parser != "claude":
+            raise ValueError("parser must be 'claude' or 'markdown'")
         return self._configured_extractor()
 
     def _configured_extractor(self) -> BaselineExtractor:
-        config = model_config_from_environment()
-        if not config or not config.get("enabled", True):
-            raise RuntimeError("业务基线导入需要启用模型，请配置 BUSINESS_CODE_MODEL_ENABLED=true 和 API 凭据")
-        try:
-            model = init_configured_chat_model(ModelConfig.from_mapping(config))
-        except (RuntimeError, ValueError) as exc:
-            raise RuntimeError(f"业务基线模型初始化失败: {exc}") from exc
-        return LangChainBaselineExtractor(model)
+        return ClaudeCodeBaselineExtractor()
 
     def _load_config(self) -> dict[str, Any]:
         if not self.project_config or not self.project_config.is_file():
@@ -364,11 +370,12 @@ class BaselineKnowledgeService:
             "confidence": row["confidence"], "status": row["status"], "updatedAt": row["updated_at"],
         }
 
+
 class MarkdownBaselineExtractor:
-    """Explicit local parser for environments that do not use a model.
+    """Explicit local parser for environments that do not use Claude Code.
 
     This parser is intentionally opt-in.  It is useful for smoke tests and
-    air-gapped demonstrations, but it is never selected after a model error.
+    air-gapped demonstrations, but it is never selected after a Claude Code error.
     """
 
     mode = "MARKDOWN"
@@ -377,55 +384,58 @@ class MarkdownBaselineExtractor:
         return _markdown_extract(text)
 
 
-class LangChainBaselineExtractor:
-    def __init__(self, model, *, agent_factory=None):
-        self.model = model
-        self.agent_factory = agent_factory
+class ClaudeCodeBaselineExtractor:
+    """Structure one business document through the shared Claude Code runtime."""
+
+    mode = "CLAUDE_CODE"
+
+    def __init__(self, *, runtime=None, workspace: str | Path | None = None):
+        self.runtime = runtime or default_claude_runtime()
+        self._temporary_workspace = None
+        if workspace is None:
+            self._temporary_workspace = tempfile.TemporaryDirectory(prefix="business-baseline-claude-")
+            self.workspace = Path(self._temporary_workspace.name)
+        else:
+            self.workspace = Path(workspace).expanduser().resolve()
+            self.workspace.mkdir(parents=True, exist_ok=True)
 
     def extract(self, *, source_path: str, text: str) -> Mapping[str, Any]:
-        factory = self.agent_factory
-        if factory is None:
-            from langchain.agents import create_agent
-            factory = create_agent
-        agent = factory(model=self.model, tools=[], response_format=_baseline_schema(), system_prompt=_BASELINE_PROMPT)
-        result = agent.invoke({"messages": [{"role": "user", "content": json.dumps({"path": source_path, "text": text}, ensure_ascii=False)}]})
-        structured = result.get("structured_response") if isinstance(result, Mapping) else None
-        if structured is None:
-            raise ValueError("业务基线模型没有返回结构化结果")
-        value = structured.model_dump(mode="python") if hasattr(structured, "model_dump") else structured
-        if not isinstance(value, Mapping):
-            raise ValueError("业务基线结构化结果格式错误")
-        return value
+        prompt = (
+            f"{_BASELINE_PROMPT}\n\n{_BASELINE_OUTPUT_INSTRUCTIONS}\n"
+            "以下是待结构化的业务补充知识原文。只依据 text，不要尝试读取 path 外的文件。\n"
+            f"输入：{json.dumps({'path': source_path, 'text': text}, ensure_ascii=False)}"
+        )
+        result = normalize_runtime_result(self.runtime.ask(prompt, workspace=str(self.workspace)))
+        if result.status != "completed":
+            raise ValueError(f"Claude Code 业务基线解析未完成: {result.status}")
+        return _parse_structured_payload(result.answer)
+
+    def close(self) -> None:
+        if self._temporary_workspace is not None:
+            self._temporary_workspace.cleanup()
+            self._temporary_workspace = None
 
 
-def _baseline_schema():
-    from pydantic import BaseModel, ConfigDict, Field
-
-    class Entity(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        type: str
-        name: str
-        aliases: list[str] = Field(default_factory=list)
-        definition: str
-        attributes: dict[str, Any] = Field(default_factory=dict)
-        entryAnchors: list[dict[str, Any]] = Field(default_factory=list)
-        sourceQuote: str
-
-    class Relation(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        from_: str = Field(alias="from")
-        relation: str
-        to: str
-        scope: str = ""
-        attributes: dict[str, Any] = Field(default_factory=dict)
-        sourceQuote: str
-
-    class Result(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        entities: list[Entity] = Field(default_factory=list)
-        relations: list[Relation] = Field(default_factory=list)
-
-    return Result
+def _parse_structured_payload(answer: str) -> Mapping[str, Any]:
+    raw = str(answer or "").strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", raw, flags=re.IGNORECASE | re.DOTALL)
+    candidate = fenced.group(1).strip() if fenced else raw
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        value = None
+        decoder = json.JSONDecoder()
+        for offset, character in enumerate(candidate):
+            if character != "{":
+                continue
+            try:
+                value, _ = decoder.raw_decode(candidate[offset:])
+                break
+            except json.JSONDecodeError:
+                continue
+    if not isinstance(value, Mapping):
+        raise ValueError("Claude Code 业务基线解析没有返回 JSON 对象")
+    return value
 
 
 _BASELINE_PROMPT = """你负责把人工业务基线转换为严格的内部知识结构。
@@ -437,6 +447,13 @@ SYSTEM 的 responsibilities、nonResponsibilities 放 attributes。不要把类�
 FLOW/CAPABILITY 可以从同一 Markdown 小节的“调查入口”列表提取 entryAnchors，格式为 application、entryType、entryName、sourceQuote；entryName 只能是页面名、类名、Job 或 Consumer 名，不能是限定类名、方法签名或文件行号。入口必须逐字出现在 sourceQuote 所在小节中。
 关系使用简短稳定的英文谓词，例如 TRIGGERS、PRODUCES、BELONGS_TO、DEPENDS_ON、HANDLED_BY。
 无法确定时少提取，不要猜测代码类名。"""
+
+_BASELINE_OUTPUT_INSTRUCTIONS = """输出必须是一个 JSON 对象，格式只能是：
+{
+  "entities": [{"type": "...", "name": "...", "aliases": [], "definition": "...", "attributes": {}, "entryAnchors": [], "sourceQuote": "..."}],
+  "relations": [{"from": "...", "relation": "...", "to": "...", "scope": "", "attributes": {}, "sourceQuote": "..."}]
+}
+没有实体或关系时使用空数组。不要输出 Markdown 围栏、解释、注释或其他字段。"""
 
 
 def _validate_payload(payload: Mapping[str, Any], text: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

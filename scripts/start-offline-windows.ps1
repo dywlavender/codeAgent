@@ -5,8 +5,8 @@ param(
     [string]$HostAddress = "127.0.0.1",
     [ValidateRange(0, 65535)]
     [int]$Port = 0,
-    [ValidateSet("model", "markdown")]
-    [string]$BaselineParser = "model",
+    [ValidateSet("claude", "model", "markdown")]
+    [string]$BaselineParser = "claude",
     [switch]$NoBrowser
 )
 

@@ -34,8 +34,6 @@ def _user_facing_internal_error(exc: Exception) -> str:
     detail = " ".join(messages).casefold()
     if "insufficient_quota" in detail or "quota exhausted" in detail or "free quota" in detail:
         return "模型调用失败：当前模型账号额度已用尽，请更换有额度的 API Key，或检查 Claude Code 登录状态。"
-    if "thinking mode" in detail and "tool_choice" in detail:
-        return "模型调用失败：当前模型的思考模式不支持工具调用，请关闭思考模式后重试；如使用旧兼容接口，可设置 BUSINESS_CODE_MODEL_THINKING=disabled。"
     if "sqlite objects created in a thread" in detail:
         return "查询服务失败：数据库连接发生跨线程使用。请重启工作台后重试。"
     if "accessdenied.unpurchased" in detail or "access to model denied" in detail or "model denied" in detail:
@@ -265,7 +263,7 @@ def make_server(
                         business_context_root=context.business_context_root if context.registered else None,
                     )
                     body = self._body()
-                    self._json(200, service.refresh(parser=str(body.get("parser") or "model")))
+                    self._json(200, service.refresh(parser=str(body.get("parser") or "claude")))
                     return
 
                 if path == "/api/ast/generate":
