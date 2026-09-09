@@ -151,6 +151,11 @@ class OfflineProjectSyncTest(unittest.TestCase):
             self.assertTrue((code_map / "repositories" / "core.md").is_file())
             self.assertTrue((code_map / "repositories.md").is_file())
             self.assertTrue((code_map / "applications.md").is_file())
+            repository_map = (code_map / "repositories" / "core.md").read_text(encoding="utf-8")
+            repositories_map = (code_map / "repositories.md").read_text(encoding="utf-8")
+            self.assertIn("仓库标识：`core`", repository_map)
+            self.assertNotIn(str(repository), repository_map)
+            self.assertNotIn(str(repository), repositories_map)
 
 
 if __name__ == "__main__":

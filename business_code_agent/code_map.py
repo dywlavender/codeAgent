@@ -26,9 +26,7 @@ def generate_code_map(db: Connection, root: str | Path, *, project_name: str | N
     repositories_dir = target / "repositories"
     repositories_dir.mkdir(parents=True, exist_ok=True)
 
-    repositories = db.execute(
-        """SELECT id,root_path FROM repository ORDER BY id"""
-    ).fetchall()
+    repositories = db.execute("SELECT id FROM repository ORDER BY id").fetchall()
     applications = _rows(db, """SELECT a.id AS id, a.name AS name,
                                       a.system_id AS system_id,
                                       COALESCE(s.name, a.system_id) AS system_name,
@@ -58,7 +56,6 @@ def generate_code_map(db: Connection, root: str | Path, *, project_name: str | N
     repository_rows = []
     for row in repositories:
         repository_id = str(row["id"] if hasattr(row, "keys") else row[0])
-        root_path = str(row["root_path"] if hasattr(row, "keys") else row[1])
         counts = db.execute(
             """SELECT count(DISTINCT cf.id) AS files, count(DISTINCT cs.id) AS symbols
                  FROM code_file cf LEFT JOIN code_symbol cs ON cs.file_id=cf.id
@@ -90,11 +87,11 @@ def generate_code_map(db: Connection, root: str | Path, *, project_name: str | N
                                   )
                                 ORDER BY f.fact_type,cf.path,cs.line_start,f.subject""", (repository_id,))
         edge_rows = _integration_edges(db, repository_id)
-        map_path.write_text(_repository_map(repository_id, root_path, file_rows, fact_rows, edge_rows), encoding="utf-8")
+        map_path.write_text(_repository_map(repository_id, file_rows, fact_rows, edge_rows), encoding="utf-8")
         written.append(str(map_path.relative_to(target)))
         files = int(counts["files"] if hasattr(counts, "keys") else counts[0])
         symbols = int(counts["symbols"] if hasattr(counts, "keys") else counts[1])
-        repository_rows.append({"id": repository_id, "root": root_path, "files": files,
+        repository_rows.append({"id": repository_id, "files": files,
                                 "symbols": symbols, "map": f"repositories/{safe}.md"})
     repositories_path = target / "repositories.md"
     repositories_path.write_text(_repositories_map(repository_rows), encoding="utf-8")
@@ -108,11 +105,11 @@ def generate_code_map(db: Connection, root: str | Path, *, project_name: str | N
             "applications": len(applications), "documents": len(written), "files": written}
 
 
-def _repository_map(repository_id: str, root_path: str, rows, fact_rows=(), edge_rows=()) -> str:
+def _repository_map(repository_id: str, rows, fact_rows=(), edge_rows=()) -> str:
     lines = [
         f"# 自动代码地图：{repository_id}",
         "",
-        f"源码根目录：`{root_path}`",
+        f"仓库标识：`{repository_id}`",
         "",
         "以下是索引中的文件和符号定位提示，不代表调用链或业务职责；请读取源码确认。",
         "",
@@ -164,10 +161,10 @@ def _repository_map(repository_id: str, root_path: str, rows, fact_rows=(), edge
 
 def _repositories_map(rows) -> str:
     lines = ["# 自动代码地图：仓库目录", "", "只提供仓库、文件和符号定位；代码行为必须回到源码确认。", "",
-             "| 仓库 | 源码根目录 | 文件数 | 符号数 | 结构资料 |",
-             "| --- | --- | ---: | ---: | --- |"]
+             "| 仓库 | 文件数 | 符号数 | 结构资料 |",
+             "| --- | ---: | ---: | --- |"]
     for row in rows:
-        lines.append(f"| {row['id']} | `{row['root']}` | {row['files']} | {row['symbols']} | [{row['id']}]({row['map']}) |")
+        lines.append(f"| {row['id']} | {row['files']} | {row['symbols']} | [{row['id']}]({row['map']}) |")
     return "\n".join(lines) + "\n"
 
 
