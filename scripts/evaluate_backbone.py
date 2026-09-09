@@ -20,8 +20,26 @@ from business_code_agent.evaluation import (ARMS_AB, ARM_DESCRIPTIONS_AB, freeze
                                             rejudge_output, run_batch, validate_suite)
 
 
-def _comparison_setup(args, documents):
+def _comparison_setup(args, documents, *, old_documents=None, code_map_documents=None):
     """Arm list, frozen baseline variants and descriptions for one comparison mode."""
+    if args.comparison == "abcde":
+        from business_code_agent.evaluation.runner import ARM_DESCRIPTIONS_ABCDE, ARMS_ABCDE
+        if not old_documents:
+            raise ValueError("五组对照需要保留可读的历史 baseline 资料作为 B 组")
+        if not code_map_documents:
+            raise ValueError("五组对照需要可读的自动 Code Map 资料作为 C 组")
+        business_documents = dict(documents)
+        structure_documents = dict(code_map_documents)
+        return list(ARMS_ABCDE), {
+            "raw": {},
+            "old_baseline": dict(old_documents),
+            "code_map": structure_documents,
+            "business_context": business_documents,
+            "code_map_context": {
+                **{f"business-context/{key}": value for key, value in business_documents.items()},
+                **{f"generated-code-map/{key}": value for key, value in structure_documents.items()},
+            },
+        }, dict(ARM_DESCRIPTIONS_ABCDE)
     if args.comparison in ("diagnostic", "abc", "diagnostic_ast"):
         from business_code_agent.evaluation.runner import COMPARISONS
         descriptions = COMPARISONS[args.comparison]
@@ -53,7 +71,7 @@ def main():
     parser.add_argument("--cases", nargs="+")
     parser.add_argument("--start-repeat", type=int, default=1)
     parser.add_argument("--blocks", nargs="+", help="Optional case:repeat blocks, each including all comparison arms")
-    parser.add_argument("--comparison", choices=["ab", "abc", "diagnostic", "diagnostic_ast", "current", "rewrite"], default="ab")
+    parser.add_argument("--comparison", choices=["ab", "abc", "abcde", "diagnostic", "diagnostic_ast", "current", "rewrite"], default="ab")
     parser.add_argument("--legacy-baseline", type=Path, help="Frozen baseline file to compare against a rewrite")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
@@ -88,11 +106,21 @@ def main():
     config_path = (suite_path.parent / suite["projectConfig"]).resolve()
     try:
         from business_code_agent.evaluation.runner import baseline_documents, resolve_project_sources
-        _, _, baseline_root, _ = resolve_project_sources(config_path)
+        manager, _, baseline_root, _ = resolve_project_sources(config_path)
         if not baseline_root.is_dir():
             parser.error("业务基线目录不存在")
         documents = baseline_documents(baseline_root)
-        arms, variants, arm_descriptions = _comparison_setup(args, documents)
+        old_documents = None
+        code_map_documents = None
+        if args.comparison == "abcde":
+            knowledge = manager.config.get("knowledge") or {}
+            configured_old_root = knowledge.get("baselineRoot")
+            old_root = manager._resolve_material_path(configured_old_root) if configured_old_root else None
+            old_documents = baseline_documents(old_root) if old_root else {}
+            code_map_documents = baseline_documents(manager.code_map_root)
+        arms, variants, arm_descriptions = _comparison_setup(
+            args, documents, old_documents=old_documents, code_map_documents=code_map_documents,
+        )
         ast_version_id = None
         ast_generation_seconds = None
         if any(arm in ("ast", "overview_ast") for arm in arms) and variants is None:
