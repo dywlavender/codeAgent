@@ -146,8 +146,11 @@ class OfflineProjectSyncTest(unittest.TestCase):
             self.assertGreater(result["repositories"][0]["indexed"]["symbols"], 0)
             self.assertFalse((repository / ".git").exists())
             self.assertEqual(1, result["codeMap"]["repositories"])
+            self.assertEqual(1, result["codeMap"]["applications"])
             self.assertTrue((code_map / "project-index.md").is_file())
             self.assertTrue((code_map / "repositories" / "core.md").is_file())
+            self.assertTrue((code_map / "repositories.md").is_file())
+            self.assertTrue((code_map / "applications.md").is_file())
 
 
 if __name__ == "__main__":

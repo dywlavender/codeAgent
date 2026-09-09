@@ -282,6 +282,35 @@ class EvaluationServiceTest(unittest.TestCase):
         self.assertFalse((hybrid / "withdraw-flow.md").exists())
         self.assertIn("项目总览", (hybrid / "project-overview.md").read_text())
 
+    def test_abcde_batch_freezes_each_material_arm(self):
+        business_context = self.root / "knowledge" / "business-context"
+        code_map = self.root / "knowledge" / "generated-code-map"
+        business_context.mkdir(parents=True)
+        code_map.mkdir(parents=True)
+        (business_context / "boundaries.md").write_text("业务补充知识\n", encoding="utf-8")
+        (code_map / "project-index.md").write_text("自动代码地图\n", encoding="utf-8")
+        config = json.loads(self.config.read_text(encoding="utf-8"))
+        config["knowledge"].update({
+            "businessContextRoot": "knowledge/business-context",
+            "baselineRoot": "knowledge/baseline",
+            "codeMapRoot": "knowledge/generated-code-map",
+        })
+        self.config.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        self.service = self.make_service(ScriptedRuntime())
+        eval_id, state = self.start_and_wait(self.service, {"comparison": "abcde"})
+        self.assertEqual({"raw", "old_baseline", "code_map", "business_context", "code_map_context"},
+                         set(state["arms"]))
+        self.assertEqual(10, state["progress"]["answers"]["completed"])
+        batch = self.service.root / eval_id
+        self.assertTrue((batch / "inputs/baselines/old_baseline/project-overview.md").is_file())
+        self.assertTrue((batch / "inputs/baselines/code_map/project-index.md").is_file())
+        self.assertTrue((batch / "inputs/baselines/business_context/boundaries.md").is_file())
+        self.assertTrue((batch / "inputs/baselines/code_map_context/business-context/boundaries.md").is_file())
+        self.assertTrue((batch / "inputs/baselines/code_map_context/generated-code-map/project-index.md").is_file())
+        summary = state["summaries"]["model"]
+        self.assertEqual(2, summary["qualityBlocks"])
+        self.assertEqual(8, len(summary["pairs"]))
+
     def test_diagnostic_batch_freezes_only_overview_and_preserves_requirements(self):
         self.service = self.make_service(ScriptedRuntime())
         eval_id, state = self.start_and_wait(self.service, {"comparison": "diagnostic"})

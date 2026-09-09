@@ -34,9 +34,18 @@ ARM_DESCRIPTIONS_AB = {
 AST_ARM_DESCRIPTION = "同一资料 + AST 代码解析结构地图（tree-sitter 机械生成，无业务解释）"
 ARMS_ABC = ("code_only", "optional", "ast")
 ARM_DESCRIPTIONS_ABC = {**ARM_DESCRIPTIONS_AB, "ast": AST_ARM_DESCRIPTION}
+ARMS_ABCDE = ("raw", "old_baseline", "code_map", "business_context", "code_map_context")
+ARM_DESCRIPTIONS_ABCDE = {
+    "raw": "A：源码、README、需求原文",
+    "old_baseline": "B：A + 历史完整 baseline（仅历史对照）",
+    "code_map": "C：A + 自动 Code Map（结构导航）",
+    "business_context": "D：A + 分类后的 Business Context",
+    "code_map_context": "E：A + Code Map + Business Context",
+}
 ARMS_DIAGNOSTIC = ("code_only", "overview", "optional")
 ARM_DESCRIPTIONS_DIAGNOSTIC = {**ARM_DESCRIPTIONS_AB, "overview": "同一资料 + 仅项目总览（不提供流程主干）"}
 COMPARISONS = {"ab": ARM_DESCRIPTIONS_AB, "abc": ARM_DESCRIPTIONS_ABC,
+               "abcde": ARM_DESCRIPTIONS_ABCDE,
                "diagnostic": {arm: ARM_DESCRIPTIONS_DIAGNOSTIC[arm] for arm in ARMS_DIAGNOSTIC}}
 COMPARISONS["diagnostic_ast"] = {**COMPARISONS["diagnostic"], "ast": AST_ARM_DESCRIPTION,
     "overview_ast": "同一资料 + 相同业务总览 + AST结构地图（不提供人工流程文档）"}
@@ -45,6 +54,7 @@ COMPARISON_NOTES = {
     "diagnostic": "无主干、仅总览、完整主干；分别比较定位收益与流程文档的额外收益。",
     "ab": "结构化图谱不参与该对照；结果只反映文档主干的整体接入效果。",
     "abc": "三臂对照：文档主干与 AST 代码解析地图分别与无主干组对比；结构化图谱不参与。",
+    "abcde": "五组资料对照：A 原始资料、B 历史完整主干、C 自动 Code Map、D Business Context、E 两者组合。五组使用相同冻结源码、需求、题库和评分要点。",
 }
 
 
@@ -102,7 +112,7 @@ def baseline_documents(baseline_root):
 
 def _arm_documents(arm, documents, inputs, ast_documents=None):
     """Per-arm reference documents: none, the human baseline, or the AST map."""
-    if arm == "code_only":
+    if arm in {"code_only", "raw"}:
         return {}
     if arm == "overview":
         if not documents.get("project-overview.md", "").strip():
@@ -443,7 +453,11 @@ def summarize_pairs(results, cases, arms, *, source="model", reviews=None):
                 if treatment_seconds is not None and control_seconds is not None else None,
             })
 
-    if "code_only" in arm_list:
+    if "raw" in arm_list:
+        for arm in arm_list:
+            if arm != "raw":
+                append_pairs("raw", arm)
+    elif "code_only" in arm_list:
         for arm in arm_list:
             if arm != "code_only":
                 append_pairs("code_only", arm)

@@ -67,16 +67,21 @@ def generate_report(output, manual_path=None):
                      f"{str(earned) + '/' + str(total) if scores else '待评'} | {issues if scores else '待评'} |")
     lines += ["", "## 每题配对", "", "| 题目 / 轮次 / 类型 | 对比组 | 分数差 | 问题数差 | 工具次数差 | 秒数差 |",
               "| --- | --- | ---: | ---: | ---: | ---: |"]
+    control_arm = "raw" if "raw" in arms else "code_only"
     pairs = []
-    for block in complete:
-        control = indexed[(*block, "code_only")]
-        a = reviewed(control, cases, manual)
-        for arm in arms:
-            if arm == "code_only":
-                continue
+    for arm in arms:
+        if arm == control_arm:
+            continue
+        pair_blocks = [block for block in blocks
+                       if indexed.get((*block, control_arm), {}).get("status") == "completed"
+                       and indexed.get((*block, arm), {}).get("status") == "completed"]
+        for block in pair_blocks:
+            control = indexed[(*block, control_arm)]
             treatment = indexed[(*block, arm)]
+            a = reviewed(control, cases, manual)
             b = reviewed(treatment, cases, manual)
             pair = {"questionId": block[0], "repeat": block[1], "arm": arm,
+                    "controlArm": control_arm,
                     "category": cases[block[0]].get("category", "未分类"),
                     "scoreDelta": b[0] - a[0] if a and b else None,
                     "issuesDelta": b[2] - a[2] if a and b else None,
@@ -88,12 +93,12 @@ def generate_report(output, manual_path=None):
                          f"{pair['toolDelta']} | {pair['secondsDelta']} |")
     methods = sorted({reviewed(indexed[(*b, arm)], cases, manual)[3] for b in eligible for arm in arms})
     lines += ["", "本报告质量评分来源：" + ("、".join(methods) if methods else "待评") + "。"]
-    lines += ["", "差值 = 有主干组减无主干组；分数增加较好，错误和成本减少较好。", "", "## 结论边界", "",
+    lines += ["", f"差值 = 各对照组减 {control_arm} 组；分数增加较好，错误和成本减少较好。", "", "## 结论边界", "",
               "若有未评分或失败配对，本轮验证不完整。得分、额外错误与成本必须共同查看；报告不把少调用或读取过主干判为有效。",
               "自动评分是同一模型服务的新会话初评；不主动提供待评答案的组名和检索轨迹，但答案本身可能透露来源，不能视为严格盲评。",
               "各组评分者均可读取同一份冻结源码、需求及所有版本业务文档，以核查引用。它可能误判；人工复核评分依据后可用 --reviews 重生成报告。评分成本不计入答题耗时和工具数。",
               "未自动判定“无关检索”及“首次正确定位”：工具调用总数不能替代这两个指标。轨迹保留供复核。",
-              "本流程比较文档主干的整体接入效果，不验证数据库知识图谱的独立收益。", "", "## 答案与评分", ""]
+              "本流程比较配置的资料组合效果；自动 Code Map 与 Business Context 的贡献分别解释，不把资料被读取本身当作收益。", "", "## 答案与评分", ""]
     review_template = {}
     for r in results:
         lines.append(f"- {r['id']}：{r.get('status')}；[答案](runs/{r['id']}/answer.md)，"
@@ -157,11 +162,12 @@ def build_view_report(*, protocol, results, cases, source, reviews=None, notes=N
         lines.append(f"| {pair['questionId']} / {pair['repeat']} / {pair['category']} | {pair['arm']} | "
                      f"{pair['scoreDelta'] if pair['scored'] else '待评'} | "
                      f"{pair['issuesDelta'] if pair['scored'] else '待评'} | {pair['toolDelta']} | {pair['secondsDelta']} |")
+    control_arm = "raw" if "raw" in arms else "code_only"
     lines += ["", "## 结论边界", "",
-              "差值 = 有主干组减无主干组；分数增加较好，错误和成本减少较好。单轮或小样本不构成稳定结论。",
+              f"差值 = 各对照组减 {control_arm} 组；分数增加较好，错误和成本减少较好。单轮或小样本不构成稳定结论。",
               "模型初评是同一模型服务的新会话评分，存在漏判与引文改写，需人工复核后才能作为验收依据。",
               "未自动判定“无关检索”及“首次正确定位”；工具调用总数不能替代这两个指标。",
-              "本流程比较文档主干的整体接入效果，不验证数据库知识图谱的独立收益。"]
+              "本流程比较配置的资料组合效果；自动 Code Map 与 Business Context 的贡献分别解释，不把资料被读取本身当作收益。"]
     diagnosis = diagnosis_summaries(results, cases, arms, source=source, reviews=reviews)
     lines.append(diagnosis_markdown(diagnosis))
     summary["diagnosis"] = diagnosis

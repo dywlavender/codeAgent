@@ -228,14 +228,15 @@ class WorkspaceManager:
             code_map_source = self.code_map_root if mode not in {"none", "backbone", "ast"} else None
         elif code_map_source is not None:
             code_map_source = Path(code_map_source).expanduser().resolve()
-        if mode == "none":
+        if mode in {"none", "raw"}:
             code_map_source = None
             business_context_source = None
-        elif mode == "backbone":
+        elif mode in {"backbone", "business_context", "old_baseline"}:
             code_map_source = None
-        elif mode == "ast" and (not code_map_source or not code_map_source.is_dir()):
-            raise WorkspaceError("AST 资料目录不可用，请先手动生成 AST")
-        if mode == "ast":
+        elif mode in {"ast", "code_map", "code_map_context"} and (not code_map_source or not code_map_source.is_dir()):
+            message = "AST 资料目录不可用，请先手动生成 AST" if mode == "ast" else "自动代码地图不可用，请先完成源码同步和索引"
+            raise WorkspaceError(message)
+        if mode in {"ast", "code_map"}:
             business_context_source = None
         requirements_source = self.requirements_root or self._configured_path(
             self.config.get("requirementsRoot")
@@ -447,6 +448,11 @@ class WorkspaceManager:
             "none": "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务补充知识或自动代码地图。",
             "backbone": "当前模式：有主干。提供项目特有的业务补充知识，按问题需要读取；源码仍是当前实现依据。",
             "ast": "当前模式：AST。仅提供用户手动生成的结构资料和代码索引，不提供人工业务补充知识；结构条目只用于定位，行为仍须读取源码。",
+            "raw": "评测 A：原始项目资料。只提供源码、README 和需求原文，不提供业务补充知识或自动代码地图。",
+            "old_baseline": "评测 B：历史完整主干。只用于历史对照；当前实现仍以源码核实。",
+            "code_map": "评测 C：自动代码地图。只提供结构导航，不提供人工业务补充知识；行为仍须读取源码。",
+            "business_context": "评测 D：业务补充知识。只提供经过分类的项目特有语义，不提供自动代码地图；行为仍须读取源码。",
+            "code_map_context": "评测 E：自动代码地图 + 业务补充知识。两类资料均按需读取，结构和语义资料都不是实现证据。",
         }.get(mode or "", "")
         return f"""# CodeAgent
 

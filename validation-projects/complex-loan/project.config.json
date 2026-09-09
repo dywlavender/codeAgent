@@ -12,7 +12,9 @@
   "repositoryRoot": ".data/repositories",
 
   "knowledge": {
-    "baselineRoot": "knowledge/baseline"
+    "businessContextRoot": "knowledge/business-context",
+    "baselineRoot": "knowledge/baseline",
+    "codeMapRoot": ".data/knowledge/generated-code-map"
   },
 
   "requirementsRoot": "requirements",

@@ -24,8 +24,9 @@ from .harness import EvaluationRuntime, write_json
 from .ast_service import AstService
 from .case_import import import_upload
 from .report import build_view_report, generate_report
-from .runner import (ARM_DESCRIPTIONS_ABC, ARMS_ABC, COMPARISONS, freeze_batch, load_protocol, rejudge_output,
-                     run_batch, summarize_pairs, validate_suite, resolve_project_sources)
+from .runner import (ARM_DESCRIPTIONS_ABC, ARM_DESCRIPTIONS_ABCDE, ARMS_ABC, ARMS_ABCDE, COMPARISONS,
+                     freeze_batch, load_protocol, rejudge_output, run_batch, summarize_pairs,
+                     validate_suite, resolve_project_sources)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class EvaluationError(ValueError):
 class EvaluationService:
     def __init__(self, *, project_config=None, data_root=None, ast_data_root=None,
                  business_context_root=None, code_map_root=None, baseline_root=None,
+                 legacy_baseline_root=None,
                  requirements_root=None, runtime_factory=None,
                  timeout_seconds=240, workers=2, command="claude"):
         self.project_config = Path(project_config).expanduser().resolve() if project_config else None
@@ -75,6 +77,7 @@ class EvaluationService:
         # Historical field retained because persisted protocols and old callers
         # still call this material "baseline".
         self.baseline_root = self.business_context_root
+        self.legacy_baseline_root = Path(legacy_baseline_root).expanduser().resolve() if legacy_baseline_root else None
         self.code_map_root = Path(code_map_root).expanduser().resolve() if code_map_root else None
         self.requirements_root = Path(requirements_root).expanduser().resolve() if requirements_root else None
         if data_root:
@@ -110,6 +113,17 @@ class EvaluationService:
             return project_id, project_name
         except (OSError, ValueError):
             return None, None
+
+    def _legacy_baseline_for(self, manager):
+        """Resolve the preserved full baseline without replacing new context."""
+        if self.legacy_baseline_root is not None:
+            return self.legacy_baseline_root
+        configured = (manager.config.get("knowledge") or {}).get("baselineRoot")
+        if configured:
+            return manager._resolve_material_path(configured)
+        if not manager._new_material_layout:
+            return manager.business_context_root
+        return None
 
     # ------------------------------------------------------------------ index
 
@@ -394,6 +408,7 @@ class EvaluationService:
         repositories = []
         requirements = {"root": None, "readable": False}
         code_map = {"root": None, "readable": False, "documents": []}
+        old_baseline = {"root": None, "readable": False, "documents": []}
         baseline = {"root": None, "readable": False, "documents": [], "hasOverview": False}
         try:
             from .runner import resolve_project_sources
@@ -425,9 +440,19 @@ class EvaluationService:
                         # new runtime context uses the short project index.
                         "hasOverview": any(doc["name"] == "project-overview.md" for doc in documents),
                         "hasIndex": any(doc["name"] == "project-index.md" for doc in documents)}
+            legacy_root = self._legacy_baseline_for(manager)
+            legacy_documents = []
+            if legacy_root and legacy_root.is_dir():
+                legacy_documents = [{"name": str(path.relative_to(legacy_root)),
+                                     "bytes": path.stat().st_size}
+                                    for path in sorted(legacy_root.rglob("*.md"))]
+            old_baseline = {"root": str(legacy_root) if legacy_root else None,
+                            "readable": bool(legacy_root and legacy_root.is_dir()),
+                            "documents": legacy_documents}
         except Exception as exc:
             logger.warning("评测就绪检查失败: %s", exc)
             baseline["error"] = str(exc)
+            old_baseline["error"] = str(exc)
         cli_version = None
         available = bool(shutil.which(self.command))
         if available:
@@ -436,6 +461,7 @@ class EvaluationService:
             except (OSError, subprocess.SubprocessError):
                 available = False
         return {"repositories": repositories, "requirements": requirements, "codeMap": code_map,
+                "oldBaseline": old_baseline,
                 "baseline": baseline, "businessContext": baseline,
                 "cli": {"command": self.command, "available": available, "version": cli_version}}
 
@@ -457,6 +483,7 @@ class EvaluationService:
             "lastUsedSuiteId": suites["lastUsedSuiteId"],
             "baseline": baseline,
             "businessContext": baseline,
+            "oldBaseline": readiness["oldBaseline"],
             "ast": self.ast_service.status(),
             "repositories": readiness["repositories"],
             "requirements": readiness["requirements"],
@@ -465,6 +492,7 @@ class EvaluationService:
             "runtime": {"source": "本地 Claude Code 当前模型设置；实际响应模型名称记录在批次报告中",
                         "timeoutSeconds": self.timeout_seconds, "workers": self.workers,
                         "comparison": {"arms": list(ARMS_ABC), "descriptions": ARM_DESCRIPTIONS_ABC},
+                        "fiveArmComparison": {"arms": list(ARMS_ABCDE), "descriptions": ARM_DESCRIPTIONS_ABCDE},
                         "comparisons": COMPARISONS},
             "activeEvaluationId": active,
         }
@@ -529,9 +557,14 @@ class EvaluationService:
             if not readiness["repositories"] or any(not repo["readable"] for repo in readiness["repositories"]):
                 raise EvaluationError("项目源码仓库不可读，请检查项目配置与仓库同步。")
             if not readiness["baseline"]["readable"]:
-                raise EvaluationError("业务基线目录不可读，知识主干资料缺失，无法开始对照。")
+                raise EvaluationError("业务补充知识目录不可读，D/E 组缺少可用资料。")
             if not readiness["baseline"]["documents"]:
-                raise EvaluationError("业务基线目录没有任何 Markdown 文档，有主干组将没有可对照的知识。")
+                raise EvaluationError("业务补充知识目录没有任何 Markdown 文档，无法开始对照。")
+            if comparison == "abcde":
+                if not readiness["oldBaseline"]["readable"] or not readiness["oldBaseline"]["documents"]:
+                    raise EvaluationError("五组对照需要保留可读的历史 baseline 资料作为 B 组。")
+                if not readiness["codeMap"]["readable"] or not readiness["codeMap"]["documents"]:
+                    raise EvaluationError("五组对照需要先完成源码同步和索引，生成可读的自动 Code Map。")
             ast_status = self.ast_service.status()
             requested_ast_id = str(payload.get("astVersionId") or "").strip() or None
             ast_current = self.ast_service.version(requested_ast_id) if requested_ast_id else self.ast_service.current_version()
@@ -543,7 +576,29 @@ class EvaluationService:
                 for path in ast_current[2].rglob("*.md")
             } if ast_current else None
             variants = None
-            if ast_documents is not None and "ast" in arm_descriptions:
+            if comparison == "abcde":
+                from .runner import baseline_documents
+                manager, _, business_root, _ = resolve_project_sources(
+                    self.project_config,
+                    business_context_root=self.business_context_root,
+                    code_map_root=self.code_map_root,
+                    requirements_root=self.requirements_root,
+                )
+                old_root = self._legacy_baseline_for(manager)
+                business_docs = baseline_documents(business_root)
+                old_docs = baseline_documents(old_root) if old_root else {}
+                code_map_docs = baseline_documents(manager.code_map_root)
+                variants = {
+                    "raw": {},
+                    "old_baseline": old_docs,
+                    "code_map": code_map_docs,
+                    "business_context": business_docs,
+                    "code_map_context": {
+                        **{f"business-context/{key}": value for key, value in business_docs.items()},
+                        **{f"generated-code-map/{key}": value for key, value in code_map_docs.items()},
+                    },
+                }
+            elif ast_documents is not None and "ast" in arm_descriptions:
                 from .runner import baseline_documents
                 _, _, baseline_root, _ = resolve_project_sources(
                     self.project_config,
@@ -613,6 +668,9 @@ class EvaluationService:
                              "timeoutSeconds": self.timeout_seconds, "comparison": comparison,
                              "sourceRepoCount": len(frozen["protocol"].get("sourceRepositories", [])),
                              "baselineDocCount": len(frozen.get("baselineDocuments", {})),
+                             "oldBaselineDocCount": len((variants or {}).get("old_baseline", {})),
+                             "codeMapDocCount": len((variants or {}).get("code_map", {})),
+                             "businessContextDocCount": len((variants or {}).get("business_context", {})),
                              "astVersionId": ast_version_id,
                              "astStatus": ast_status.get("status") if ast_version_id else None,
                              "retryOf": payload.get("retryOf"),

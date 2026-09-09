@@ -184,12 +184,17 @@ def _is_material_path(value):
 
 def reference_usage(trace, baseline, command):
     """Observable delivery/use only; never equates access with effectiveness."""
-    baseline = Path(baseline)
-    structural_root = baseline.name == "generated-code-map"
-    overview = baseline / "project-overview.md"
-    index = baseline / "project-index.md"
-    content = overview.read_text().strip() if overview.is_file() else ""
-    index_content = index.read_text().strip() if index.is_file() else ""
+    roots = [Path(value) for value in baseline] if isinstance(baseline, (list, tuple, set)) else [Path(baseline)]
+    roots = [value for value in roots if value]
+    structural_roots = {value.name for value in roots if value.name == "generated-code-map"}
+    injected_content = []
+    for root in roots:
+        overview = root / "project-overview.md"
+        index = root / "project-index.md"
+        if overview.is_file():
+            injected_content.append(("overview", overview.read_text().strip()))
+        if index.is_file():
+            injected_content.append(("index", index.read_text().strip()))
     ast_calls = 0
     accessed = set()
     for tool in trace:
@@ -198,18 +203,32 @@ def reference_usage(trace, baseline, command):
         args = tool.get("input", {})
         path = args.get("file_path") or args.get("path") or ""
         try:
-            relative = Path(path).resolve().relative_to(baseline.resolve()).as_posix()
+            resolved = Path(path).resolve()
+            matched_root = next((root for root in roots if _is_relative_to(resolved, root.resolve())), None)
+            if matched_root is None:
+                continue
+            relative = resolved.relative_to(matched_root.resolve()).as_posix()
         except ValueError:
             continue
         if not baseline_content_calls([tool]):
             continue
-        accessed.add(relative)
-        if structural_root or relative == "ast-overview.md" or relative == "ast" or relative.startswith("ast/"):
+        accessed.add(f"{matched_root.name}/{relative}" if len(roots) > 1 else relative)
+        if matched_root.name in structural_roots or relative == "ast-overview.md" or relative == "ast" or relative.startswith("ast/"):
             ast_calls += 1
     command_text = "\n".join(command)
-    return {"overviewInjected": bool(content and content in command_text),
-            "projectIndexInjected": bool(index_content and index_content in command_text),
+    return {"overviewInjected": any(kind == "overview" and content and content in command_text
+                                      for kind, content in injected_content),
+            "projectIndexInjected": any(kind == "index" and content and content in command_text
+                                         for kind, content in injected_content),
             "astContentCalls": ast_calls, "referencePathsAccessed": sorted(accessed)}
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def run_answer_job(job, *, output, inputs, repository_names, judge_enabled, runtime_factory,
@@ -243,21 +262,43 @@ def run_answer_job(job, *, output, inputs, repository_names, judge_enabled, runt
         if (inputs / "requirements").is_dir():
             shutil.copytree(inputs / "requirements", base / "requirements")
         baseline_dir = inputs / "baselines" / arm
-        current_mode = {"code_only": "none", "optional": "backbone", "ast": "ast"}.get(arm)
-        if current_mode == "backbone" and baseline_dir.is_dir():
+        current_mode = {
+            "code_only": "none", "optional": "backbone", "ast": "ast",
+            "raw": "raw", "old_baseline": "old_baseline", "code_map": "code_map",
+            "business_context": "business_context", "code_map_context": "code_map_context",
+        }.get(arm)
+        if current_mode in {"backbone", "business_context"} and baseline_dir.is_dir():
             shutil.copytree(baseline_dir, base / "business-context")
-        elif current_mode == "ast" and baseline_dir.is_dir():
+        elif current_mode in {"ast", "code_map"} and baseline_dir.is_dir():
             shutil.copytree(baseline_dir, base / "generated-code-map")
+        elif current_mode == "code_map_context" and baseline_dir.is_dir():
+            context_source = baseline_dir / "business-context"
+            code_map_source = baseline_dir / "generated-code-map"
+            if context_source.is_dir():
+                shutil.copytree(context_source, base / "business-context")
+            if code_map_source.is_dir():
+                shutil.copytree(code_map_source, base / "generated-code-map")
+        elif current_mode == "old_baseline" and baseline_dir.is_dir():
+            shutil.copytree(baseline_dir, base / "baseline")
         elif current_mode is None and baseline_dir.is_dir():
             shutil.copytree(baseline_dir, base / "baseline")
         config = base / "project.json"
-        knowledge = ({"businessContextRoot": "business-context", "codeMapRoot": "generated-code-map"}
-                     if current_mode is not None else {"baselineRoot": "baseline"})
+        if current_mode in {"backbone", "business_context"}:
+            knowledge = {"businessContextRoot": "business-context"}
+        elif current_mode in {"ast", "code_map"}:
+            knowledge = {"codeMapRoot": "generated-code-map"}
+        elif current_mode == "code_map_context":
+            knowledge = {"businessContextRoot": "business-context", "codeMapRoot": "generated-code-map"}
+        elif current_mode == "raw":
+            knowledge = {}
+        else:
+            knowledge = {"baselineRoot": "baseline"}
         write_json(config, {"project": {"id": "evaluation", "name": "知识主干评测"},
                             "repositories": repositories, "knowledge": knowledge})
         workspace = WorkspaceManager(project_config=config).ensure(
             mode=current_mode,
-            code_map_source=base / "generated-code-map" if current_mode == "ast" else None,
+            code_map_source=base / "generated-code-map"
+            if current_mode in {"ast", "code_map", "code_map_context"} else None,
         )
         run_dir = output / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -298,9 +339,15 @@ def run_answer_job(job, *, output, inputs, repository_names, judge_enabled, runt
         value["toolErrors"] = tool_errors
         value["baselineReadCalls"] = baseline_read_calls(trace)
         value["baselineContentCalls"] = baseline_content_calls(trace)
-        material_root = (base / "business-context" if current_mode == "backbone"
-                         else base / "generated-code-map" if current_mode == "ast"
-                         else base / "baseline")
+        material_root = ([base / "business-context", base / "generated-code-map"]
+                         if current_mode == "code_map_context"
+                         else base / "business-context"
+                         if current_mode in {"backbone", "business_context"}
+                         else base / "generated-code-map"
+                         if current_mode in {"ast", "code_map"}
+                         else base / "baseline"
+                         if current_mode in {"old_baseline", None}
+                         else [])
         value["referenceUsage"] = reference_usage(trace, material_root, command)
         if judge_enabled and value.get("status") == "completed" and not (cancel_check and cancel_check()):
             judge_workspace = judge_workspace_for(base, repositories, inputs)

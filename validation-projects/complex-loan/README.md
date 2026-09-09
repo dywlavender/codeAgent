@@ -9,7 +9,8 @@ project.config.json      平台项目配置（complex-loan-validation，端口 8
 VERSIONS.md              源码版本固定记录
 repos/                   固定版本源码快照（gitignore，按 VERSIONS.md 重新检出）
 requirements/            双方答题组均可读的项目说明（V0 原生范围）
-knowledge/baseline/      知识主干（V0 原生范围：总览＋贷款申请＋还款处理）
+knowledge/business-context/  经过分类压缩的业务补充知识（D/E 组）
+knowledge/baseline/      历史完整主干（B 组保留，不再作为默认资料）
 evaluations/             评测题库（complex-loan.json，5 道原生题）
 docs/                    设计与核查文档
 .data/                   本项目独立的数据库、工作区与评测记录（gitignore）
@@ -45,7 +46,7 @@ docs/                    设计与核查文档
 
 ## 约定
 
-- 需求、主干、题库三类资料严格分开（对照评测的资料边界见根目录 AGENTS.md 与 knowledge-backbone-direction.md）。
+- 需求、业务补充知识、历史主干和题库严格分开（对照评测的资料边界见根目录 AGENTS.md 与 knowledge-backbone-direction.md）。
 - 文档描述现状；计划中的能力必须标注为计划，不得写入主干当作已实现。
 - 升级 Fineract/Mifos 版本时，先重跑 `docs/源码核查报告.md` 中带行号的证据核对，再同步更新主干与题库。
 

@@ -130,6 +130,26 @@ class ThreeModeFlowTest(unittest.TestCase):
         self.assertEqual(0, len([item for item in summary["pairs"]
                                  if item["controlArm"] == "code_only" and item["arm"] == "ast"]))
 
+    def test_five_arm_pairs_use_raw_control_independently(self):
+        cases = {"case-1": {"id": "case-1", "checks": ["结论正确"]}}
+
+        def result(arm, status):
+            value = {"id": f"case-1-r1-{arm}", "questionId": "case-1", "repeat": 1,
+                     "arm": arm, "status": status, "elapsedSeconds": 1, "toolCalls": 1}
+            if status == "completed":
+                value.update({"answer": "候选答案", "review": {
+                    "status": "completed", "checks": [{"met": True, "reason": "正确", "evidence": "src/Main.java:1"}],
+                    "issues": [],
+                }})
+            return value
+
+        arms = ["raw", "old_baseline", "code_map", "business_context", "code_map_context"]
+        rows = [result(arm, "failed" if arm == "code_map_context" else "completed") for arm in arms]
+        summary = summarize_pairs(rows, cases, arms)
+        self.assertEqual(3, len([item for item in summary["pairs"]
+                                if item["controlArm"] == "raw" and item["arm"] in arms[1:4]]))
+        self.assertEqual(0, len([item for item in summary["pairs"] if item["arm"] == "code_map_context"]))
+
 
 if __name__ == "__main__":
     unittest.main()

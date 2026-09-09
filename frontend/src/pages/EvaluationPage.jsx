@@ -13,9 +13,13 @@ import { request } from "../lib/api.js";
 import { formatRelative } from "../lib/format.js";
 
 const ARMS = ["code_only", "optional", "ast"];
-const ARM_ORDER = ["code_only", "optional", "ast", "overview", "overview_ast", "preloaded", "legacy", "revised"];
+const FIVE_ARMS = ["raw", "old_baseline", "code_map", "business_context", "code_map_context"];
+const ARM_ORDER = ["raw", "old_baseline", "code_map", "business_context", "code_map_context",
+  "code_only", "optional", "ast", "overview", "overview_ast", "preloaded", "legacy", "revised"];
 const ARM_LABEL = {
   code_only: "无主干", optional: "有主干", ast: "AST", overview: "仅总览", overview_ast: "总览 + AST",
+  raw: "A 原始资料", old_baseline: "B 历史完整主干", code_map: "C Code Map",
+  business_context: "D Business Context", code_map_context: "E 组合资料",
   preloaded: "预加载主干", legacy: "旧版主干", revised: "新版主干",
 };
 
@@ -104,23 +108,42 @@ function ExperimentSetup({ setup, onStart, starting, error, onGoAst, onGoCases }
   const [repeats, setRepeats] = useState(1);
   const [selectedIds, setSelectedIds] = useState(null);
   const [judge, setJudge] = useState(true);
+  const [comparison, setComparison] = useState(
+    setup?.oldBaseline?.readable && setup?.oldBaseline?.documents?.length
+      && setup?.codeMap?.readable && setup?.codeMap?.documents?.length ? "abcde" : "abc",
+  );
+  const comparisonOptions = [
+    { value: "abcde", label: "五组资料对照（A–E）" },
+    { value: "abc", label: "三模式对照（无主干／有主干／AST）" },
+  ];
   const suite = suites.find((item) => item.id === suiteId);
   const cases = (suite?.cases || []).filter((item) => !item.disabled);
   const selected = selectedIds ? cases.filter((item) => selectedIds.includes(item.id)) : cases;
   const missingRubricCases = selected.filter((item) => !item.checks?.length);
+  const fiveArm = comparison === "abcde";
+  const arms = fiveArm ? FIVE_ARMS : ARMS;
   const astReady = setup?.ast?.status === "available";
+  const businessReady = Boolean(setup?.businessContext?.readable ?? setup?.baseline?.readable);
+  const oldBaselineReady = Boolean(setup?.oldBaseline?.readable && setup?.oldBaseline?.documents?.length);
+  const codeMapReady = Boolean(setup?.codeMap?.readable && setup?.codeMap?.documents?.length);
   useEffect(() => {
     const next = setup?.lastUsedSuiteId || suites[0]?.id || null;
     setSuiteId(next);
     setSelectedIds(null);
   }, [setup?.lastUsedSuiteId, suites.length]); // eslint-disable-line
-  const total = selected.length * 3 * repeats;
-  const ready = Boolean(suiteId && selected.length && setup?.cli?.available && setup?.baseline?.readable && astReady
+  useEffect(() => {
+    if (comparison === "abcde" && (!setup?.oldBaseline?.readable || !setup?.oldBaseline?.documents?.length
+      || !setup?.codeMap?.readable || !setup?.codeMap?.documents?.length)) setComparison("abc");
+  }, [setup?.oldBaseline?.readable, setup?.oldBaseline?.documents?.length,
+    setup?.codeMap?.readable, setup?.codeMap?.documents?.length]); // eslint-disable-line
+  const total = selected.length * arms.length * repeats;
+  const ready = Boolean(suiteId && selected.length && setup?.cli?.available && businessReady
+    && (fiveArm ? oldBaselineReady && codeMapReady : astReady)
     && (!judge || !missingRubricCases.length));
   return (
     <div className="experiment-setup">
       <div className="page-heading compact-heading">
-        <div><span className="page-kicker">对比实验</span><h1>一键运行三组实验</h1><p>同一批问题、源码和知识资料版本，分别使用无主干、有主干、AST 模式回答。</p></div>
+        <div><span className="page-kicker">对比实验</span><h1>{fiveArm ? "一键运行五组资料对照" : "一键运行三组实验"}</h1><p>{fiveArm ? "同一批问题、源码和需求，分别比较原始资料、历史主干、Code Map、Business Context 及组合资料。" : "同一批问题、源码和知识资料版本，分别使用无主干、有主干、AST 模式回答。"}</p></div>
       </div>
       {error && <Alert type="error" showIcon message={error} />}
       <Card className="panel-card launch-card">
@@ -128,11 +151,12 @@ function ExperimentSetup({ setup, onStart, starting, error, onGoAst, onGoCases }
           <label><span>题库</span><Select value={suiteId} placeholder="选择题库" onChange={(value) => { setSuiteId(value); setSelectedIds(null); }} options={suites.map((item) => ({ value: item.id, label: `${item.name} · ${item.caseCount} 题` }))} /></label>
           <label><span>执行范围</span><Select mode="multiple" value={selectedIds ?? cases.map((item) => item.id)} placeholder="全部启用案例" maxTagCount="responsive" onChange={(values) => setSelectedIds(values.length === cases.length ? null : values)} options={cases.map((item) => ({ value: item.id, label: `${item.id} · ${CATEGORY_LABEL[item.category] || item.category || "未分类"}` }))} /></label>
           <label><span>重复次数</span><Segmented value={repeats} onChange={setRepeats} options={[{ value: 1, label: "1 次" }, { value: 2, label: "2 次" }, { value: 3, label: "3 次" }]} /></label>
+          <label><span>资料对照</span><Select value={comparison} onChange={setComparison} options={comparisonOptions} /></label>
         </div>
-        <div className="launch-mode-row"><span className="field-title">实验模式</span>{ARMS.map((arm) => <div className="mode-pill fixed" key={arm}><Check size={14} weight="bold" /> {ARM_LABEL[arm]}<small>{arm === "code_only" ? "源码、README、需求" : arm === "optional" ? "＋业务补充知识" : "＋结构总览与 AST 索引"}</small></div>)}</div>
+        <div className="launch-mode-row"><span className="field-title">实验模式</span>{arms.map((arm) => <div className="mode-pill fixed" key={arm}><Check size={14} weight="bold" /> {ARM_LABEL[arm]}<small>{fiveArm ? ({ raw: "源码、README、需求", old_baseline: "＋历史完整 baseline", code_map: "＋自动结构导航", business_context: "＋分类业务资料", code_map_context: "＋结构导航与业务资料" }[arm]) : (arm === "code_only" ? "源码、README、需求" : arm === "optional" ? "＋业务补充知识" : "＋结构总览与 AST 索引")}</small></div>)}</div>
         {missingRubricCases.length > 0 && <Alert style={{ marginTop: 14 }} type="warning" showIcon message={`有 ${missingRubricCases.length} 个案例没有评分要点，不能直接启动自动初评。`} description={<Space wrap><span>{missingRubricCases.slice(0, 8).map((item) => item.id).join("、")}{missingRubricCases.length > 8 ? "…" : ""}</span><Button type="link" onClick={onGoCases}>前往测试案例补齐评分要点 <ArrowRight size={13} /></Button></Space>} />}
-        <div className="readiness-row"><div><span>资料状态</span><div className="readiness-items"><Tag color={setup?.businessContext?.readable ?? setup?.baseline?.readable ? "success" : "error"}>业务补充知识 {(setup?.businessContext?.readable ?? setup?.baseline?.readable) ? `${(setup?.businessContext || setup?.baseline).documents?.length || 0} 份` : "不可用"}</Tag><Tag color={astReady ? "success" : setup?.ast?.status === "stale" ? "warning" : "default"}>AST {astReady ? `${setup.ast.currentVersionId} · ${setup.ast.current?.generatedAt ? new Date(setup.ast.current.generatedAt).toLocaleString("zh-CN") : "可用"}` : setup?.ast?.status === "stale" ? "待更新" : "未生成"}</Tag></div></div>{!astReady && <Button type="link" onClick={onGoAst}>前往生成 AST <ArrowRight size={13} /></Button>}</div>
-        <div className="launch-foot"><div><Checkbox checked={judge} onChange={(event) => setJudge(event.target.checked)}>启用自动初评</Checkbox><span>{judge ? `预计 ${total} 次答题 + ${total} 次初评` : `仅答题：预计 ${total} 次答题；完成后可手动复核`}</span></div><Button type="primary" icon={<Play size={14} weight="fill" />} disabled={!ready} loading={starting} onClick={() => onStart({ suiteId, repeats, comparison: "abc", judge, caseIds: selectedIds || undefined, astVersionId: setup.ast.currentVersionId })}>{judge ? "开始三组对比" : "开始三组答题"}</Button></div>
+        <div className="readiness-row"><div><span>资料状态</span><div className="readiness-items"><Tag color={businessReady ? "success" : "error"}>Business Context {businessReady ? `${(setup?.businessContext || setup?.baseline).documents?.length || 0} 份` : "不可用"}</Tag>{fiveArm && <><Tag color={oldBaselineReady ? "success" : "error"}>历史 baseline {oldBaselineReady ? `${setup.oldBaseline.documents.length} 份` : "不可用"}</Tag><Tag color={codeMapReady ? "success" : "error"}>Code Map {codeMapReady ? `${setup.codeMap.documents.length} 份` : "不可用"}</Tag></>}{!fiveArm && <Tag color={astReady ? "success" : setup?.ast?.status === "stale" ? "warning" : "default"}>AST {astReady ? `${setup.ast.currentVersionId} · ${setup.ast.current?.generatedAt ? new Date(setup.ast.current.generatedAt).toLocaleString("zh-CN") : "可用"}` : setup?.ast?.status === "stale" ? "待更新" : "未生成"}</Tag>}</div></div>{!fiveArm && !astReady && <Button type="link" onClick={onGoAst}>前往生成 AST <ArrowRight size={13} /></Button>}</div>
+        <div className="launch-foot"><div><Checkbox checked={judge} onChange={(event) => setJudge(event.target.checked)}>启用自动初评</Checkbox><span>{judge ? `预计 ${total} 次答题 + ${total} 次初评` : `仅答题：预计 ${total} 次答题；完成后可手动复核`}</span></div><Button type="primary" icon={<Play size={14} weight="fill" />} disabled={!ready} loading={starting} onClick={() => onStart({ suiteId, repeats, comparison, judge, caseIds: selectedIds || undefined, ...(fiveArm ? {} : { astVersionId: setup.ast.currentVersionId }) })}>{judge ? `开始${fiveArm ? "五组" : "三组"}对比` : `开始${fiveArm ? "五组" : "三组"}答题`}</Button></div>
       </Card>
       {!suites.length && <Empty description="还没有测试案例，请先在“测试案例”导入题库" />}
       {!setup?.cli?.available && <Alert style={{ marginTop: 14 }} type="warning" showIcon message={`未找到 ${setup?.cli?.command || "claude"} 命令，当前无法执行实验。`} />}
@@ -183,8 +207,11 @@ function SummaryTable({ detail, source }) {
 
 function ComparisonConclusion({ detail, source, comparison }) {
   const summary = detail.summaries?.[source];
-  const control = comparison === "backboneAst" ? "optional" : "code_only";
-  const treatment = comparison === "ast" ? "ast" : comparison === "backboneAst" ? "ast" : "optional";
+  const named = {
+    backbone: ["code_only", "optional"], ast: ["code_only", "ast"], backboneAst: ["optional", "ast"],
+  };
+  const [control, treatment] = named[comparison] || (comparison.endsWith("VsRaw") ? ["raw", comparison.slice(0, -5)] : []);
+  if (!control || !treatment) return null;
   const pairs = (summary?.pairs || []).filter((item) => item.arm === treatment && (item.controlArm || "code_only") === control);
   const scored = pairs.filter((item) => item.scored);
   if (!summary || !pairs.length) return null;
@@ -256,6 +283,7 @@ function BatchView({ detail, onStop, onRejudge, onRetry, onExport, onNew, onRefr
     ...(arms.includes("optional") && arms.includes("code_only") ? [{ value: "backbone", label: "有主干 vs 无主干" }] : []),
     ...(arms.includes("ast") && arms.includes("code_only") ? [{ value: "ast", label: "AST vs 无主干" }] : []),
     ...(arms.includes("optional") && arms.includes("ast") ? [{ value: "backboneAst", label: "有主干 vs AST" }] : []),
+    ...(arms.includes("raw") ? arms.filter((arm) => arm !== "raw").map((arm) => ({ value: `${arm}VsRaw`, label: `${ARM_LABEL[arm] || arm} vs A 原始资料` })) : []),
   ];
   useEffect(() => { if (!comparisonOptions.some((item) => item.value === comparison)) setComparison("all"); }, [detail.id, arms.join("|")]); // eslint-disable-line
   useEffect(() => { if (detail.reviewCoverage?.reviewed) setSource("review"); }, [detail.reviewCoverage?.reviewed]);
@@ -331,7 +359,7 @@ function CaseLibrary({ setup, onChanged, onRequireUnlock }) {
 
 function History({ items, onOpen, onRerun, rerunning }) {
   if (!items.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有历史实验批次" />;
-  return <div className="history-list">{items.map((item) => { const summary = item.summaries?.review || item.summaries?.model; return <Card className="panel-card history-row" key={item.id}><div><b>{item.suite?.name || "未命名题库"}</b><p>{statusText(item.status)} · {formatRelative(item.createdAt)} · {item.questions || 0} 题 × {item.repeats || 1} 轮</p></div><div className="history-score">{summary?.qualityBlocks ? `有效配对 ${summary.qualityBlocks} · 无主干 ${summary.score?.code_only || "待评"} · 有主干 ${summary.score?.optional || "待评"} · AST ${summary.score?.ast || "待评"}` : "尚无有效评分"}</div><Space><Button type="link" onClick={() => onOpen(item)}>查看</Button><Button type="link" onClick={() => onRerun(item)} loading={rerunning === item.id}>重跑</Button></Space></Card>; })}</div>;
+  return <div className="history-list">{items.map((item) => { const summary = item.summaries?.review || item.summaries?.model; const scoreText = summary?.score ? Object.entries(summary.score).map(([arm, score]) => `${ARM_LABEL[arm] || arm} ${score || "待评"}`).join(" · ") : "尚无有效评分"; return <Card className="panel-card history-row" key={item.id}><div><b>{item.suite?.name || "未命名题库"}</b><p>{statusText(item.status)} · {formatRelative(item.createdAt)} · {item.questions || 0} 题 × {item.repeats || 1} 轮</p></div><div className="history-score">{summary?.qualityBlocks ? `有效配对 ${summary.qualityBlocks} · ${scoreText}` : "尚无有效评分"}</div><Space><Button type="link" onClick={() => onOpen(item)}>查看</Button><Button type="link" onClick={() => onRerun(item)} loading={rerunning === item.id}>重跑</Button></Space></Card>; })}</div>;
 }
 
 // ---------------------------------------------------------------- 页面
@@ -360,7 +388,7 @@ export function EvaluationPage({ projectId, onRequireUnlock }) {
   async function start(payload) { setStarting(true); setActionError(""); try { const result = await request("/api/evaluations", { method: "POST", body: JSON.stringify(payload) }); setCurrentId(result.evaluationId); setTab("experiment"); await loadItems(); } catch (reason) { setActionError(adminError(reason, onRequireUnlock)); } finally { setStarting(false); } }
   async function action(path) { setActionError(""); try { await request(path, { method: "POST", body: "{}" }); setDetail(await request(`/api/evaluations/${currentId}`)); } catch (reason) { setActionError(adminError(reason, onRequireUnlock)); } }
   async function retryFailed() { setActionError(""); try { const result = await request(`/api/evaluations/${currentId}/retry`, { method: "POST", body: "{}" }); setCurrentId(result.evaluationId); setDetail(null); setTab("experiment"); await loadItems(); } catch (reason) { setActionError(adminError(reason, onRequireUnlock)); } }
-  async function rerun(item) { setRerunning(item.id); try { await start({ suiteId: item.suite?.id, repeats: item.repeats || item.settings?.repeats || 1, judge: item.judge !== false, comparison: "abc", astVersionId: setup?.ast?.currentVersionId }); } finally { setRerunning(""); } }
+  async function rerun(item) { setRerunning(item.id); try { await start({ suiteId: item.suite?.id, repeats: item.repeats || item.settings?.repeats || 1, judge: item.judge !== false, comparison: item.settings?.comparison || "abcde", ...(item.settings?.astVersionId ? { astVersionId: item.settings.astVersionId } : {}) }); } finally { setRerunning(""); } }
   async function exportReport(source) { try { const value = await request(`/api/evaluations/${currentId}/report?source=${source}`); exportMarkdown(`${currentId}-${source}.md`, value.markdown); } catch (reason) { setActionError(adminError(reason, onRequireUnlock)); } }
   const refreshDetail = () => currentId ? request(`/api/evaluations/${currentId}`).then(setDetail).catch(() => {}) : null;
   return <div className="page-wrap eval-page">{error && <Alert type="error" showIcon message={error} />}{actionError && <Alert style={{ marginTop: 10 }} type="error" showIcon message={actionError} />}{setup && <Tabs className="workbench-tabs" activeKey={tab} onChange={setTab} items={[{ key: "experiment", label: "对比实验", children: detail ? <BatchView detail={{ ...detail, actionError }} onStop={() => action(`/api/evaluations/${currentId}/cancel`)} onRejudge={() => action(`/api/evaluations/${currentId}/rejudge`)} onRetry={retryFailed} onExport={exportReport} onNew={() => { setCurrentId(null); setDetail(null); setActionError(""); }} onRefresh={refreshDetail} onRequireUnlock={onRequireUnlock} /> : <ExperimentSetup setup={setup} onStart={start} starting={starting} error={actionError} onGoAst={() => { window.location.hash = "#/ast"; }} onGoCases={() => setTab("cases")} /> }, { key: "history", label: "历史批次", children: <History items={items} onOpen={(item) => { setCurrentId(item.id); setTab("experiment"); }} onRerun={rerun} rerunning={rerunning} /> }, { key: "cases", label: "测试案例", children: <CaseLibrary setup={setup} onChanged={async () => { await loadSetup(); await loadItems(); }} onRequireUnlock={onRequireUnlock} /> }]} />}</div>;

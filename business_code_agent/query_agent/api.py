@@ -103,6 +103,7 @@ def make_server(
                 ast_data_root=context.ast_root,
                 business_context_root=context.business_context_root if context.registered else None,
                 code_map_root=context.code_map_root,
+                legacy_baseline_root=context.legacy_baseline_root if context.registered else None,
                 requirements_root=context.requirements_root if context.registered else None,
             )
         return evaluation_services[key]
