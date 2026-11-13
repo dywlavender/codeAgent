@@ -2,19 +2,20 @@
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）
 
-`claudecode` 的 `9a1c71e` 实际包含「V2 设计 + V1 运行配置预备实现」：Profile、Manifest、工具预检、执行/会话配置及 Runtime、API、schema、轨迹前端配套改动已提交，不再按未提交或纯文档描述。架构设计通过，整包提交有条件通过；V2 RunContext、DirectRuntime 和 core-v1 尚未实现，答题收益未验证。本轮先修正文档并补专项测试，不回滚已有代码、不启动 core 开发。
+`claudecode` 的 `9a1c71e` 实际包含「V2 设计 + V1 运行配置预备实现」：Profile、Manifest、工具预检、执行/会话配置及 Runtime、API、schema、轨迹前端配套改动已提交，不再按未提交或纯文档描述。架构设计通过，整包提交有条件通过。阶段 1 已实现 `core-v1` 最小主链（Profile、RunContext、隔离 core 工作区、FileCapability、DirectAgentRuntime、QueryService 接入）；生产默认仍为 Legacy，完整 V2 其余能力未实现，真实模型答案验收因供应商配额未完成。
 
 后续新 Agent 功能必须先读 [V2 总体架构](docs/spec/agent-architecture-v2.md)、[能力与运行合同](docs/spec/agent-capability-contract.md) 和 [迁移计划](docs/spec/agent-migration-plan.md)，遵守以下边界：
 
 - 唯一调查主链为 QueryService → RunContext → AgentRuntime → 模型自主选择工具 → Answer → 证据检查与持久化；Trace 从运行开始持续记录。Business Context、AST、检索与契约不能各自建立全局调查编排。
 - RunContext 复用现有 ProjectContext，固定工程、Profile、范围、工作区、资料和实际能力。工具只能使用授权快照，不再自行读取环境变量或探测相邻资料。
-- 首个实现目标 `core-v1` 只使用源码、可选需求和 Read/Glob/Grep；业务资料、AST、Code Map、Hybrid 与 Contract 均禁用，即使机器上已有产物也不探测/使用。`legacy-v1` 是未来对现有 coordinated 的显式适配，不是本次已开放的配置名称。
+- 首个实现目标 `core-v1` 只使用源码、可选需求和 Read/Glob/Grep；业务资料、AST、Code Map、Hybrid 与 Contract 均禁用，即使机器上已有产物也不探测/使用。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；默认网页的 `mode=combined` 映射为 `core`，显式 `none/backbone/ast` 返回配置错误。`legacy-v1` 是未来对现有 coordinated 的显式适配，不是当前已开放名称。
 - required/optional/disabled 是授权策略，ready/missing/stale/unavailable 是实际状态；optional 缺失/过期只收缩原 Profile 内可用能力，required 不可用明确失败，不自动换 Profile 或生成索引。
 - 能力扩展只增加提供者、工具/阅读指导及注册配置，不修改 Direct 核心循环。源码、需求/业务约定和结构导航保留不同证明能力，引用校验不是语义证明。
 - 工程、范围、Profile、可用资料/工具及其版本变化时重建模型会话，历史运行不补写新资料；同名仓库或版本不能跨工程复用。
 - Query 核心依赖公共工具合同，不依赖知识管理或 AST 内部实现；知识管理不调用问答主循环，CodeIntel 不生成最终业务答案，Evaluation 只消费公共 Runtime，API/CLI 只做装配与传输。
-- 收尾后下一步仅实现 `core-v1` 并接入现有 QueryService。最小范围是 AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools 和 AgentRuntime；只验基础源码问答、跨仓库搜索、会话、授权、Trace 与停止。完整动态失效、结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定及 AST/Contract 专属授权随能力延后，不成为 core 前置，也不新增抽象层。
-- 当前 Manifest 只枚举实际仓库，可能省略授权范围内缺失仓库；阶段 1 必修并测试按配置展开的预期仓库逐一核验。任一必需仓库缺失/不可读须在模型前失败，错误与 execution/Trace 明确仓库 ID，不能以 File 工具已注册或部分仓库可读代替完整性检查。
+- `core-v1` 阶段 1 已实现 AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools、DirectAgentRuntime 和 QueryService core 分支；测试位于 `tests/test_core_*.py`、`tests/test_direct_runtime.py`。完整动态失效、结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定及 AST/Contract 专属授权仍随能力延后，不成为 core 前置，也不新增抽象层。
+- 预期仓库必须来自配置和规范化 scope，由 `prepare_core` 逐一核验；任一必需仓库缺失/不可读须在模型前失败，错误与 execution/Trace 明确仓库 ID，不能以 File 工具已注册或部分仓库可读代替完整性检查。core 不构造 AstMaterial，不探测业务、Code Map、AST、Hybrid 或 Contract。
+- 真实模型 core 端到端验收尚未完成（2026-11-13 供应商返回 403 insufficient_quota）；不能用模拟模型测试、API 回归或失败记录替代答案质量验收。生产默认切换前需完成真实模型验收并另行确认。
 - Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；Direct 不继承其调查逻辑，生产默认切换及旧链删除另行确认。
 
 下文 `combined`、`coordinated`、自动补查、既有 Profile/开关与资料模式约定继续服务 V1 及历史对照，不作为 V2 core 的隐含授权。资料来源边界、只读、手动生成、工程隔离、无限制生产调查与真实效果验证原则继续适用；V2 接口和迁移以以上三份文档为准。现有 `profile.py/materials.py/preparation.py` 准备工作不等于 V2 已完成。

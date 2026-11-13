@@ -186,6 +186,7 @@ def make_server(
                 project_scoped=context.registered,
                 retrieval_root=context.data_root / 'retrieval-index',
                 trace_root=context.data_root / 'query-traces',
+                project_context=context,
                 ast_material_factory=lambda: AstService(
                     project_config=str(context.config_path) if context.config_path else None,
                     data_root=context.ast_root,

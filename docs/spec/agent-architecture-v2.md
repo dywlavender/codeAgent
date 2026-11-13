@@ -1,6 +1,6 @@
 # CodeAgent V2 架构设计
 
-状态：设计冻结，尚未实现或切换生产默认。确认日期：2026-11-13。
+状态：设计冻结；`core-v1` 已实现阶段 1 最小主链，可通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用，生产默认仍为 Legacy。确认日期：2026-11-13。
 
 `claudecode` 提交 `9a1c71e7c7bd7400d8d400475f51e47ccbca41f2` 的实际交付是「V2 设计 + V1 运行配置预备实现」，不是纯文档提交。Profile、资料清单、工具预检、执行快照与会话配置已进入该提交，另有 Runtime、API、schema 和轨迹前端配套改动；这些不是 V2 Direct Runtime。当前结论为：架构设计通过，整包提交有条件通过，验证范围与缺口见[迁移计划第 7 节](agent-migration-plan.md#7-本次验证与交付状态)。
 
@@ -12,7 +12,9 @@
 - AST、Business Context、SearchCode、Contract 后续通过同一 Capability 接入。不允许因增加能力而复制 Agent、增加全局调查调度器或修改核心循环。
 - 设计任务的原始范围仅为文档，但实际提交已包含 V1 预备实现；交付验收必须覆盖这些实现，不能用文档走查或三组旧回归替代。本轮收尾只修订文档和专项测试，不回滚实现或扩大到 core 开发。
 
-架构边界、资料授权、证据边界现在生效；新 Profile 名称和接口签名是后续实现目标，不是当前可运行命令。生产默认切换需要实现验收与单独确认，不由文档冻结自动触发。
+架构边界、资料授权、证据边界现在生效。阶段 1 已实现 `core-v1` 的 Profile、RunContext、按配置逐一核验仓库的隔离工作区、FileCapability、DirectAgentRuntime 及 QueryService 接入；完整 V2 合同中的运行期能力失效联动、结构版本联动和复杂 Evidence 生命周期仍待对应能力阶段实现。生产默认切换需要完整验收与单独确认，不由本次实现自动触发。
+
+阶段 1 的实现边界见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。`core-v1` 的默认网页请求 `mode=combined` 会映射为 `core`，不会因此挂载业务、AST、Code Map 或索引；显式 `none/backbone/ast` 会被拒绝。
 
 ## 2. 唯一调查主链
 
@@ -86,8 +88,8 @@ BusinessContextCapability 通常不增加工具，复用 FileCapability 的 Read
 
 | Profile | Runtime | 资料与能力 | 当前状态 |
 | --- | --- | --- | --- |
-| `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 下一实施阶段目标 |
-| `legacy-v1` | `langchain-legacy` | 保留当前 combined/coordinated 及已准备索引的使用语义 | 需未来兼容适配；本阶段仍用现有入口 |
+| `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 已实现基础主链（阶段 1）；默认未切换 |
+| `legacy-v1` | `langchain-legacy` | 保留当前 combined/coordinated 及已准备索引的使用语义 | 需未来兼容适配；当前仍用现有入口 |
 | `core-business-v1` | 同一 `langchain-direct` | core 加 Business Context | 预留，未开放 |
 | `core-ast-v1` | 同一 `langchain-direct` | core 加 AST 结构导航 | 预留，未开放 |
 | `core-business-ast-v1` | 同一 `langchain-direct` | core 加两种能力 | 预留，未开放 |
@@ -106,7 +108,7 @@ Direct 的模型自主决定下一次 Read／Glob／Grep 和何时回答。不�
 
 ## 6. 逻辑目标结构与依赖规则
 
-以下是职责位置，不是本阶段要创建的 Python 文件清单。
+以下是目标职责位置。阶段 1 已创建 `context.py`、`capabilities.py`、`tools/files.py`、`agent/direct.py` 和 `agent/session.py`；其余是后续能力的目标，不要求一次建齐。
 
 ```text
 business_code_agent/
@@ -169,6 +171,6 @@ repos/
 
 ## 8. 交付与后续闸门
 
-设计冻结通过条件为 A01—A12 能由接口和场景解释清楚；该设计已通过。整包含 V1 预备实现，验收仍为有条件通过：须修正实际提交范围、补配置/预检/会话/失败持久化专项测试，并将逐一缺失仓库校验列为阶段 1 必修。三组原有回归不能证明全部新机制，更不能证明零索引 Agent、业务认知收益或 AST 收益。
+设计冻结通过条件为 A01—A12 能由接口和场景解释清楚；该设计已通过。阶段 1 已补配置/预检/会话/失败持久化及 core 闭环测试，逐一缺失仓库校验已在 `prepare_core` 实现。还没有完成真实模型答案验收：2026-11-13 对 `validation-projects/complex-loan` 发起真实请求时供应商返回 403（免费额度耗尽），core 已正确保存失败 Run、事件和 Trace。不能据此宣称零索引 Agent 的答案质量、业务认知收益或 AST 收益已验证。
 
 下一阶段只实现 `core-v1` 与现有 QueryService 的接入，保留 Legacy 回退。业务知识、AST、检索与契约都不参与基础 Runtime 验收；以后按能力分别接入、分别做同模型同资料条件的增量评测。

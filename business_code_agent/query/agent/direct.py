@@ -270,7 +270,8 @@ class DirectAgentRuntime:
             "repositoryIds": list(context.repository_ids),
             "materials": [[source.kind, source.path, source.status, source.version]
                           for source in context.materials],
-            "toolNames": [tool.name for tool in prepared.tools],
+            "tools": [[tool.name, str(getattr(tool, "description", ""))]
+                      for tool in prepared.tools],
             "instructions": [text for _, text in prepared.instructions],
             "model": settings.get("requestedModel"),
             "contextChars": int(self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000")),
@@ -321,24 +322,26 @@ def verify_answer(answer: str, messages) -> dict:
         if data.get("error") or not data.get("content"):
             continue
         reads.append(data)
-    by_path = {data["path"]: data for data in reads}
+    by_path: dict[str, list[dict]] = {}
+    for data in reads:
+        by_path.setdefault(data["path"], []).append(data)
     references = []
     for match in _CITATION.finditer(answer or ""):
         cited = match.group(1).lstrip("./")
         line = int(match.group(2)) if match.group(2) else None
-        matched = by_path.get(cited)
-        if matched is None:
-            candidates = [data for path, data in by_path.items()
-                          if path.endswith("/" + cited)]
-            matched = candidates[0] if len(candidates) == 1 else None
+        matched_path = cited if cited in by_path else None
+        candidates = [path for path in by_path if path.endswith("/" + cited)]
+        if matched_path is None and len(candidates) == 1:
+            matched_path = candidates[0]
         confirmed = False
-        if matched:
-            start, end = matched["lineStart"], matched["lineEnd"]
-            confirmed = line is None or (start <= line <= end)
+        if matched_path:
+            ranges = by_path[matched_path]
+            confirmed = line is None or any(
+                item["lineStart"] <= line <= item["lineEnd"] for item in ranges)
         references.append({
             "path": cited,
             "line": line,
-            "matchedPath": matched["path"] if matched else None,
+            "matchedPath": matched_path,
             "confirmed": confirmed,
         })
     return {

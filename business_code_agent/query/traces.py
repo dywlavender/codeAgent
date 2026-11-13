@@ -45,6 +45,10 @@ class RunTraceArchive:
         self.value["runtimeEvents"] = snapshot.get("events", [])
         self.value["modelSnapshotAvailable"] = bool(snapshot.get("calls"))
 
+    def update_run(self, **fields):
+        self.value.setdefault("run", {}).update(fields)
+        self.write()
+
     def finish(self, **run):
         self.refresh()
         self.value["run"].update(run)

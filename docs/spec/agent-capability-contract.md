@@ -1,8 +1,8 @@
 # CodeAgent V2 能力与运行合同
 
-状态：接口设计冻结，尚未作为 Python 实现发布。确认日期：2026-11-13。
+状态：接口设计冻结；`core-v1` 已实现阶段 1 最小子集，完整合同其余部分尚未实现。确认日期：2026-11-13。
 
-本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是完整目标合同，不是阶段 1 必须逐类复制的实现清单。`9a1c71e` 已提交 V1 Profile、Manifest、预检及执行/会话快照，但尚未实现这里的 RunContext 和 Direct Runtime；后续复用/演进既有模块，不建立两套同名模型。
+本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是完整目标合同，不是已全部实现的模块清单。阶段 1 已实现 `RunContext`、`MaterialSource`/`prepare_core`、简易 `FileCapability`、`DirectAgentRuntime` 以及 `QueryService` 接入；`RunAccess` 联动、结构版本和复杂 Evidence 仍未实现。完整合同用于后续能力阶段，不要求现在复制所有类型。
 
 ### 合同成熟度与实施边界
 

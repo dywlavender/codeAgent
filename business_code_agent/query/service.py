@@ -11,24 +11,32 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from business_code_agent.platform.ast_material import AstMaterial
+from business_code_agent.platform.projects import ProjectContext
+from business_code_agent.query.capabilities import prepare_capabilities
+from business_code_agent.query.context import RunContext
 
 from .claude_runtime import default_claude_runtime
 from .materials import MATERIAL_KINDS, MaterialManifest
 from .profile import execution_snapshot, resolve_profile
-from .runtime import RequiredToolUnavailable, RuntimeErrorBase, normalize_runtime_result
+from .runtime import RequiredToolUnavailable, RunPreparation, RuntimeErrorBase, normalize_runtime_result
 from .traces import RunTraceArchive
-from .workspace import MODE_DESCRIPTIONS, Workspace, WorkspaceManager, _safe_name
+from .workspace import MODE_DESCRIPTIONS, Workspace, WorkspaceError, WorkspaceManager, _safe_name
 
 
 logger = logging.getLogger(__name__)
 
 QUERY_MODES = ("combined", "none", "backbone", "ast")
-QUERY_MODE_LABELS = {"combined": "组合资料", "none": "无主干", "backbone": "有主干", "ast": "AST"}
+QUERY_MODE_LABELS = {
+    "basic": "基础对照", "tracked": "跟踪调查",
+    "combined": "组合资料", "none": "无主干", "backbone": "有主干", "ast": "AST",
+    "core": "零索引核心",
+}
 
 
 class QueryRuntimeError(RuntimeErrorBase):
@@ -63,18 +71,27 @@ def _load_json(value: Any, default: Any) -> Any:
     return parsed
 
 
-def _session_config(execution, manifest):
-    return {
+def _session_config(execution, manifest, *, core=False):
+    value = {
         "profileId": execution["profileId"],
         "investigation": execution["investigation"],
         "answerMode": execution["answerMode"],
         "model": execution["model"],
         "tools": [{key: tool[key] for key in ("capability", "policy", "status", "names", "version")}
                   for tool in execution["tools"]],
-        "materials": [[source.kind, source.path, str(source.directory), source.version]
-                      for source in manifest.readable()],
+        "materials": (
+            [[source.kind, source.path, source.status, source.version]
+             for source in manifest.sources]
+            if core else
+            [[source.kind, source.path, str(source.directory), source.version]
+             for source in manifest.readable()]
+        ),
         "settings": execution["settings"],
     }
+    if core:
+        value["repositoryIds"] = [source.repository_id for source in manifest.sources
+                                  if source.kind == "source"]
+    return value
 
 
 class QueryService:
@@ -99,6 +116,7 @@ class QueryService:
         retrieval_root: str | Path | None = None,
         trace_root: str | Path | None = None,
         ast_material_factory=None,
+        project_context: ProjectContext | None = None,
     ):
         self.ast_material_factory = ast_material_factory
         self.db = db
@@ -122,6 +140,18 @@ class QueryService:
         self.runtime = runtime
         self.trace_root = Path(trace_root or (Path(db_path).parent / "query-traces" if db_path and db_path != ":memory:"
                                             else self.workspace_manager.root / "query-traces"))
+        self.project_context = project_context or self._derive_project_context()
+
+    def _derive_project_context(self) -> ProjectContext:
+        """Reuse ProjectContext when the composition root did not inject it."""
+        if self.project_scoped and self.project_id and self.db_path:
+            database = Path(self.db_path).expanduser().resolve()
+            config = Path(self.project_config).expanduser().resolve() if self.project_config else None
+            return ProjectContext(self.project_id, self.workspace_manager.project_name, config,
+                                  database.parent, database, True)
+        database = self.db_path if self.db_path and self.db_path != ":memory:" else str(
+            Path.cwd() / ".data" / "knowledge.db")
+        return ProjectContext.legacy(database, self.project_config)
 
     @staticmethod
     def _default_workspace_root(
@@ -149,6 +179,35 @@ class QueryService:
         scope=None,
         mode: str | None = None,
     ) -> dict[str, Any]:
+        """Dispatch one question to the selected runtime."""
+        if not str(question or "").strip():
+            raise ValueError("question is required")
+        runtime = self.runtime if self.runtime is not None else _default_runtime(
+            index_root=self.index_root, project_id=self.project_id)
+        profile = getattr(runtime, "profile", None)
+        if profile is not None and profile.investigation == "direct":
+            return self._query_core(
+                question, conversation_id=conversation_id, event_callback=event_callback,
+                run_callback=run_callback, scope=scope, mode=mode, runtime=runtime,
+            )
+        return self._query_legacy(
+            question, conversation_id=conversation_id, history=history,
+            event_callback=event_callback, run_callback=run_callback,
+            scope=scope, mode=mode, runtime=runtime,
+        )
+
+    def _query_legacy(
+        self,
+        question: str,
+        *,
+        conversation_id: str | None = None,
+        history=(),
+        event_callback=None,
+        run_callback=None,
+        scope=None,
+        mode: str | None = None,
+        runtime=None,
+    ) -> dict[str, Any]:
         """Run one question and persist the complete runtime exchange.
 
         ``history`` remains an accepted argument for old clients. The selected
@@ -167,7 +226,7 @@ class QueryService:
         effective_mode = self._normalize_mode(mode)
         effective_scope = self._normalize_scope(scope)
         self._validate_owned_id(conversation_id, "conversation")
-        runtime = self.runtime if self.runtime is not None else _default_runtime(index_root=self.index_root, project_id=self.project_id)
+        runtime = runtime or self.runtime or _default_runtime(index_root=self.index_root, project_id=self.project_id)
         runtime_name = str(getattr(runtime, "runtime_name", "CLAUDE_CODE"))
         profile = getattr(runtime, "profile", None)
         workspace = self._workspace_for_mode(effective_mode)
@@ -346,13 +405,243 @@ class QueryService:
         }
 
     @staticmethod
-    def _normalize_mode(mode: str | None) -> str:
+    def _normalize_mode(mode: str | None, *, core: bool = False) -> str:
+        if core:
+            value = str(mode or "core").strip().casefold()
+            if value in {"", "core", "combined"}:
+                return "core"
+            raise ValueError(
+                "core-v1 只使用源码与需求，不使用旧资料模式；请移除 mode 参数"
+            )
         value = str(mode or "combined").strip().casefold()
         aliases = {"no_backbone": "none", "without": "none", "full": "backbone", "overview": "backbone"}
         value = aliases.get(value, value)
         if value not in QUERY_MODES:
             raise ValueError("mode 必须是 combined、none、backbone 或 ast")
         return value
+
+    def _query_core(self, question, *, conversation_id, event_callback, run_callback,
+                    scope, mode, runtime) -> dict[str, Any]:
+        """Run core-v1: create the run first, then prepare and call the model."""
+        profile = runtime.profile
+        effective_mode = self._normalize_mode(mode, core=True)
+        effective_scope = self._normalize_scope(scope)
+        self._validate_owned_id(conversation_id, "conversation")
+        runtime_name = str(getattr(runtime, "runtime_name", "LANGCHAIN_DIRECT"))
+        repositories = (sorted(set(effective_scope["repositoryIds"]))
+                        if effective_scope else None)
+        logger.info("core 查询请求: conversation=%s question_characters=%s",
+                    conversation_id or "new", len(question))
+        run_id = self._new_id("RUN")
+        started_at = _now()
+        started_clock = time.monotonic()
+        workspace_id = self.workspace_manager.project_id
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            conversation = self._get_or_create_conversation(
+                conversation_id, workspace_id, effective_mode, runtime_name)
+            active = self.db.execute(
+                "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
+                (conversation["id"],),
+            ).fetchone()
+            if active:
+                raise QueryBusyError(active["id"])
+            self.db.execute(
+                """INSERT INTO query_run
+                   (id,conversation_id,runtime,runtime_session_id,question,status,answer,
+                    error,usage_json,scope_json,mode,ast_version_id,execution_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,NULL,'{}',?,NULL,0)""",
+                (run_id, conversation["id"], runtime_name, conversation["runtime_session_id"],
+                 question, _json(effective_scope) if effective_scope else None,
+                 effective_mode, started_at),
+            )
+            self._save_message(conversation["id"], run_id, "user", question, started_at)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        settings = runtime.execution_settings()
+        expected_repositories = repositories or sorted(
+            repository_id for repository_id, _ in self.workspace_manager.repository_sources())
+        base_execution = execution_snapshot(profile, MaterialManifest(()), (), settings=settings)
+        base_execution["repositoryIds"] = list(expected_repositories)
+        emitted: list[dict[str, Any]] = []
+        client_connected = True
+        archive = RunTraceArchive(self.trace_root, run_id, self.project_id)
+        archive.start({"runId": run_id, "conversationId": conversation["id"], "question": question,
+                       "runtime": runtime_name, "mode": effective_mode, "scope": effective_scope,
+                       "astVersionId": None, "astStatus": None, "materials": [],
+                       "execution": base_execution, "startedAt": started_at, "status": "running"},
+                      self.workspace_manager.root)
+
+        def on_event(event: Mapping[str, Any]) -> None:
+            nonlocal client_connected
+            normalized = dict(event)
+            emitted.append(normalized)
+            self._save_event(run_id, normalized, len(emitted))
+            self.db.commit()
+            archive.event({**normalized, "at": normalized.get("at", _now())})
+            if event_callback and client_connected:
+                try:
+                    event_callback(normalized)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    client_connected = False
+                    logger.warning("core 查询客户端已断开: run=%s；后台继续保存结果", run_id)
+
+        workspace = None
+        execution = base_execution
+        callback_sent = False
+        try:
+            workspace = self.workspace_manager.prepare_core(
+                run_id=run_id, repository_ids=repositories, include_requirements=True)
+            manifest = MaterialManifest.for_core(workspace.path, workspace.repository_mounts)
+            missing = manifest.missing_required()
+            if missing:
+                raise WorkspaceError("授权仓库不可用，未调用模型：" + "、".join(
+                    source.repository_id or source.label for source in missing))
+            context = RunContext(
+                run_id=run_id, project=self.project_context, profile=profile,
+                repository_ids=workspace.repository_ids, workspace=workspace.path,
+                materials=manifest.sources, session_id=None,
+            )
+            prepared = prepare_capabilities(context)
+            preparation = RunPreparation(manifest, prepared.statuses)
+            execution = execution_snapshot(profile, manifest, prepared.statuses, settings=settings)
+            execution["repositoryIds"] = list(workspace.repository_ids)
+            session_config = _session_config(execution, manifest, core=True)
+            archive.workspace = workspace.path.resolve()
+            archive.update_run(execution=execution, mode=effective_mode, astVersionId=None,
+                               workspace=str(workspace.path),
+                               materials=[{"label": label, "path": str(path)}
+                                          for label, path in manifest.labelled_roots()])
+            self._apply_core_run(conversation, run_id, effective_scope, effective_mode,
+                                 execution, session_config, runtime_name, workspace_id)
+            if run_callback:
+                callback_sent = True
+                run_callback({"runId": run_id, "conversationId": conversation["id"],
+                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                              "astVersionId": None, "execution": execution})
+            preparation.require_tools()
+            context = replace(context, session_id=conversation["runtime_session_id"])
+            raw_result = runtime.ask(
+                question, context=context, prepared=prepared,
+                session_id=conversation["runtime_session_id"],
+                event_callback=on_event,
+                cancel_check=lambda: self.db.execute(
+                    "SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
+            )
+            result = normalize_runtime_result(raw_result)
+        except Exception as exc:
+            duration = round((time.monotonic() - started_clock) * 1000, 3)
+            error_text = str(exc) or exc.__class__.__name__
+            logger.error("core 查询失败: run=%s conversation=%s duration_ms=%s error_type=%s",
+                         run_id, conversation["id"], duration, type(exc).__name__)
+            failure_execution = {**execution, "phase": "failed", "error": error_text}
+            failure_execution.setdefault("repositoryIds", list(expected_repositories))
+            archive.update_run(execution=failure_execution, mode=effective_mode,
+                               astVersionId=None,
+                               workspace=str(workspace.path) if workspace else str(self.workspace_manager.root))
+            if not callback_sent and run_callback:
+                run_callback({"runId": run_id, "conversationId": conversation["id"],
+                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                              "astVersionId": None, "execution": failure_execution})
+            on_event({"eventType": "error", "subtype": exc.__class__.__name__,
+                      "payload": {"error": error_text}})
+            archive.finish(status="failed", error=error_text, completedAt=_now(), durationMs=duration)
+            self.db.execute(
+                """UPDATE query_run SET status='failed',error=?,execution_json=?,completed_at=?,duration_ms=?
+                   WHERE id=?""",
+                (error_text, _json(failure_execution), _now(), duration, run_id),
+            )
+            self.db.commit()
+            if isinstance(exc, QueryRuntimeError):
+                raise
+            if isinstance(exc, (RequiredToolUnavailable, WorkspaceError)):
+                raise QueryConfigurationError(error_text) from exc
+            raise QueryRuntimeError(error_text) from exc
+
+        for event in result.events:
+            if event not in emitted:
+                on_event(event)
+        session_id = result.runtime_session_id or conversation["runtime_session_id"]
+        completed_at = _now()
+        final_status = "cancelled" if result.status == "cancelled" else "completed"
+        if final_status == "cancelled":
+            on_event({"sequence": len(emitted) + 1, "eventType": "status",
+                      "payload": {"phase": "cancelled", "label": "已停止"}})
+        duration = round((time.monotonic() - started_clock) * 1000, 3)
+        usage = {**result.usage, "traceArchive": str(archive.path)}
+        archive.finish(status=final_status, answer=result.answer, usage=usage,
+                       completedAt=completed_at, durationMs=duration)
+        self.db.execute(
+            """UPDATE query_run SET status=?,runtime_session_id=?,answer=?,usage_json=?,
+               completed_at=?,duration_ms=? WHERE id=?""",
+            (final_status, session_id, result.answer, _json(usage), completed_at, duration, run_id),
+        )
+        if result.answer:
+            self._save_message(conversation["id"], run_id, "assistant", result.answer, completed_at)
+        self.db.execute(
+            """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,
+               ast_version_id=NULL,updated_at=? WHERE id=?""",
+            (runtime_name, session_id, workspace.id, completed_at, conversation["id"]),
+        )
+        self.db.commit()
+        logger.info("core 查询结束: run=%s status=%s conversation=%s session=%s duration_ms=%s events=%s",
+                    run_id, final_status, conversation["id"], session_id, duration, len(emitted))
+        return {
+            "runId": run_id,
+            "conversationId": conversation["id"],
+            "projectId": self.project_id,
+            "runtime": runtime_name,
+            "sessionId": session_id,
+            "workspaceId": workspace.id,
+            "mode": effective_mode,
+            "modeLabel": QUERY_MODE_LABELS[effective_mode],
+            "astVersionId": None,
+            "execution": execution,
+            "status": final_status,
+            "scope": effective_scope,
+            "answer": result.answer,
+            "events": emitted,
+            "usage": usage,
+        }
+
+    def _apply_core_run(self, conversation, run_id, scope, mode, execution,
+                        session_config, runtime_name, workspace_id) -> None:
+        stored_scope = _load_json(conversation.get("scope_json"), None)
+        stored_mode = str(conversation.get("mode") or "backbone")
+        changed = (
+            scope != stored_scope
+            or mode != stored_mode
+            or conversation.get("ast_version_id") is not None
+            or conversation.get("runtime") != runtime_name
+            or session_config != _load_json(conversation.get("session_config_json"), None)
+        )
+        session_id = None if changed else conversation.get("runtime_session_id")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute(
+                """UPDATE query_conversation SET scope_json=?,mode=?,ast_version_id=NULL,
+                   runtime=?,runtime_session_id=?,session_config_json=?,workspace_id=?,updated_at=?
+                   WHERE id=?""",
+                (_json(scope) if scope else None, mode, runtime_name, session_id,
+                 _json(session_config), workspace_id, _now(), conversation["id"]),
+            )
+            self.db.execute(
+                "UPDATE query_run SET mode=?,ast_version_id=NULL,execution_json=?,runtime_session_id=? WHERE id=?",
+                (mode, _json(execution), session_id, run_id),
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        conversation.update({
+            "runtime": runtime_name, "runtime_session_id": session_id,
+            "workspace_id": workspace_id, "mode": mode, "ast_version_id": None,
+            "scope_json": _json(scope) if scope else None,
+            "session_config_json": _json(session_config),
+        })
 
     def _workspace_for_mode(self, mode: str) -> Workspace:
         business_context_source = None
@@ -636,14 +925,29 @@ class QueryService:
                 WHERE a.status='ACTIVE' ORDER BY s.name,a.name"""
         )]
         project = self.workspace_manager.project_name
-        sources = self.workspace_manager.source_summary()
-        try:
-            workspace = self._workspace_for_mode("combined")
-            workspace_info = workspace.to_dict()
-            sources = self.workspace_manager.source_summary(workspace)
-        except Exception as exc:
-            logger.warning("无法准备 workspace 摘要: %s", exc)
-            workspace_info = {"id": self.workspace_manager.project_id}
+        runtime = self.runtime
+        profile = getattr(runtime, "profile", None) if runtime is not None else None
+        if runtime is None:
+            try:
+                profile = resolve_profile(dict(os.environ))
+            except Exception:
+                profile = None
+        if profile is not None and profile.investigation == "direct":
+            workspace_info = {
+                "id": self.workspace_manager.project_id,
+                "path": str(self.workspace_manager.root),
+                "mode": "core",
+            }
+            sources = self.workspace_manager.core_source_summary()
+        else:
+            sources = self.workspace_manager.source_summary()
+            try:
+                workspace = self._workspace_for_mode("combined")
+                workspace_info = workspace.to_dict()
+                sources = self.workspace_manager.source_summary(workspace)
+            except Exception as exc:
+                logger.warning("无法准备 workspace 摘要: %s", exc)
+                workspace_info = {"id": self.workspace_manager.project_id}
         return {
             "projectId": self.project_id,
             "project": project,
@@ -689,10 +993,12 @@ class QueryService:
     def _get_or_create_conversation(
         self,
         conversation_id: str | None,
-        workspace: Workspace,
+        workspace: Workspace | str,
         mode: str,
         runtime_name: str,
     ) -> dict[str, Any]:
+        workspace_id = workspace if isinstance(workspace, str) else workspace.id
+        ast_version_id = None if isinstance(workspace, str) else workspace.ast_version_id
         now = _now()
         if conversation_id:
             row = self.db.execute(
@@ -703,26 +1009,26 @@ class QueryService:
             if row:
                 self.db.execute(
                     "UPDATE query_conversation SET workspace_id=?,updated_at=? WHERE id=?",
-                    (workspace.id, now, conversation_id),
+                    (workspace_id, now, conversation_id),
                 )
                 value = dict(row)
-                value["workspace_id"] = workspace.id
+                value["workspace_id"] = workspace_id
                 return value
         conversation_id = conversation_id or self._new_id("CONV")
         self.db.execute(
             """INSERT INTO query_conversation
                (id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            (conversation_id, runtime_name, None, workspace.id, None, mode,
-             workspace.ast_version_id, now, now),
+            (conversation_id, runtime_name, None, workspace_id, None, mode,
+             ast_version_id, now, now),
         )
         return {
             "id": conversation_id,
             "runtime": runtime_name,
             "runtime_session_id": None,
-            "workspace_id": workspace.id,
+            "workspace_id": workspace_id,
             "mode": mode,
-            "ast_version_id": workspace.ast_version_id,
+            "ast_version_id": ast_version_id,
         }
 
     def _save_message(self, conversation_id: str, run_id: str, role: str, content: str, created_at: str) -> None:
@@ -765,6 +1071,11 @@ def _default_runtime(*, index_root=None, project_id=None):
     profile = resolve_profile(environment)
     if profile.runtime == "claude":
         return default_claude_runtime()
+    if profile.investigation == "direct":
+        from business_code_agent.query.agent.direct import DirectAgentRuntime
+
+        return DirectAgentRuntime(profile=profile, environment=environment,
+                                  project_id=project_id)
     if profile.investigation == "agent_direct":
         raise ValueError("standard-v1 将在自主调查策略接入后开放，当前可使用 coordinated-legacy-v1")
     from .langchain_agent import LangChainRuntime

@@ -488,6 +488,24 @@ class WorkspaceManager:
         """Return every configured repository, including missing directories."""
         return self._repository_sources()
 
+    def core_source_summary(self) -> list[dict[str, Any]]:
+        """Describe core sources without touching AST, business or indexes."""
+        result = []
+        for repository_id, path in self._repository_sources():
+            status = _directory_status(path)
+            result.append({
+                "id": f"repository:{repository_id}", "kind": "repository",
+                "name": repository_id, "path": str(path), "status": status,
+                "authorizationConfigured": status in {"READABLE", "EMPTY"},
+            })
+        result.append({
+            "id": "requirements:需求原文", "kind": "requirements", "name": "需求原文",
+            "path": str(self.requirements_root),
+            "status": _directory_status(self.requirements_root),
+            "authorizationConfigured": self.requirements_root.is_dir(),
+        })
+        return result
+
     def _repository_sources(self) -> list[tuple[str, Path]]:
         configured = self.config.get("repositories")
         values: list[tuple[str, Path]] = []

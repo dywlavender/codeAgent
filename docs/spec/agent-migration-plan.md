@@ -59,7 +59,7 @@
 | `codeintel/hybrid/` | 保留显式准备及可选 SearchCode，后续 CodeSearchCapability 调公开只读入口 | 后续 | 零索引 core 不导入 numpy/ONNX/tokenizers；问答不下载模型 |
 | `codeintel/contracts/` | 保留索引准备与只读关系/字段查询；后续 ContractCapability 适配 | 后续 | 不在领域层生成业务答案，未解析/过期关系保留缺口 |
 | `evaluation/harness.py`、`runner.py`、`service.py` | 新对照只调用公共 Runtime/上下文构建边界，旧冻结批次入口保留 | 1/后续 | 评测不是 Query 依赖；不得改写旧答案、Profile、版本或评分 |
-| `api/server.py`、`cli.py` | 仅装配 ProjectContext、提供者、RuntimeFactory 和传输参数 | 1、3 | 不在路由中实现能力选择/循环；本阶段不改入口 |
+| `api/server.py`、`cli.py` | 装配 ProjectContext、提供者、RuntimeFactory 和传输参数 | 1、3 | 阶段 1 仅向 QueryService 注入 ProjectContext，不改路由/协议，不在路由中实现能力选择或循环 |
 | `storage/schema.py`、前端问答页 | 已提交 V1 快照存储/展示配套；阶段 1 优先复用执行快照/usage 扩展元数据 | 后续按需 | 本轮收尾不再迁移数据库或改页面；不把 UI 重做作为 core 前置 |
 
 目标目录不存在不是问题；接口实现与依赖边界优先于目录搬家。退出旧入口前必须检查真实调用方，不保留无用 re-export，也不因追求「新目录整齐」批量移动代码。
@@ -70,9 +70,9 @@
 
 三份 V2 文档、现行规范同步、第 5 节走查与第 6 节设计验收已完成。原三组既有测试共 15 项通过仅是基础回归；实际提交另含 V1 预备实现，因此还须补第 7 节专项测试与真实范围说明。阶段 0 不要求零索引 Agent 已实现，整包结论不再写成「7/7 全量验收通过」。
 
-### 阶段 1：下一步只实现 core-v1
+### 阶段 1：core-v1 基础主链（已实现）
 
-最小实现只包含 **AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools、AgentRuntime**；直接复用既有工程、RuntimeResult、会话及 Trace 基础设施。完整合同保留作后续边界，不要求把所有类型/Protocol 一次落地，更不新增抽象层。
+最小实现只包含 **AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools、AgentRuntime**；直接复用既有工程、RuntimeResult、会话及 Trace 基础设施。完整合同保留作后续边界，不要求把所有类型/Protocol 一次落地，更不新增抽象层。本节验收结果见第 8 节。
 
 顺序固定为：
 
@@ -83,13 +83,15 @@
 5. 接入现有 QueryService，保留 RuntimeResult、执行快照、原文引用、完整事件、停止和终态。旧入口通过最薄边界适配保留，不要求先统一 Legacy 全部能力合同。
 6. 完成基础源码问答、跨仓库文件搜索、会话、授权、Trace、停止回归，再按用户允许的范围验证真实模型。
 
-**缺失仓库为阶段 1 必修、必验**：预期集合必须来自配置和规范化 scope，不能来自 `repos/` 枚举。测试 channel/middle/decision 中缺失 middle、全部缺失、目录不可读，以及未指定 scope 展开全部仓库；任一必需仓库不满足时模型调用为零，错误、execution 和 Trace 明确列出仓库 ID（如 middle）。显式仅选存在的 channel/decision 可以运行；未登记目录不可自动加入。不得以「File 工具已注册」或「仍有两个仓库可读」代替完整性核验。本轮只复现并登记现有缺口，修复随 RunContext 落地。
+**缺失仓库为阶段 1 必修、必验**：预期集合必须来自配置和规范化 scope，不能来自 `repos/` 枚举。`prepare_core` 现在先核验所有选中仓库，任一缺失或不可读即失败，错误列出仓库 ID；模型调用为零，失败 Run、execution 和 Trace 保留。显式仅选存在的 channel/decision 可以运行；未登记目录不加入。测试见 `test_core_context.py`、`test_core_workspace.py`、`test_core_query_service.py`。
 
-其他必验项：无可选解析/检索依赖也可导入 core；禁用能力探测函数「调用即失败」仍可问答；模型可自主跨授权仓库搜索；Profile/范围/实际工具和资料变化重建会话；取消与失败保留事件。可用一个固定结果测试提供者验证注册不改循环，但不扩展真实业务/结构能力。真实模型验证记录模型、资料、用量和未确认关系，不把桩测试当答题收益。
+其他必验项：无可选解析/检索依赖也可导入 core；禁用能力探测函数「调用即失败」仍可问答；模型可自主跨授权仓库搜索；Profile/范围/实际工具和资料变化重建会话；取消与失败保留事件。固定结果测试提供者验证注册不改 Direct 循环，不扩展真实业务/结构能力。
 
-**延后项**：完整运行期能力失效联动、全部结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定、AST/Contract 专属授权、高级检索动态状态管理，随阶段 2/3/后续对应能力实施。core 的路径授权、required 明确失败、基本原文引用和会话边界不能因延后这些机制而省略。
+**已实现（2026-11-13）**：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py`、`query/agent/session.py` 及 QueryService core 分支。默认仍为 Legacy，`BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；网页默认 `mode=combined` 映射为 `core`，显式旧模式拒绝。
 
-阶段 1 不自动切换生产默认，也不删除旧链。切换需单独确认，不能靠重命名 standard-v1 绕过新授权合同。
+**延后项**：完整运行期能力失效联动、全部结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定、AST/Contract 专属授权、高级检索动态状态管理，随阶段 2/3/后续对应能力实施。core 的路径授权、required 明确失败、基本原文引用和会话边界未因延后这些机制而省略。
+
+阶段 1 不自动切换生产默认，也不删除旧链。切换需单独确认，不能靠重命名 standard-v1 绕过新授权合同。真实模型答案验收因供应商配额未完成，见第 8 节。
 
 ### 阶段 2：Business Context
 
@@ -241,7 +243,7 @@
 | --- | --- | --- |
 | 无 Hybrid Index，optional 不阻断文件问答 | 配置专项调用真实 Read/Glob/Grep；服务专项使用真实 LangChainRuntime + 固定响应模型完成文件问答 | 无网络模型；未证明真实问题答题收益 |
 | 已有 Contract Index 但 Profile 禁用 | 在索引路径放置哨兵文件，将文件探测/ContractIndex 构造替换为调用即失败；仅注册文件工具 | 验证 disabled 分支完全不碰该产物，不声称检验了真实索引内容 |
-| 多仓库缺一个，明确缺哪个 | `test_current_limitation_authorized_missing_repository_is_omitted_when_peer_exists` 复现当前省略缺失仓库 | **尚未满足**；阶段 1 必须替换为逐一缺仓库拒绝及持久化测试，见第 3 节 |
+| 多仓库缺一个，明确缺哪个 | 阶段 1 已由 `prepare_core` 逐一核验，`test_core_workspace.py`/`test_core_query_service.py` 覆盖缺失与不可读；模型未调用，Run/execution/Trace 记录仓库 ID | 阶段 0 的现状刻画保留在 `test_query_profiles.py`，不再代表当前行为 |
 | 同会话切换 Profile 或工具集合不复用模型会话 | 服务专项核对 session_id、session_config_json，覆盖 Profile、工具名/策略/状态/版本，以及模型设置和资料集合变化；相同身份仍复用 | 工具变化用合成状态隔离测试服务比较；不证明 V2 完整 schema/指纹已实现 |
 | required 不可用保存 failed 与 execution | 真实 prepare_tools 返回 required/unavailable，require_tools 阻止模型；检查 DB、回调、磁盘 Trace、错误及无助手消息 | 覆盖返回预检状态后的失败；V1 的 prepare 自身抛出异常仍早于 run 创建，不在本项通过范围，阶段 1 应按 V2 顺序处理 |
 | 旧 coordinated 保持行为 | 服务专项保留 combined/coordinated/plain、Investigation 与 workflow 来源自动 Read，另跑原 coordinated 16 项 | 局部兼容回归，不是所有 V1 功能全量验收 |
@@ -250,8 +252,62 @@
 
 - 实际提交范围和已实现/已设计/待实现状态已修正，三份 V2 文档、当前架构、AGENTS、指导方向和索引保持一致；不回滚已提交 V1 预备实现。
 - A01—A12 与五场景按设计范围通过。完整合同保留，但核心阶段只落实最小类型、注册和文件 Runtime；运行期跨能力失效、结构联动和复杂 Evidence 生命周期后置，不增加抽象层。
-- 缺失仓库核验仍未修复，已列阶段 1 必修/必验；现状刻画测试通过不关闭该缺口。core-v1、DirectRuntime 及 V2 Legacy 适配均尚未实现。
-- 本轮仅变更规范文档与测试；未修改生产代码、生产默认或现有数据。专项夹具和数据库均在临时目录，coordinated 旧回归会显式生成临时契约索引；未生成工程索引、下载模型或调用真实模型。
-- 未跑全量套件、未重新验证 API/前端完整流程；7 份变更文档的 64 个本地链接/锚点检查及 `git diff --check` 通过。没有据本地回归将整包提升为无条件通过。
+- 阶段 0 收尾时缺失仓库核验尚未修复；阶段 1 已修复并由第 8 节专项测试覆盖。`core-v1` 与 DirectRuntime 已实现，V2 Legacy 适配仍未实现。
+- 阶段 0 收尾时仅变更规范文档与测试；阶段 1 的实现、测试和真实模型尝试见第 8 节。
+- 阶段 0 的 55 项本地回归、7 份文档链接检查及 `git diff --check` 通过；没有据本地回归将整包提升为无条件通过。
 
-收尾之后才进入阶段 1，范围仅为源码问答、跨仓库搜索、会话、授权、Trace 与停止；Business Context、AST、Hybrid/Contract 不同时接入。
+阶段 0 收尾后已进入阶段 1，范围仅为源码问答、跨仓库搜索、会话、授权、Trace 与停止；Business Context、AST、Hybrid/Contract 未同时接入。
+
+## 8. 阶段 1 实现与验证（2026-11-13）
+
+### 实现范围
+
+| 提交 | 内容 |
+| --- | --- |
+| `8de687c` | `core-v1` Profile、RunContext、`MaterialManifest.for_core` 与配置仓库清单；缺失仓库保留为独立条目 |
+| `231bbf0` | `WorkspaceManager.prepare_core` 每轮隔离工作区、`query/tools/files.py`、`query/capabilities.py` |
+| `f96f23b` | `DirectAgentRuntime`、项目级 Direct 会话、取消与引用核对；不导入 Coordinator/Investigation/CodeIntel |
+| 本次 | QueryService core 分支：先创建 Run/Trace，再准备资料；失败/取消/成功持久化；API 组合根注入 ProjectContext |
+
+`core-v1` 使用源码 required、需求 optional、File required；Business Context、Code Map、AST、Hybrid、Contract 均 disabled，且 core 路径不构造 `AstMaterial`、不探测索引。Legacy 查询路径保持原有行为。
+
+### 验收矩阵
+
+| 编号 | 本地证据 | 结论 |
+| --- | --- | --- |
+| C01 零预建索引 | core 服务测试替换 `AstMaterial`/`WorkspaceManager.ensure` 为调用即失败仍成功；工作区无 knowledge/AST/索引目录；Direct 导入子进程不含 CodeIntel | 通过（单元/集成） |
+| C02 多仓库问答 | Direct 模拟模型跨 channel/decision 执行 Glob/Grep/Read | 通过（模拟模型） |
+| C03 缺失仓库 | `prepare_core` 拒绝 middle，模型零调用；失败 Run/execution/Trace 含仓库 ID | 通过 |
+| C04 独立调查 | Direct 导入子进程不含 `query.langchain_agent`/Coordinator/Investigation | 通过 |
+| C05 工具扩展 | 附加只读 Ping 提供者无需修改 Direct 循环 | 通过 |
+| C06 会话隔离 | core scope/profile 变化及 Legacy 工具/设置变化均重建会话 | 通过 |
+| C07 资料隔离 | core 工作区无业务/AST/Code Map；Read 拒绝未授权路径 | 通过 |
+| C08 原文依据 | Read 返回真实路径/行号；`usage.verification` 对引用逐条核对，`semanticProof=false` | 通过（引用核对，不等于语义正确） |
+| C09 运行记录 | core 成功、缺仓库失败、取消均有 Run/Event/Trace | 通过 |
+| C10 向后兼容 | Legacy 15 项、coordinated 16 项、问答 API/Trace/工作区 30 项本地回归通过 | 通过（本地） |
+
+### 本地测试
+
+阶段 1 新增 5 个测试模块，共 33 项：
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_core_context.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_core_workspace.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_core_file_tools.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_direct_runtime.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_core_query_service.py'
+```
+
+连同既有 55 项配置/会话/协调器/包边界回归，共 88 项通过；另跑 API/Trace/工作区/工程上下文 30 项通过。失败路径产生的 `WorkspaceError`/`RuntimeError` 日志为预期。测试使用临时目录和模拟模型，未生成工程索引。
+
+### 真实模型尝试与未完成项
+
+对 `validation-projects/complex-loan` 使用现有 `.env` 发起真实 core 请求。第一次在宿主机 HTTP 客户端初始化阶段被 `NO_PROXY=[::1]` 解析错误阻塞；仅为该验证进程清理代理变量后，供应商返回 **403 insufficient_quota（免费额度耗尽）**，未产生模型答案。core 已按失败路径保存 Run、事件和 Trace；未修改生产环境或模型配置。
+
+因此：
+
+- 真实模型的五类问题（代码定位、方法逻辑、跨工程调用、配置/数据访问、连续追问）**尚未完成**，不能宣称答案质量或业务收益。
+- 未启动浏览器页面做 core 人工验收；API/服务层回归通过不等于前端实机通过。
+- 生产默认仍为 Legacy；切换需在配额可用后完成真实模型验收并单独确认。
+
+下一步只做真实模型 core 验收或阶段 2 Business Context，不同时接入 AST/Hybrid/Contract，也不回退本次实现。

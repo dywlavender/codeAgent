@@ -17,9 +17,11 @@ V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构
 
 `claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
 
-已设计但未实现的是 V2 RunContext、统一 Capability 合同及 DirectRuntime；`core-v1/legacy-v1` 尚未开放。当前 `standard-v1` 的 direct 分支仍明确拒绝运行，其资料与工具策略不等价 core。设计通过、整包有条件通过；专项测试范围与缺失仓库缺口见[迁移计划](agent-migration-plan.md#7-本次验证与交付状态)。
+阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用，生产默认仍是 Legacy。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
 
-后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。本轮收尾仅修订文档和专项测试，不回滚已提交实现；下一阶段只落地最小 core 合同，完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链，默认切换需要另行确认。
+真实模型答案验收尚未完成：2026-11-13 对验证工程请求时供应商返回 403（额度耗尽），失败 Run/Event/Trace 已保存；不能用模拟模型测试或 API 回归代替答案质量验收。设计通过、整包有条件通过；阶段 1 验收与测试范围见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。
+
+后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链，默认切换需要另行确认。
 
 ## V1 目标
 
