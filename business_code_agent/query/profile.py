@@ -23,6 +23,9 @@ class AgentProfile:
     contract_trace: ToolPolicy = "disabled"
 
 
+CORE = AgentProfile("core-v1", "langchain-direct", "direct",
+                    materials=("source", "requirements"),
+                    file_tools="required", search_code="disabled", contract_trace="disabled")
 STANDARD = AgentProfile("standard-v1", "langchain", "agent_direct")
 COORDINATED_LEGACY = AgentProfile("coordinated-legacy-v1", "langchain", "coordinated",
                                   contract_trace="optional")
@@ -45,7 +48,7 @@ def legacy_langchain_profile(workflow, answer_mode, search_code, contract_trace)
 def resolve_profile(environment: Mapping[str, str]) -> AgentProfile:
     name = environment.get("BUSINESS_CODE_AGENT_PROFILE", "").strip()
     if name:
-        profiles = {profile.id: profile for profile in (STANDARD, COORDINATED_LEGACY, CLAUDE_COMPAT)}
+        profiles = {profile.id: profile for profile in (CORE, STANDARD, COORDINATED_LEGACY, CLAUDE_COMPAT)}
         if name not in profiles:
             raise ValueError(f"未知的 Agent Profile：{name}")
         return profiles[name]

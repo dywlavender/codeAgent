@@ -388,6 +388,10 @@ class WorkspaceManager:
         candidate = Path(str(value or "")).expanduser()
         return candidate.resolve() if candidate.is_absolute() else self._configured_path(candidate)
 
+    def repository_sources(self) -> list[tuple[str, Path]]:
+        """Return every configured repository, including missing directories."""
+        return self._repository_sources()
+
     def _repository_sources(self) -> list[tuple[str, Path]]:
         configured = self.config.get("repositories")
         values: list[tuple[str, Path]] = []

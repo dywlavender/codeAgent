@@ -30,18 +30,22 @@ class MaterialSource:
     directory: Path | None
     status: str
     version: str | None = None
+    repository_id: str | None = None
 
     @property
     def available(self) -> bool:
         return self.directory is not None
 
     def to_dict(self) -> dict:
-        return {
+        value = {
             "kind": self.kind, "label": self.label, "path": self.path,
             "directory": str(self.directory) if self.available else None,
             "purpose": _PURPOSES[self.kind], "status": self.status,
             "available": self.available, "version": self.version,
         }
+        if self.repository_id:
+            value["repositoryId"] = self.repository_id
+        return value
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,36 @@ class MaterialManifest:
             if not any(source.kind == "source" for source in sources):
                 sources.append(MaterialSource("source", "代码仓库", "repos", None, "missing"))
         return cls(tuple(sources))
+
+    @classmethod
+    def for_core(cls, workspace, repositories, *, include_requirements=True) -> "MaterialManifest":
+        """Build the core authorization list from configured repositories.
+
+        ``repositories`` contains every expected ``(repository_id, mount)``
+        from project configuration plus the normalized scope. Entries are never
+        derived by listing the workspace, so a missing authorized repository
+        stays visible instead of being silently omitted.
+        """
+        root = Path(workspace)
+        sources = []
+        for repository_id, mount in repositories:
+            candidate = root / mount
+            directory = candidate.resolve() if candidate.is_dir() else None
+            sources.append(MaterialSource(
+                "source", f"代码仓库 {repository_id}", str(mount), directory,
+                "available" if directory else "missing", repository_id=repository_id,
+            ))
+        if include_requirements:
+            candidate = root / "requirements"
+            directory = candidate.resolve() if candidate.is_dir() else None
+            sources.append(MaterialSource(
+                "requirements", "需求原文", "requirements", directory,
+                "available" if directory else "missing",
+            ))
+        return cls(tuple(sources))
+
+    def missing_required(self) -> list[MaterialSource]:
+        return [source for source in self.sources if source.kind == "source" and not source.available]
 
     def readable(self) -> list[MaterialSource]:
         return [source for source in self.sources if source.available]
