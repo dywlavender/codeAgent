@@ -1,6 +1,6 @@
 # CodeAgent V2 架构设计
 
-状态：设计冻结；`core-v1` 已实现阶段 1 最小主链，可通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用，生产默认仍为 Legacy。确认日期：2026-11-13。
+状态：设计冻结；`core-v1` 阶段 1 最小主链与 `core-business-v1` 阶段 2 Business Context 工程接入已实现，可分别通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1`、`core-business-v1` 显式启用；真实模型效果验收仍未完成，生产默认仍为 Legacy。确认日期：2026-11-13。
 
 `claudecode` 提交 `9a1c71e7c7bd7400d8d400475f51e47ccbca41f2` 的实际交付是「V2 设计 + V1 运行配置预备实现」，不是纯文档提交。Profile、资料清单、工具预检、执行快照与会话配置已进入该提交，另有 Runtime、API、schema 和轨迹前端配套改动；这些不是 V2 Direct Runtime。当前结论为：架构设计通过，整包提交有条件通过，验证范围与缺口见[迁移计划第 7 节](agent-migration-plan.md#7-本次验证与交付状态)。
 
@@ -14,7 +14,7 @@
 
 架构边界、资料授权、证据边界现在生效。阶段 1 已实现 `core-v1` 的 Profile、RunContext、按配置逐一核验仓库的隔离工作区、FileCapability、DirectAgentRuntime 及 QueryService 接入；完整 V2 合同中的运行期能力失效联动、结构版本联动和复杂 Evidence 生命周期仍待对应能力阶段实现。生产默认切换需要完整验收与单独确认，不由本次实现自动触发。
 
-阶段 1 的实现边界见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。`core-v1` 的默认网页请求 `mode=combined` 会映射为 `core`，不会因此挂载业务、AST、Code Map 或索引；显式 `none/backbone/ast` 会被拒绝。
+阶段 1 的实现边界见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)，阶段 2 的 Business Context 工程接入见[第 9 节](agent-migration-plan.md#9-阶段-2-business-context-工程实现2026-11-13)。`core-v1` 的默认网页请求 `mode=combined` 会映射为 `core`，不会因此挂载业务、AST、Code Map 或索引；`core-business-v1` 只增加可选业务文档，仍不挂载任何代码索引；两者显式 `none/backbone/ast` 都会被拒绝。
 
 ## 2. 唯一调查主链
 
@@ -90,11 +90,11 @@ BusinessContextCapability 通常不增加工具，复用 FileCapability 的 Read
 | --- | --- | --- | --- |
 | `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 已实现基础主链（阶段 1）；默认未切换 |
 | `legacy-v1` | `langchain-legacy` | 保留当前 combined/coordinated 及已准备索引的使用语义 | 需未来兼容适配；当前仍用现有入口 |
-| `core-business-v1` | 同一 `langchain-direct` | core 加 Business Context | 预留，未开放 |
+| `core-business-v1` | 同一 `langchain-direct` | core 加可选 Business Context 文件与阅读指导 | 阶段 2 工程接入已实现；效果未验收 |
 | `core-ast-v1` | 同一 `langchain-direct` | core 加 AST 结构导航 | 预留，未开放 |
 | `core-business-ast-v1` | 同一 `langchain-direct` | core 加两种能力 | 预留，未开放 |
 
-阶段 1 只新增 core 正式注册和保留旧入口所需的最薄 Legacy 适配，不要求先统一旧链全部能力。未来组合 Profile 的接口走查使用内存测试配置，不表示当前名称已可运行。不同组合不能对应不同 DirectRuntime 子类或不同调查算法。
+阶段 1 新增 core 正式注册和保留旧入口所需的最薄 Legacy 适配；阶段 2 只新增 `core-business-v1` 与一个无工具的 `BusinessContextCapability`，复用同一 Direct 模型/工具循环。其余组合 Profile 仍为预留。不同组合不能对应不同 DirectRuntime 子类或不同调查算法。
 
 - `required` 是必须具备的能力/资料，不要求模型每题必须调用或读取。
 - `optional` 是授权尝试使用现有可用资料，不允许准备、下载或补建。

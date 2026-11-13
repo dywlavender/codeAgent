@@ -386,6 +386,14 @@ class CoreDefaultRuntimeTest(unittest.TestCase):
         self.assertEqual("LANGCHAIN_DIRECT", runtime.runtime_name)
         self.assertEqual(("core-v1", "direct"), (runtime.profile.id, runtime.profile.investigation))
 
+    def test_business_profile_selects_the_same_direct_runtime(self):
+        with patch.dict(os.environ, {"BUSINESS_CODE_AGENT_PROFILE": "core-business-v1"}, clear=True):
+            runtime = _default_runtime(index_root=Path("/tmp/does-not-exist"), project_id="core")
+        self.assertEqual("LANGCHAIN_DIRECT", runtime.runtime_name)
+        self.assertEqual(("core-business-v1", "direct", "optional"),
+                         (runtime.profile.id, runtime.profile.investigation,
+                          runtime.profile.business_context))
+
 
 if __name__ == "__main__":
     unittest.main()

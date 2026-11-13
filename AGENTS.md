@@ -2,7 +2,7 @@
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）
 
-`claudecode` 的 `9a1c71e` 实际包含「V2 设计 + V1 运行配置预备实现」：Profile、Manifest、工具预检、执行/会话配置及 Runtime、API、schema、轨迹前端配套改动已提交，不再按未提交或纯文档描述。架构设计通过，整包提交有条件通过。阶段 1 已实现 `core-v1` 最小主链（Profile、RunContext、隔离 core 工作区、FileCapability、DirectAgentRuntime、QueryService 接入）；生产默认仍为 Legacy，完整 V2 其余能力未实现，真实模型答案验收因供应商配额未完成。
+`claudecode` 的 `9a1c71e` 实际包含「V2 设计 + V1 运行配置预备实现」：Profile、Manifest、工具预检、执行/会话配置及 Runtime、API、schema、轨迹前端配套改动已提交，不再按未提交或纯文档描述。架构设计通过，整包提交有条件通过。阶段 1 已实现 `core-v1` 最小主链（Profile、RunContext、隔离 core 工作区、FileCapability、DirectAgentRuntime、QueryService 接入）；阶段 2 已实现 `core-business-v1` 的 Business Context 工程接入；生产默认仍为 Legacy，完整 V2 其余能力未实现，真实模型答案验收与业务效果对照因供应商配额未完成。
 
 后续新 Agent 功能必须先读 [V2 总体架构](docs/spec/agent-architecture-v2.md)、[能力与运行合同](docs/spec/agent-capability-contract.md) 和 [迁移计划](docs/spec/agent-migration-plan.md)，遵守以下边界：
 
@@ -14,6 +14,7 @@
 - 工程、范围、Profile、可用资料/工具及其版本变化时重建模型会话，历史运行不补写新资料；同名仓库或版本不能跨工程复用。
 - Query 核心依赖公共工具合同，不依赖知识管理或 AST 内部实现；知识管理不调用问答主循环，CodeIntel 不生成最终业务答案，Evaluation 只消费公共 Runtime，API/CLI 只做装配与传输。
 - `core-v1` 阶段 1 已实现 AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools、DirectAgentRuntime 和 QueryService core 分支；测试位于 `tests/test_core_*.py`、`tests/test_direct_runtime.py`。完整动态失效、结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定及 AST/Contract 专属授权仍随能力延后，不成为 core 前置，也不新增抽象层。
+- `core-business-v1` 阶段 2 已实现可选 Business Context：资料由项目业务目录只读挂载，复用 Read/Glob/Grep；无专用业务搜索工具，无新调查循环。业务文档内容指纹变化会重建会话；业务资料不能当作源码已实现，也不能扩大本轮仓库授权。AST/Code Map/Hybrid/Contract 仍 disabled；真实模型 Core 与 Core+Business 效果对照尚未完成，工程测试通过不等于业务收益已验证。
 - 预期仓库必须来自配置和规范化 scope，由 `prepare_core` 逐一核验；任一必需仓库缺失/不可读须在模型前失败，错误与 execution/Trace 明确仓库 ID，不能以 File 工具已注册或部分仓库可读代替完整性检查。core 不构造 AstMaterial，不探测业务、Code Map、AST、Hybrid 或 Contract。
 - 真实模型 core 端到端验收尚未完成（2026-11-13 供应商返回 403 insufficient_quota）；不能用模拟模型测试、API 回归或失败记录替代答案质量验收。生产默认切换前需完成真实模型验收并另行确认。
 - Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；Direct 不继承其调查逻辑，生产默认切换及旧链删除另行确认。

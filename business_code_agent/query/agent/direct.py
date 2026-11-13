@@ -392,6 +392,7 @@ def verify_answer(answer: str, messages) -> dict:
                          and _delivered(by_path[matched_path], line, line_end))
         references.append({
             "path": cited,
+            "kind": _reference_kind(matched_path or cited),
             "line": line,
             "lineEnd": line_end,
             "matchedPath": matched_path,
@@ -405,6 +406,14 @@ def verify_answer(answer: str, messages) -> dict:
                         if not reference["confirmed"]],
         "readFiles": sorted(by_path),
     }
+
+
+def _reference_kind(path: str) -> str:
+    if path.startswith("knowledge/business-context/"):
+        return "business_context"
+    if path.startswith("requirements/"):
+        return "requirements"
+    return "source"
 
 
 def _reference_text(reference) -> str:

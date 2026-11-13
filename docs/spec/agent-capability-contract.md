@@ -1,6 +1,6 @@
 # CodeAgent V2 能力与运行合同
 
-状态：接口设计冻结；`core-v1` 已实现阶段 1 最小子集，完整合同其余部分尚未实现。确认日期：2026-11-13。
+状态：接口设计冻结；`core-v1` 阶段 1 与 `core-business-v1` 阶段 2 最小子集已实现，完整合同其余部分尚未实现。确认日期：2026-11-13。
 
 本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是完整目标合同，不是已全部实现的模块清单。阶段 1 已实现 `RunContext`、`MaterialSource`/`prepare_core`、简易 `FileCapability`、`DirectAgentRuntime` 以及 `QueryService` 接入；`RunAccess` 联动、结构版本和复杂 Evidence 仍未实现。完整合同用于后续能力阶段，不要求现在复制所有类型。
 
@@ -108,7 +108,7 @@ class MaterialSource:
 
 `legacy-v1` 表示当前 combined/coordinated/plain 的标准对照配置，不表示其内部能力已经实现统一协议：AST/Code Map 仍可只提供现有文件导航，契约保留现有工具名；Legacy 适配器记录真实工具清单，不虚构 FindCodeRelation。旧 basic/tracked、资料模式、Claude CLI 和显式开关继续走原入口并保留实际历史身份，不能统统重标为 legacy-v1。
 
-未来组合约定：`core-business-v1` 把业务资料与能力改为 optional；`core-ast-v1` 把 AST 资料与能力改为 optional；组合版同时改变二者。其余策略继承 core，尤其 Hybrid/Contract 不随 AST 自动打开。optional 允许无资料时继续文件调查，但不能据名称声称已使用该能力。需要严格验证某能力时，可用显式测试配置设 required，记录完整定义，不静默改变注册 Profile。
+`core-business-v1` 已按约定实现：source required、requirements 与 business_context optional、file required，Hybrid/Contract/AST/Code Map 仍 disabled；Business Context 不新增专用搜索工具，只复用 Read/Glob/Grep 并提供阅读指导。`core-ast-v1` 及组合版仍为预留：AST 资料与能力改为 optional，其余策略继承 core，尤其 Hybrid/Contract 不随 AST 自动打开。optional 允许无资料时继续文件调查，但不能据名称声称已使用该能力。需要严格验证某能力时，可用显式测试配置设 required，记录完整定义，不静默改变注册 Profile。
 
 示例表达（设计格式，不是当前可执行配置）：
 

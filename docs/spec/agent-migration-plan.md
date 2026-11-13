@@ -318,4 +318,60 @@
 - 未启动浏览器页面做 core 人工验收；API/服务层回归通过不等于前端实机通过。
 - 生产默认仍为 Legacy；切换需在配额可用后完成真实模型验收并单独确认。
 
-下一步只做真实模型 core 验收或阶段 2 Business Context，不同时接入 AST/Hybrid/Contract，也不回退本次实现。
+真实模型 core 验收仍待配额；随后只进入阶段 2 Business Context 工程实现（见第 9 节），不同时接入 AST/Hybrid/Contract，也不回退本次实现。
+
+## 9. 阶段 2 Business Context 工程实现（2026-11-13）
+
+### 实现范围
+
+| 位置 | 内容 |
+| --- | --- |
+| `query/profile.py` | 新增显式 `core-business-v1`：source required、requirements/business_context optional、File required，其余能力 disabled |
+| `query/materials.py` | `for_core` 可选生成 `business_context` 条目；内容清单指纹 `sha256:`；缺失/空目录为 missing，不阻断 |
+| `query/workspace.py` | `prepare_core` 按 Profile 可选挂载工程业务资料到 `knowledge/business-context`；`core-v1` 不创建/探测该目录 |
+| `query/tools/files.py` | Read/Glob/Grep 的授权根仍完全来自本轮 MaterialManifest，仅增加 `business_context` 类型 |
+| `query/capabilities.py` | 新增无工具 `BusinessContextCapability`，提供 optional 状态和阅读指导；索引能力继续 disabled |
+| `query/service.py` | 按 Profile 决定是否挂载业务资料；执行快照、会话配置和 workspace 摘要记录业务资料状态/版本 |
+| `query/agent/direct.py` | 模型—工具调查循环未改动；引用核验仅增加 `business_context/source` 来源类型标注 |
+
+业务资料根来源：已注册工程使用组合根注入的 `ProjectContext.business_context_root`；兼容工程继续使用项目配置的 `knowledge.businessContextRoot`（历史 `baselineRoot` 仅作读取兼容），同一工程不并行创建第二套 Business Context。
+
+### 验收矩阵
+
+| 编号 | 本地证据 | 结论 |
+| --- | --- | --- |
+| B01 Profile 独立 | `core-v1` 不生成业务条目且无法读取；`core-business-v1` 独立生成可选条目 | 通过 |
+| B02 可选业务资料 | 删除业务目录后服务仍完成源码问答，状态为 optional/missing，File 仍 ready | 通过 |
+| B03 资料访问 | Business Profile 通过 Glob/Grep/Read 读取业务文档 | 通过 |
+| B04 资料隔离 | Core Profile 对同一路径返回“不在本轮授权资料范围内” | 通过 |
+| B05 不引入索引依赖 | 两种 Profile 的 AST/Code Map/Hybrid/Contract 均为 disabled；Core 工作区无生成索引 | 通过 |
+| B06 Runtime 不变 | 两种 Profile 均使用同一 `DirectAgentRuntime`，无新调查循环 | 通过 |
+| B07 会话版本 | 业务文档内容指纹变化后重建会话；内容未变复用会话 | 通过 |
+| B08 证据区分 | 阅读指导声明业务资料非实现证据；引用条目带 `kind`，`semanticProof=false` | 通过（格式/来源区分，不是语义证明） |
+| B09 Trace | 执行快照含业务资料状态/版本；工具事件记录实际读取；引用与源码后续调查可回看 | 通过 |
+| B10 Legacy 回归 | 既有配置/会话/协调器/API 回归通过 | 通过（本地） |
+| B11 多工程授权 | 业务文档提到未授权仓库时，Read 该仓库源码仍被拒绝 | 通过 |
+| B12 工具扩展 | 业务能力不注册新工具；工具集合仍为 Read/Glob/Grep | 通过 |
+
+### 本地测试
+
+阶段 2 新增 2 个测试模块 12 项，另在 `test_core_query_service.py` 增加 1 项 `core-business-v1` Runtime 选择用例；阶段 1 五个模块现共 40 项（含该新增用例）：
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_business_context_capability.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_core_business_query.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_core_query_service.py'
+```
+
+40 项阶段 1 模块、12 项阶段 2 新模块、既有 55 项配置/会话/协调器/包边界回归、31 项 API/Trace/工作区/工程上下文回归，共 138 项后端相关测试通过；前端 `npm test` 18 项通过。测试使用临时目录、模拟模型和本地业务文档，未生成 AST、Code Map、Hybrid 或 Contract 索引。
+
+### 未完成的效果验收
+
+阶段 2 的工程验收（B01—B12）已完成，但**业务知识是否真正改善调查质量尚未验证**：
+
+- 尚未使用真实模型运行 Core 与 Core + Business 的 16 道固定问答题对照；当前供应商配额仍不可用。
+- 尚未进行浏览器人工复核、关键阶段覆盖率与错误结论统计。
+- 模拟模型测试只能证明授权、状态、会话、Trace 和工具行为，不能证明业务术语消歧、跨系统定位或数据生命周期覆盖提升。
+- 生产默认仍为 Legacy；`core-business-v1` 需显式配置启用。
+
+效果验收必须在同一模型、同一组问题、仅改变 Business Context 授权的条件下完成，并单独记录；不能由工程测试通过替代。
