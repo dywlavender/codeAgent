@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .materials import MaterialManifest
+from .materials import BUSINESS_CONTEXT_MOUNT, MaterialManifest
 from .navigation import NAVIGATION_FILE, build_navigation
 
 logger = logging.getLogger(__name__)
@@ -238,14 +238,16 @@ class WorkspaceManager:
         return self.root if not mode else self.root / "modes" / _safe_name(mode)
 
     def prepare_core(self, *, run_id: str, repository_ids=None,
-                     include_requirements: bool = True) -> Workspace:
+                     include_requirements: bool = True,
+                     include_business_context: bool = False) -> Workspace:
         """Create a run-isolated workspace containing only authorized sources.
 
         The expected repository set comes from project configuration and the
         normalized scope, never from directories that happen to exist. All
         selected repositories are checked before any model call; a missing or
-        unreadable one fails with its repository id. No AST, code map, business
-        context or index is inspected or mounted.
+        unreadable one fails with its repository id. Business context is an
+        optional profile-authorized document mount; no AST, code map or index
+        is inspected or mounted.
         """
         configured = self.repository_sources()
         if not configured:
@@ -288,8 +290,13 @@ class WorkspaceManager:
             self._link_directory(requirements_link, self.requirements_root)
         else:
             self._unlink_directory(requirements_link)
+        business_link = root / BUSINESS_CONTEXT_MOUNT
+        if include_business_context and self.business_context_root.is_dir():
+            self._link_directory(business_link, self.business_context_root)
+        else:
+            self._unlink_directory(business_link)
         claude_file = root / "CLAUDE.md"
-        claude_file.write_text(self._core_instructions(), encoding="utf-8")
+        claude_file.write_text(self._core_instructions(include_business_context), encoding="utf-8")
         navigation = build_navigation(
             self.config,
             {repository_id: f"repos/{_safe_name(repository_id)}" for repository_id, _ in selected},
@@ -310,6 +317,8 @@ class WorkspaceManager:
             mode="core",
             repository_ids=tuple(repository_id for repository_id, _ in selected),
             repository_mounts=mounts,
+            business_context_path=(business_link
+                                   if include_business_context and business_link.is_dir() else None),
         )
 
     def ensure(self, *, mode: str | None = None,
@@ -488,8 +497,8 @@ class WorkspaceManager:
         """Return every configured repository, including missing directories."""
         return self._repository_sources()
 
-    def core_source_summary(self) -> list[dict[str, Any]]:
-        """Describe core sources without touching AST, business or indexes."""
+    def core_source_summary(self, *, include_business_context: bool = False) -> list[dict[str, Any]]:
+        """Describe core sources without touching AST, code indexes or unknown material."""
         result = []
         for repository_id, path in self._repository_sources():
             status = _directory_status(path)
@@ -504,6 +513,13 @@ class WorkspaceManager:
             "status": _directory_status(self.requirements_root),
             "authorizationConfigured": self.requirements_root.is_dir(),
         })
+        if include_business_context:
+            status = _directory_status(self.business_context_root)
+            result.append({
+                "id": "business_context:业务补充知识", "kind": "business_context",
+                "name": "业务补充知识", "path": str(self.business_context_root),
+                "status": status, "authorizationConfigured": status == "READABLE",
+            })
         return result
 
     def _repository_sources(self) -> list[tuple[str, Path]]:
@@ -668,15 +684,23 @@ class WorkspaceManager:
             lines.append("- 代码仓库：未配置或目录不可用")
         return "\n".join(lines) + "\n"
 
-    def _core_instructions(self) -> str:
-        return """# CodeAgent core
-
-本轮只授权源码仓库和可选需求原文。只读使用 Read、Glob、Grep；不要修改、创建或删除文件。
-
-- 源码是当前实现的依据，需求只说明目标；检索命中只是线索，关键结论必须 Read。
-- 只能访问 repos/ 和 requirements/ 下的相对路径，不得访问其他目录或宿主绝对路径。
-- 无法确认的关系明确列为缺口，不把局部代码当作完整业务链。
-"""
+    def _core_instructions(self, include_business_context: bool = False) -> str:
+        lines = [
+            "# CodeAgent core",
+            "",
+            "本轮只授权源码仓库和可选需求原文。只读使用 Read、Glob、Grep；不要修改、创建或删除文件。",
+            "",
+            "- 源码是当前实现的依据，需求只说明目标；检索命中只是线索，关键结论必须 Read。",
+            "- 只能访问 repos/ 和 requirements/ 下的相对路径，不得访问其他目录或宿主绝对路径。",
+        ]
+        if include_business_context:
+            lines.extend([
+                "- 业务补充知识位于 knowledge/business-context/，只用于解释术语、职责和业务约定；",
+                "  不能当作源码已经实现，仍需读取源码核实。",
+                "- 业务文档提到但本轮未授权的仓库或系统，只记录为待核实关系，不能访问其源码。",
+            ])
+        lines.append("- 无法确认的关系明确列为缺口，不把局部代码当作完整业务链。")
+        return "\n".join(lines) + "\n"
 
     def _claude_instructions(self) -> str:
         return """# CodeAgent

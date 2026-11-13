@@ -47,7 +47,7 @@ def _is_ignored(relative: Path) -> bool:
 
 
 class CoreFiles:
-    """File access bound to one run's ready source and requirement roots."""
+    """File access bound to the ready material roots authorized this run."""
 
     def __init__(self, workspace, materials):
         self.workspace = Path(workspace).resolve()
@@ -55,14 +55,14 @@ class CoreFiles:
         for source in materials:
             if not isinstance(source, MaterialSource) or not source.available:
                 continue
-            if source.kind not in {"source", "requirements"}:
+            if source.kind not in {"source", "requirements", "business_context"}:
                 continue
             root = Path(source.directory).resolve()
             if not root.is_dir():
                 continue
             roots.append((str(source.path).rstrip("/"), root))
         if not roots:
-            raise ValueError("本轮没有可授权的源码或需求目录")
+            raise ValueError("本轮没有可授权的源码、需求或业务资料目录")
         self.roots = roots
 
     def locate(self, path):
@@ -215,19 +215,19 @@ class CoreFiles:
 
         @tool
         def Read(path: str, offset: int = 1, limit: int = 160) -> str:
-            """读取授权源码或需求原文，返回真实行号和文件路径；截断后用 nextLine 续读。"""
+            """读取本轮授权资料（源码、需求或业务补充知识），返回真实行号和文件路径；截断后用 nextLine 续读。"""
             return result(self.read, path, offset, limit)
 
         @tool
         def Glob(pattern: str, limit: int = 100, kind: str = "files", offset: int = 0) -> str:
-            """定位授权文件或目录；** 可跨多层目录。列仓库用 pattern='repos/*', kind='directories'。"""
+            """定位本轮授权文件或目录；** 可跨多层目录。列仓库用 pattern='repos/*', kind='directories'。"""
             return result(self.glob, pattern, limit, kind, offset)
 
         @tool
         def Grep(pattern: str, path: str = "", glob: str = "", literal: bool = False,
                  limit: int = 60, case_sensitive: bool = True, whole_word: bool = False,
                  offset: int = 0) -> str:
-            """按原文行检索授权资料，默认区分大小写；命中只是线索，结论须 Read。"""
+            """按原文行检索本轮授权资料，默认区分大小写；命中只是线索，结论须 Read。"""
             return result(self.grep, pattern, path, glob, literal, limit,
                           case_sensitive, whole_word, offset)
 
