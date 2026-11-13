@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
 MATERIAL_KINDS = ("source", "requirements", "business_context", "code_map", "ast")
+BUSINESS_CONTEXT_MOUNT = "knowledge/business-context"
 _PURPOSES = {
     "source": "核实当前实现，README 提供项目背景",
     "requirements": "核对需求目标和验收约束",
@@ -89,13 +91,15 @@ class MaterialManifest:
         return cls(tuple(sources))
 
     @classmethod
-    def for_core(cls, workspace, repositories, *, include_requirements=True) -> "MaterialManifest":
+    def for_core(cls, workspace, repositories, *, include_requirements=True,
+                 include_business_context=False) -> "MaterialManifest":
         """Build the core authorization list from configured repositories.
 
         ``repositories`` contains every expected ``(repository_id, mount)``
         from project configuration plus the normalized scope. Entries are never
         derived by listing the workspace, so a missing authorized repository
-        stays visible instead of being silently omitted.
+        stays visible instead of being silently omitted. Optional business
+        context is mounted only when the selected profile authorizes it.
         """
         root = Path(workspace)
         sources = []
@@ -116,6 +120,15 @@ class MaterialManifest:
                 "requirements", "需求原文", "requirements", directory,
                 "available" if directory else "missing",
             ))
+        if include_business_context:
+            candidate = root / BUSINESS_CONTEXT_MOUNT
+            directory = candidate.resolve() if candidate.is_dir() else None
+            version = _directory_revision(directory) if directory else None
+            sources.append(MaterialSource(
+                "business_context", "业务补充知识", BUSINESS_CONTEXT_MOUNT,
+                directory if version else None,
+                "available" if version else "missing", version,
+            ))
         return cls(tuple(sources))
 
     def missing_required(self) -> list[MaterialSource]:
@@ -129,3 +142,25 @@ class MaterialManifest:
 
     def roots(self) -> list[tuple[str, Path]]:
         return [(source.path, source.directory) for source in self.readable()]
+
+
+def _directory_revision(directory: Path) -> str | None:
+    """Hash business document names and contents for session invalidation."""
+    if not directory.is_dir():
+        return None
+    digest = hashlib.sha256()
+    count = 0
+    for path in sorted(directory.rglob("*")):
+        relative = path.relative_to(directory)
+        if not path.is_file() or any(part.startswith(".") for part in relative.parts):
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        digest.update(relative.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+        digest.update(b"\0")
+        count += 1
+    return f"sha256:{digest.hexdigest()[:16]}" if count else None
