@@ -13,12 +13,14 @@ from unittest.mock import patch
 
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from business_code_agent.query.agent.direct import DirectAgentRuntime
 from business_code_agent.query.profile import CORE
 from business_code_agent.query.runtime import RuntimeResult
 from business_code_agent.query.service import (
     QueryConfigurationError,
+    QueryRuntimeError,
     QueryService,
     _default_runtime,
 )
@@ -37,6 +39,20 @@ class ExplodingModel(ToolModel):
     def _call(self, *args, **kwargs):
         type(self).called = True
         raise AssertionError("model must not be called")
+
+
+class FailingSecondCallModel(ToolModel):
+    attempts: ClassVar[int] = 0
+
+    def _generate(self, *args, **kwargs):
+        type(self).attempts += 1
+        if type(self).attempts == 2:
+            raise RuntimeError("provider down")
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(
+            content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
+            }]))])
 
 
 def project_config(root: Path, repositories=("channel", "decision")) -> Path:
@@ -135,6 +151,58 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertEqual("core", summary["workspace"]["mode"])
         self.assertEqual({"repository", "requirements"},
                          {source["kind"] for source in summary["sources"]})
+
+    def test_three_model_calls_are_archived_with_requests_tools_and_responses(self):
+        responses = [
+            AIMessage(content="", tool_calls=[
+                {"id": "glob", "name": "Glob", "args": {"pattern": "repos/*"}},
+                {"id": "grep", "name": "Grep", "args": {"pattern": "withdraw"}}]),
+            AIMessage(content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
+            }]),
+            AIMessage(content="提款入口为 repos/channel/Channel.java:2。"),
+        ]
+        service, _ = self.service(responses)
+        result = service.query("提款入口在哪里？")
+        trace = service.get_trace(result["runId"])
+        calls = trace["calls"]
+        self.assertEqual([1, 2, 3], [call["attempt"] for call in calls])
+        self.assertEqual(["investigation", "investigation", "answer"],
+                         [call["phase"] for call in calls])
+        self.assertEqual(["completed"] * 3, [call["status"] for call in calls])
+        self.assertTrue(trace["modelSnapshotAvailable"])
+        for call in calls:
+            self.assertGreater(call["inputTextChars"], 0)
+            self.assertGreaterEqual(call["durationMs"], 0)
+            self.assertEqual({"Read", "Glob", "Grep"},
+                             {definition["function"]["name"] for definition in call["tools"]})
+            self.assertEqual(["ai"], [message["role"] for message in call["responses"]])
+        self.assertEqual(["system", "human"],
+                         [message["role"] for message in calls[0]["messages"]])
+        self.assertIn("tool", [message["role"] for message in calls[1]["messages"]])
+        self.assertIn("repos/channel/Channel.java:2", calls[2]["responses"][0]["content"])
+        self.assertEqual("completed", trace["run"]["status"])
+
+    def test_failed_second_model_call_is_kept_in_trace(self):
+        FailingSecondCallModel.attempts = 0
+        runtime = DirectAgentRuntime(profile=CORE,
+                                     model=FailingSecondCallModel(responses=[]),
+                                     environment={})
+        service = QueryService(self.db, db_path=self.db_path,
+                               project_config=self.config, project_id="core-query",
+                               runtime=runtime)
+        with self.assertRaises(QueryRuntimeError):
+            service.query("提款入口在哪里？")
+        run = self.db.execute("SELECT id,status FROM query_run").fetchone()
+        self.assertEqual("failed", run["status"])
+        trace = json.loads((service.trace_root / f"{run['id']}.json").read_text(encoding="utf-8"))
+        self.assertEqual(["completed", "failed"],
+                         [call["status"] for call in trace["calls"]])
+        self.assertEqual(("RuntimeError", "provider down"),
+                         (trace["calls"][1]["errorType"], trace["calls"][1]["error"]))
+        self.assertIn("tool", [message["role"] for message in trace["calls"][1]["messages"]])
+        self.assertEqual("failed", trace["status"])
 
     def test_frontend_default_mode_maps_to_core_and_legacy_modes_are_rejected(self):
         service, _ = self.service([AIMessage(content="源码答案。"),
@@ -256,6 +324,49 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertEqual("cancelled", trace["status"])
         self.assertTrue(any(event["payload"].get("phase") == "cancelled"
                             for event in trace["events"]))
+
+    def test_core_cancel_keeps_inflight_model_call_in_trace(self):
+        model = ToolModel(responses=[AIMessage(content="慢答案。")], sleep=1)
+        runtime = DirectAgentRuntime(profile=CORE, model=model, environment={})
+        results, errors = [], []
+
+        def worker():
+            worker_db = connect(self.db_path)
+            try:
+                results.append(QueryService(
+                    worker_db, db_path=self.db_path, project_config=self.config,
+                    project_id="core-query", runtime=runtime).query("等待"))
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                worker_db.close()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            run_id, trace = None, {}
+            for _ in range(200):
+                row = self.db.execute(
+                    "SELECT id FROM query_run WHERE status='running'").fetchone()
+                if row:
+                    run_id = row["id"]
+                    path = self.service_trace_root() / f"{run_id}.json"
+                    if path.is_file():
+                        trace = json.loads(path.read_text(encoding="utf-8"))
+                        if trace.get("calls"):
+                            break
+                time.sleep(0.02)
+            self.assertIsNotNone(run_id)
+            self.assertEqual("running", trace["calls"][0]["status"])
+            self.assertEqual("cancelling", self.service_cancel(run_id)["status"])
+        finally:
+            thread.join(timeout=10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([], errors)
+        self.assertEqual("cancelled", results[0]["status"])
+        trace = json.loads((self.service_trace_root() / f"{run_id}.json").read_text(encoding="utf-8"))
+        self.assertEqual(["cancelled"], [call["status"] for call in trace["calls"]])
+        self.assertEqual(1, trace["calls"][0]["attempt"])
 
     def service_cancel(self, run_id):
         service = QueryService(self.db, db_path=self.db_path, project_config=self.config,

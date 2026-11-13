@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from business_code_agent.platform.projects import ProjectContext
-from business_code_agent.query.agent.direct import DirectAgentRuntime
+from business_code_agent.query.agent.direct import DirectAgentRuntime, verify_answer
 from business_code_agent.query.agent.session import DirectSessionStore, retire_changed_sources
 from business_code_agent.query.capabilities import FileCapability, prepare_capabilities
 from business_code_agent.query.context import RunContext
@@ -177,6 +177,77 @@ class DirectRuntimeTest(unittest.TestCase):
         outputs = [event["payload"]["output"] for event in result.events
                    if event["eventType"] == "tool" and event["payload"]["status"] == "completed"]
         self.assertIn('"value": "ok"', outputs[0])
+
+    def test_verify_answer_requires_fully_delivered_line_range(self):
+        def read(path, start, end):
+            return ToolMessage(content=json.dumps({
+                "path": path, "lineStart": start, "lineEnd": end, "content": "源码"}),
+                name="Read", tool_call_id=f"read-{start}")
+
+        messages = [read("repos/channel/Channel.java", 10, 14),
+                    read("repos/channel/Channel.java", 15, 20)]
+        result = verify_answer(
+            "单行 repos/channel/Channel.java:12；"
+            "完整 repos/channel/Channel.java:10-20；"
+            "越界 repos/channel/Channel.java:15-25；"
+            "仅文件 repos/channel/Channel.java。", messages)
+        references = result["references"]
+        self.assertEqual([True, True, False, False],
+                         [reference["confirmed"] for reference in references])
+        self.assertEqual((10, 20), (references[1]["line"], references[1]["lineEnd"]))
+        self.assertTrue(references[3]["fileRead"])
+        self.assertEqual(["repos/channel/Channel.java:15-25", "repos/channel/Channel.java"],
+                         result["unconfirmed"])
+
+    def test_failed_model_call_keeps_request_and_tool_definitions(self):
+        calls = []
+        runtime = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=[]), environment={})
+        with self.assertRaises(IndexError):
+            runtime.ask("问题", context=self.context, prepared=self.prepared,
+                        call_callback=calls.append)
+        self.assertEqual(["running", "failed"], [call["status"] for call in calls])
+        call = calls[-1]
+        self.assertEqual((1, "IndexError"), (call["attempt"], call["errorType"]))
+        self.assertEqual(["system", "human"], [message["role"] for message in call["messages"]])
+        self.assertEqual({"Read", "Glob", "Grep"},
+                         {definition["function"]["name"] for definition in call["tools"]})
+
+    def test_cancellation_after_tool_keeps_completed_model_call(self):
+        cancelled = {"value": False}
+        calls = []
+
+        class CancelProvider:
+            id = "cancel"
+
+            def status(self, context):
+                return ToolStatus("cancel", "optional", "ready", ("Stop",))
+
+            def tools(self, context):
+                @tool
+                def Stop() -> str:
+                    """请求停止本轮调查。"""
+                    cancelled["value"] = True
+                    return json.dumps({"stopped": True})
+
+                return (Stop,)
+
+            def instructions(self, context):
+                return ""
+
+        prepared = prepare_capabilities(self.context,
+                                        providers=[FileCapability(), CancelProvider()])
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{"id": "stop", "name": "Stop", "args": {}}]),
+            AIMessage(content="不应执行"),
+        ])
+        result = DirectAgentRuntime(profile=CORE, model=model, environment={}).ask(
+            "停止", context=self.context, prepared=prepared,
+            cancel_check=lambda: cancelled["value"], call_callback=calls.append)
+        self.assertEqual("cancelled", result.status)
+        self.assertEqual(1, result.usage["modelCalls"])
+        self.assertEqual(1, calls[-1]["attempt"])
+        self.assertEqual("completed", calls[-1]["status"])
+        self.assertEqual(1, len(calls[-1]["responses"]))
 
     def test_direct_module_does_not_import_legacy_agent_or_codeintel(self):
         code = (

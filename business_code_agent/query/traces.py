@@ -6,6 +6,20 @@ import json
 from pathlib import Path
 import uuid
 
+from langchain_core.messages import AIMessage, ToolMessage
+
+
+def public_message(message):
+    """Serialize a model-visible message without private reasoning or credentials."""
+    value = {"role": message.type, "content": message.text if isinstance(message, AIMessage) else message.content}
+    if isinstance(message, AIMessage):
+        value["toolCalls"] = message.tool_calls
+        value["metadata"] = {key: message.response_metadata[key] for key in
+                             ("model_name", "model_provider", "finish_reason", "id") if key in message.response_metadata}
+    if isinstance(message, ToolMessage):
+        value.update({"toolCallId": message.tool_call_id, "name": message.name})
+    return value
+
 
 class RunTraceArchive:
     def __init__(self, root, run_id, project_id=None):
@@ -30,6 +44,18 @@ class RunTraceArchive:
             if candidate.is_relative_to(self.workspace / ".langchain-traces") and candidate.name.endswith(".trace.json"):
                 self.runtime_path = candidate
         self.refresh()
+        self.write()
+
+    def record_call(self, call):
+        """Upsert one model request so in-flight and failed calls are retained."""
+        entry = {**call}
+        for index, existing in enumerate(self.value["calls"]):
+            if existing.get("attempt") == entry.get("attempt"):
+                self.value["calls"][index] = entry
+                break
+        else:
+            self.value["calls"].append(entry)
+        self.value["modelSnapshotAvailable"] = bool(self.value["calls"])
         self.write()
 
     def refresh(self):

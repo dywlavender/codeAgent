@@ -14,14 +14,17 @@ import re
 import time
 import uuid
 from contextlib import suppress
+from datetime import datetime, timezone
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 
 from business_code_agent.query.capabilities import PreparedCapabilities
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
+from business_code_agent.query.traces import public_message
 from .session import DirectSessionStore, compact_messages, retire_changed_sources
 
 
@@ -31,6 +34,10 @@ _CITATION = re.compile(
     r"([A-Za-z0-9_./-]+\.(?:java|kt|scala|groovy|py|go|rs|cs|c|h|cpp|hpp|js|jsx|ts|tsx|"
     r"vue|html|xml|sql|yml|yaml|properties|json|toml|gradle|md|txt))(?::(\d+)(?:-(\d+))?)?"
 )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class _Stopped(Exception):
@@ -102,16 +109,18 @@ class DirectAgentRuntime:
         )
 
     def ask(self, question, *, context: RunContext, prepared: PreparedCapabilities,
-            session_id=None, event_callback=None, cancel_check=None) -> RuntimeResult:
+            session_id=None, event_callback=None, cancel_check=None,
+            call_callback=None) -> RuntimeResult:
         if context.profile.id != self.profile.id:
             raise ValueError("RunContext 与 Runtime Profile 不一致")
         if not prepared.tools:
             raise RuntimeErrorBase("本轮没有可用的只读工具")
         return asyncio.run(self._ask(question, context=context, prepared=prepared,
                                      session_id=session_id, event_callback=event_callback,
-                                     cancel_check=cancel_check))
+                                     cancel_check=cancel_check, call_callback=call_callback))
 
-    async def _ask(self, question, *, context, prepared, session_id, event_callback, cancel_check):
+    async def _ask(self, question, *, context, prepared, session_id, event_callback, cancel_check,
+                   call_callback):
         started = time.monotonic()
         events: list[dict] = []
         calls = 0
@@ -172,6 +181,40 @@ class DirectAgentRuntime:
             if (message.response_metadata or {}).get("model_name"):
                 reported_models.add(str(message.response_metadata["model_name"]))
 
+        tool_definitions = [convert_to_openai_tool(tool) for tool in prepared.tools]
+
+        def record_call(entry):
+            if call_callback:
+                call_callback({**entry})
+
+        def begin_call(request_messages, attempt):
+            entry = {
+                "attempt": attempt,
+                "phase": "investigation",
+                "startedAt": _now(),
+                "elapsedMs": round((time.monotonic() - started) * 1000, 3),
+                "messages": [public_message(message) for message in request_messages],
+                "tools": tool_definitions,
+                "status": "running",
+                "inputTextChars": sum(len(str(message.content)) for message in request_messages),
+            }
+            record_call(entry)
+            return entry
+
+        def finish_call(entry, call_started, *, response=None, status=None, error=None):
+            entry["status"] = status or ("failed" if error else "completed")
+            entry["completedAt"] = _now()
+            entry["durationMs"] = round((time.monotonic() - call_started) * 1000, 3)
+            if error is not None:
+                entry["errorType"] = type(error).__name__
+                entry["error"] = str(error)
+            if response is not None:
+                entry["responses"] = [public_message(response)]
+                entry["usage"] = [getattr(response, "usage_metadata", None)]
+                if not getattr(response, "tool_calls", None):
+                    entry["phase"] = "answer"
+            record_call(entry)
+
         async def controlled(awaitable):
             pending = asyncio.ensure_future(awaitable)
             try:
@@ -203,9 +246,20 @@ class DirectAgentRuntime:
                     raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
                 calls += 1
                 emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮）")
-                response = await controlled(bound.ainvoke([SystemMessage(system_prompt), *bounded]))
+                request_messages = [SystemMessage(system_prompt), *bounded]
+                call_started = time.monotonic()
+                call_entry = begin_call(request_messages, calls)
+                try:
+                    response = await controlled(bound.ainvoke(request_messages))
+                except _Stopped as exc:
+                    finish_call(call_entry, call_started, status="cancelled")
+                    return stopped(str(exc) or _STOPPED)
+                except Exception as exc:
+                    finish_call(call_entry, call_started, error=exc)
+                    raise
                 record_usage(response)
                 messages.append(response)
+                finish_call(call_entry, call_started, response=response)
                 emit("model", attempt=calls, messageCount=len(messages),
                      toolCalls=[call.get("name") for call in (response.tool_calls or [])],
                      outputChars=len(str(response.text or "")),
@@ -329,25 +383,50 @@ def verify_answer(answer: str, messages) -> dict:
     for match in _CITATION.finditer(answer or ""):
         cited = match.group(1).lstrip("./")
         line = int(match.group(2)) if match.group(2) else None
+        line_end = int(match.group(3)) if match.group(3) else line
         matched_path = cited if cited in by_path else None
         candidates = [path for path in by_path if path.endswith("/" + cited)]
         if matched_path is None and len(candidates) == 1:
             matched_path = candidates[0]
-        confirmed = False
-        if matched_path:
-            ranges = by_path[matched_path]
-            confirmed = line is None or any(
-                item["lineStart"] <= line <= item["lineEnd"] for item in ranges)
+        confirmed = bool(matched_path and line is not None
+                         and _delivered(by_path[matched_path], line, line_end))
         references.append({
             "path": cited,
             "line": line,
+            "lineEnd": line_end,
             "matchedPath": matched_path,
+            "fileRead": matched_path is not None,
             "confirmed": confirmed,
         })
     return {
         "semanticProof": False,
         "references": references,
-        "unconfirmed": [reference["path"] for reference in references
+        "unconfirmed": [_reference_text(reference) for reference in references
                         if not reference["confirmed"]],
         "readFiles": sorted(by_path),
     }
+
+
+def _reference_text(reference) -> str:
+    path, line, line_end = reference["path"], reference["line"], reference["lineEnd"]
+    if line is None:
+        return path
+    return f"{path}:{line}" if line_end == line else f"{path}:{line}-{line_end}"
+
+
+def _delivered(read_results, start, end) -> bool:
+    """Whether the cited line interval was fully present in delivered Read output."""
+    low, high = sorted((start, end))
+    intervals = sorted(
+        (item["lineStart"], item["lineEnd"]) for item in read_results
+        if item.get("lineStart") is not None and item.get("lineEnd") is not None)
+    cursor = low
+    for interval_start, interval_end in intervals:
+        if interval_end < cursor:
+            continue
+        if interval_start > cursor:
+            return False
+        cursor = max(cursor, interval_end + 1)
+        if cursor > high:
+            return True
+    return False

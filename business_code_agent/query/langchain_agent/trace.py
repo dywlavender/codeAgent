@@ -8,19 +8,10 @@ from pathlib import Path
 import time
 import uuid
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-
-def public_message(message):
-    value = {"role": message.type, "content": message.text if isinstance(message, AIMessage) else message.content}
-    if isinstance(message, AIMessage):
-        value["toolCalls"] = message.tool_calls
-        value["metadata"] = {key: message.response_metadata[key] for key in
-                             ("model_name", "model_provider", "finish_reason", "id") if key in message.response_metadata}
-    if isinstance(message, ToolMessage):
-        value.update({"toolCallId": message.tool_call_id, "name": message.name})
-    return value
+from business_code_agent.query.traces import public_message
 
 
 class TraceRecorder:

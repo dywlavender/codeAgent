@@ -524,13 +524,17 @@ class QueryService:
                               "astVersionId": None, "execution": execution})
             preparation.require_tools()
             context = replace(context, session_id=conversation["runtime_session_id"])
-            raw_result = runtime.ask(
-                question, context=context, prepared=prepared,
-                session_id=conversation["runtime_session_id"],
-                event_callback=on_event,
-                cancel_check=lambda: self.db.execute(
+            ask_kwargs = {
+                "context": context, "prepared": prepared,
+                "session_id": conversation["runtime_session_id"],
+                "event_callback": on_event,
+                "cancel_check": lambda: self.db.execute(
                     "SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
-            )
+            }
+            from business_code_agent.query.agent.direct import DirectAgentRuntime
+            if isinstance(runtime, DirectAgentRuntime):
+                ask_kwargs["call_callback"] = archive.record_call
+            raw_result = runtime.ask(question, **ask_kwargs)
             result = normalize_runtime_result(raw_result)
         except Exception as exc:
             duration = round((time.monotonic() - started_clock) * 1000, 3)

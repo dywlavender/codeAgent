@@ -267,7 +267,8 @@
 | `8de687c` | `core-v1` Profile、RunContext、`MaterialManifest.for_core` 与配置仓库清单；缺失仓库保留为独立条目 |
 | `231bbf0` | `WorkspaceManager.prepare_core` 每轮隔离工作区、`query/tools/files.py`、`query/capabilities.py` |
 | `f96f23b` | `DirectAgentRuntime`、项目级 Direct 会话、取消与引用核对；不导入 Coordinator/Investigation/CodeIntel |
-| 本次 | QueryService core 分支：先创建 Run/Trace，再准备资料；失败/取消/成功持久化；API 组合根注入 ProjectContext |
+| `863f765` | QueryService core 分支：先创建 Run/Trace，再准备资料；失败/取消/成功持久化；API 组合根注入 ProjectContext |
+| 本轮修复 | Direct 每次模型请求写入 `RunTraceArchive.calls`（请求消息、工具定义、响应、耗时）；失败/取消保留；引用改为按已交付行区间核验 |
 
 `core-v1` 使用源码 required、需求 optional、File required；Business Context、Code Map、AST、Hybrid、Contract 均 disabled，且 core 路径不构造 `AstMaterial`、不探测索引。Legacy 查询路径保持原有行为。
 
@@ -282,13 +283,13 @@
 | C05 工具扩展 | 附加只读 Ping 提供者无需修改 Direct 循环 | 通过 |
 | C06 会话隔离 | core scope/profile 变化及 Legacy 工具/设置变化均重建会话 | 通过 |
 | C07 资料隔离 | core 工作区无业务/AST/Code Map；Read 拒绝未授权路径 | 通过 |
-| C08 原文依据 | Read 返回真实路径/行号；`usage.verification` 对引用逐条核对，`semanticProof=false` | 通过（引用核对，不等于语义正确） |
-| C09 运行记录 | core 成功、缺仓库失败、取消均有 Run/Event/Trace | 通过 |
-| C10 向后兼容 | Legacy 15 项、coordinated 16 项、问答 API/Trace/工作区 30 项本地回归通过 | 通过（本地） |
+| C08 原文依据 | Read 返回真实路径/行号；引用单行与区间按已交付范围核验，仅文件名的引用只标记 `fileRead`；`semanticProof=false` | 通过（格式与覆盖核对，不等于语义正确） |
+| C09 运行记录 | core 成功、缺仓库失败、取消均有 Run/Event/Trace；`trace.calls` 保留每次模型请求消息、工具定义、响应与耗时 | 通过 |
+| C10 向后兼容 | Legacy 15 项、coordinated 16 项、问答 API/Trace/工作区 31 项本地回归通过 | 通过（本地） |
 
 ### 本地测试
 
-阶段 1 新增 5 个测试模块，共 33 项：
+阶段 1 新增 5 个测试模块，共 39 项：
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -p 'test_core_context.py'
@@ -298,7 +299,14 @@
 .venv/bin/python -m unittest discover -s tests -p 'test_core_query_service.py'
 ```
 
-连同既有 55 项配置/会话/协调器/包边界回归，共 88 项通过；另跑 API/Trace/工作区/工程上下文 30 项通过。失败路径产生的 `WorkspaceError`/`RuntimeError` 日志为预期。测试使用临时目录和模拟模型，未生成工程索引。
+连同既有 55 项配置/会话/协调器/包边界回归，共 94 项通过；另跑 query API/进度/资料、Trace、工作区、工程上下文与多应用流程 31 项通过。前端 `npm test` 18 项通过，其中包含三次模型调用在轨迹时间线上的模型步骤断言。失败路径产生的 `WorkspaceError`/`RuntimeError` 日志为预期。测试使用临时目录和模拟模型，未生成工程索引。
+
+### 2026-11-13 验收修复
+
+- **模型调用轨迹**：原 Direct 只发送 `model` 摘要事件，`RunTraceArchive.calls` 为空，轨迹页显示 0 次模型请求。现 `RunTraceArchive.record_call` 按 `attempt` upsert；Direct 在每次模型调用前写入请求消息与 OpenAI 工具定义，调用后补响应、用量和耗时。请求在调用前即落盘，第二次调用抛错时第一次记录保留，当前调用标记 `failed`；取消时标记 `cancelled`。`public_message` 与 Legacy `TraceRecorder` 共用，不新增第三种轨迹格式。`QueryService` 只对 Direct Runtime 注入该回调。
+- **引用核验**：`verify_answer` 不再把无行号引用视为已确认，只记录 `fileRead=true`；单行引用核对该行已交付；`文件:起-止` 必须被已读区间完整覆盖，分段相邻读取可合并覆盖；`unconfirmed` 保留引用区间文本。仍声明 `semanticProof=false`。
+- **新增回归**：三次模型调用的请求/工具/响应/耗时、第二次调用失败的失败记录、工具触发取消后的完成调用保留、进行中模型调用的取消记录、引用单行/跨读区间/越界/仅文件名，以及前端轨迹时间线三条模型步骤。
+- **未完成**：真实模型额度恢复前的五类问答仍未执行；浏览器人工验收未执行。以上不能由模拟模型测试替代。
 
 ### 真实模型尝试与未完成项
 
