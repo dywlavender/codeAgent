@@ -18,7 +18,8 @@ CORE_SOURCE_SUFFIXES = {
     ".xml", ".sql", ".yml", ".yaml", ".properties", ".json", ".toml", ".gradle",
     ".ini", ".conf", ".md", ".txt", ".sh", ".bat", ".ps1", ".proto", ".graphql",
 }
-CORE_FILE_NAMES = {"Dockerfile", "Makefile", "Jenkinsfile", "Procfile"}
+CORE_FILE_NAMES = {"Dockerfile", "Makefile", "Jenkinsfile", "Procfile",
+                   "README", "LICENSE", "NOTICE", "CHANGELOG"}
 CORE_IGNORED_DIRS = {
     ".git", ".svn", ".hg", ".data", ".venv", "node_modules", "target", "build",
     "dist", "__pycache__", ".idea", ".gradle", "vendor", ".next", "out",

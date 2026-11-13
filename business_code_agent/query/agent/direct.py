@@ -156,7 +156,7 @@ class DirectAgentRuntime:
 
         store = DirectSessionStore(context.project.data_root / "query-sessions" / "core")
         scope = self._session_scope(context, prepared)
-        session = session_id if session_id else f"DA-{uuid.uuid4().hex}"
+        session = session_id or context.session_id or f"DA-{uuid.uuid4().hex}"
         messages = retire_changed_sources(store.load(session, scope), prepared.files)
         messages.append(HumanMessage(question))
         system_prompt = self._system_prompt(context, prepared)

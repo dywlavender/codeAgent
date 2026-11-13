@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 MATERIAL_KINDS = ("source", "requirements", "business_context", "code_map", "ast")
@@ -100,6 +100,9 @@ class MaterialManifest:
         root = Path(workspace)
         sources = []
         for repository_id, mount in repositories:
+            mount_path = PurePosixPath(str(mount))
+            if mount_path.is_absolute() or ".." in mount_path.parts:
+                raise ValueError(f"仓库挂载路径不合法：{mount}")
             candidate = root / mount
             directory = candidate.resolve() if candidate.is_dir() else None
             sources.append(MaterialSource(
