@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from business_code_agent.query.claude_runtime import ClaudeCodeRuntime
-from business_code_agent.query.runtime import RuntimeResult
-from business_code_agent.query.service import QueryBusyError, QueryService
+from business_code_agent.query.profile import ToolStatus, resolve_profile
+from business_code_agent.query.runtime import RunPreparation, RuntimeResult
+from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryService
 from business_code_agent.storage.schema import connect
 
 
@@ -34,6 +38,26 @@ class _FakeRuntime:
             events=[],
             usage={"input_tokens": 3},
         )
+
+
+class _PreparedRuntime(_FakeRuntime):
+    def __init__(self):
+        super().__init__()
+        self.profile = resolve_profile({})
+        self.tool_statuses = (ToolStatus("file_tools", "required", "ready", ("Read", "Glob", "Grep")),)
+        self.settings = {"requestedModel": "fake-model", "agentVersion": 1}
+        self.preparations = []
+
+    def prepare(self, *, workspace, materials, project_id=None):
+        return RunPreparation(materials, self.tool_statuses)
+
+    def execution_settings(self):
+        return dict(self.settings)
+
+    def ask_prepared(self, question, *, preparation, **kwargs):
+        self.preparations.append(preparation)
+        result = super().ask(question, **kwargs)
+        return replace(result, runtime_session_id=kwargs["session_id"] or f"session-{len(self.calls)}")
 
 
 class QueryRuntimeServiceTest(unittest.TestCase):
@@ -285,6 +309,178 @@ class QueryRuntimeServiceTest(unittest.TestCase):
             prompt_all = unscoped[unscoped.index("--append-system-prompt") + 1]
             self.assertIn("代码仓库 beta", prompt_all)
             self.assertNotIn("本轮调查已限定范围", prompt_all)
+
+
+class QueryPreparedServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict(os.environ, {}, clear=True))
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        repository = self.root / "repo"
+        repository.mkdir()
+        (repository / "math.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        requirements = self.root / "requirements"
+        requirements.mkdir()
+        (requirements / "request.md").write_text("返回两数之和。", encoding="utf-8")
+        config = self.root / "project.json"
+        config.write_text(json.dumps({
+            "project": {"id": "prepared-test", "name": "Prepared Test"},
+            "knowledge": {"requirementsRoot": "requirements"},
+            "repositories": [{"id": "repo", "gitUrl": "unused", "localPath": "repo"}],
+        }), encoding="utf-8")
+        db_path = self.root / "db.sqlite"
+        self.db = connect(str(db_path))
+        self.addCleanup(self.db.close)
+        self.runtime = _PreparedRuntime()
+        self.service = QueryService(self.db, db_path=str(db_path), project_config=config,
+                                    project_id="prepared-test", runtime=self.runtime)
+
+    def session_config(self, conversation_id):
+        row = self.db.execute("SELECT session_config_json FROM query_conversation WHERE id=?",
+                              (conversation_id,)).fetchone()
+        return json.loads(row[0])
+
+    def test_profile_change_resets_session_and_keeps_historical_execution(self):
+        first = self.service.query("first", mode="none")
+        same = self.service.query("same", conversation_id=first["conversationId"], mode="none")
+        self.assertEqual(first["sessionId"], self.runtime.calls[-1]["session_id"])
+        self.assertEqual(first["sessionId"], same["sessionId"])
+        self.assertEqual(self.runtime.tool_statuses, self.runtime.preparations[0].tool_statuses)
+        old_config = self.session_config(first["conversationId"])
+        self.runtime.profile = resolve_profile({"BUSINESS_CODE_AGENT_WORKFLOW": "tracked"})
+        changed = self.service.query("changed", conversation_id=first["conversationId"], mode="none")
+        self.assertIsNone(self.runtime.calls[-1]["session_id"])
+        self.assertNotEqual(first["sessionId"], changed["sessionId"])
+        self.assertEqual("tracked-legacy-v1", self.session_config(first["conversationId"])["profileId"])
+        self.assertEqual("coordinated-legacy-v1", old_config["profileId"])
+        self.assertEqual(first["execution"], self.service.get_run(first["runId"])["execution"])
+        self.assertEqual(first["execution"], self.service.get_trace(first["runId"])["run"]["execution"])
+
+    def test_tool_set_policy_status_and_version_changes_reset_session(self):
+        baseline = ToolStatus("search_code", "optional", "ready", ("SearchCode",), "index-1")
+        variants = {
+            "names": replace(baseline, names=("SearchCode", "SearchSymbols")),
+            "policy": replace(baseline, policy="required"),
+            "status": replace(baseline, status="unavailable", names=()),
+            "version": replace(baseline, version="index-2"),
+            "removed": None,
+        }
+        file_status = self.runtime.tool_statuses[0]
+        for label, changed_status in variants.items():
+            with self.subTest(change=label):
+                self.runtime.tool_statuses = (file_status, baseline)
+                first = self.service.query("first", mode="none")
+                before = self.session_config(first["conversationId"])
+                self.runtime.tool_statuses = (file_status,) + ((changed_status,) if changed_status else ())
+                changed = self.service.query("changed", conversation_id=first["conversationId"], mode="none")
+                self.assertIsNone(self.runtime.calls[-1]["session_id"])
+                self.assertNotEqual(first["sessionId"], changed["sessionId"])
+                after = self.session_config(first["conversationId"])
+                self.assertEqual(before["profileId"], after["profileId"])
+                self.assertNotEqual(before["tools"], after["tools"])
+                self.assertEqual(first["execution"], self.service.get_run(first["runId"])["execution"])
+
+    def test_diagnostic_reason_alone_does_not_reset_session(self):
+        status = ToolStatus("search_code", "optional", "unavailable", reason="index missing")
+        self.runtime.tool_statuses += (status,)
+        first = self.service.query("first", mode="none")
+        before = self.session_config(first["conversationId"])
+        self.runtime.tool_statuses = (self.runtime.tool_statuses[0], replace(status, reason="still missing"))
+        second = self.service.query("same", conversation_id=first["conversationId"], mode="none")
+        self.assertEqual(first["sessionId"], self.runtime.calls[-1]["session_id"])
+        self.assertEqual(before, self.session_config(first["conversationId"]))
+        self.assertEqual("still missing", second["execution"]["tools"][-1]["reason"])
+        self.assertEqual("index missing", self.service.get_run(first["runId"])["execution"]["tools"][-1]["reason"])
+
+    def test_model_settings_change_resets_session_and_preserves_old_snapshot(self):
+        first = self.service.query("first", mode="none")
+        self.runtime.settings["requestedModel"] = "another-model"
+        second = self.service.query("changed", conversation_id=first["conversationId"], mode="none")
+        self.assertIsNone(self.runtime.calls[-1]["session_id"])
+        self.assertNotEqual(first["sessionId"], second["sessionId"])
+        self.assertEqual("another-model", self.session_config(first["conversationId"])["model"])
+        self.assertEqual("fake-model", self.service.get_run(first["runId"])["execution"]["model"])
+
+    def test_material_set_change_resets_session_without_changing_profile_id(self):
+        first = self.service.query("first", mode="none")
+        self.assertIn("requirements", {item[0] for item in self.session_config(first["conversationId"])["materials"]})
+        self.runtime.profile = replace(self.runtime.profile, materials=("source",))
+        second = self.service.query("changed", conversation_id=first["conversationId"], mode="none")
+        self.assertEqual(first["execution"]["profileId"], second["execution"]["profileId"])
+        self.assertIsNone(self.runtime.calls[-1]["session_id"])
+        self.assertNotEqual(first["sessionId"], second["sessionId"])
+        self.assertEqual({"source"}, {item[0] for item in self.session_config(first["conversationId"])["materials"]})
+        self.assertEqual(first["execution"], self.service.get_run(first["runId"])["execution"])
+
+    def test_required_preflight_failure_persists_failed_run_execution_and_trace(self):
+        from business_code_agent.query.langchain_agent import LangChainRuntime
+
+        runtime = LangChainRuntime(environment={}, profile=resolve_profile({
+            "BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid", "BUSINESS_CODE_AGENT_CONTRACTS": "off",
+        }), index_root=self.root / "missing-index", project_id="prepared-test")
+        self.service.runtime = runtime
+        started = []
+        with patch.object(runtime, "chat_model", side_effect=AssertionError("model must not start")) as model, \
+             self.assertLogs("business_code_agent.query.service", level="ERROR"), \
+             self.assertRaisesRegex(QueryConfigurationError, "search_code"):
+            self.service.query("question", mode="none", run_callback=started.append)
+        model.assert_not_called()
+        self.assertEqual(1, len(started))
+        run = self.service.get_run(started[0]["runId"])
+        self.assertEqual("failed", run["status"])
+        self.assertIsNotNone(run["completedAt"])
+        self.assertEqual(started[0]["execution"], run["execution"])
+        search = next(tool for tool in run["execution"]["tools"] if tool["capability"] == "search_code")
+        self.assertEqual(("required", "unavailable", []), (search["policy"], search["status"], search["names"]))
+        self.assertIn(search["reason"], run["error"])
+        self.assertEqual(["user"], [row[0] for row in self.db.execute("SELECT role FROM query_message")])
+        self.assertEqual("error", run["events"][0]["eventType"])
+        self.assertEqual(run["error"], run["events"][0]["payload"]["error"])
+        trace = json.loads((self.service.trace_root / f"{run['runId']}.json").read_text(encoding="utf-8"))
+        self.assertEqual("failed", trace["status"])
+        self.assertEqual(run["execution"], trace["run"]["execution"])
+        self.assertEqual([], trace["calls"])
+        self.assertEqual("error", trace["events"][0]["eventType"])
+        self.assertEqual("RequiredToolUnavailable", trace["events"][0]["subtype"])
+        self.assertFalse((self.root / "missing-index").exists())
+
+    def test_optional_missing_indexes_keep_coordinated_file_query_behavior(self):
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+        from business_code_agent.query.langchain_agent import LangChainRuntime
+
+        class ToolModel(FakeMessagesListChatModel):
+            def bind_tools(self, *args, **kwargs):
+                return self
+
+        runtime = LangChainRuntime(environment={}, profile=resolve_profile({}), project_id="prepared-test",
+                                   index_root=self.root / "missing-index", contract_root=self.root / "missing-contract",
+                                   model=ToolModel(responses=[AIMessage(content="返回两数之和。")]))
+        self.service.runtime = runtime
+        result = self.service.query("解释 repos/repo/math.py 这个函数")
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("combined", result["mode"])
+        self.assertEqual("coordinated-legacy-v1", result["execution"]["profileId"])
+        self.assertEqual("coordinated", result["execution"]["investigation"])
+        self.assertEqual("plain", result["execution"]["answerMode"])
+        tools = {tool["capability"]: tool for tool in result["execution"]["tools"]}
+        for name in ("search_code", "contract_trace"):
+            self.assertEqual(("optional", "unavailable", []),
+                             (tools[name]["policy"], tools[name]["status"], tools[name]["names"]))
+        self.assertEqual(["Read", "Glob", "Grep"], tools["file_tools"]["names"])
+        self.assertEqual(["Investigation"], tools["investigation"]["names"])
+        reads = [event["payload"] for event in result["events"]
+                 if event["eventType"] == "tool" and event["payload"]["status"] == "completed"]
+        self.assertEqual(["Read"], [tool["name"] for tool in reads])
+        self.assertEqual("workflow", reads[0]["origin"])
+        trace = self.service.get_trace(result["runId"])
+        self.assertIn("return a + b", str(trace["calls"][0]["messages"]))
+        self.assertEqual(1, result["usage"]["modelCalls"])
+        self.assertFalse(result["usage"]["separateFinalization"])
+        self.assertEqual(result["execution"], self.service.get_run(result["runId"])["execution"])
+        self.assertFalse((self.root / "missing-index").exists())
+        self.assertFalse((self.root / "missing-contract").exists())
 
 
 if __name__ == "__main__":

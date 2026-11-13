@@ -2,7 +2,15 @@
 
 状态：接口设计冻结，尚未作为 Python 实现发布。确认日期：2026-11-13。
 
-本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是类型合同，不应在本阶段复制成生产模块。实现时复用/演进既有 `query/profile.py`、`materials.py`、`runtime.py`，不要建立两套同名模型。
+本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是完整目标合同，不是阶段 1 必须逐类复制的实现清单。`9a1c71e` 已提交 V1 Profile、Manifest、预检及执行/会话快照，但尚未实现这里的 RunContext 和 Direct Runtime；后续复用/演进既有模块，不建立两套同名模型。
+
+### 合同成熟度与实施边界
+
+- **阶段 1 必需**：AgentProfile、RunContext（复用 ProjectContext）、MaterialSource、简单 Capability 注册、FileTools 与 AgentRuntime。只接入源码、可选需求和 Read/Glob/Grep，验证跨仓库搜索、每个授权仓库完整性、会话、授权、Trace 和停止；既有 RuntimeResult 与持久化接口继续复用。
+- **阶段 1 行为底线**：required 不可用明确失败，disabled 不探测；真实路径授权、配置/工具变化重建会话、已交付原文与引用对应不能延后。可以直接用简单状态/函数实现，不为合同中的每个 Protocol 建立独立层。
+- **能力接入时再实现**：完整 RunAccess/AvailabilityChange 运行期联动、多级依赖与整批重绑定、全部结构版本联动、复杂 Evidence 生命周期、AST/Contract 专属授权及高级检索动态状态管理。第 3—5、7、9—10 节涉及这些内容的条款是对应后续能力的验收要求，不是 core 启动前置。
+
+完整合同保留，不再增加抽象层；阶段 1 不做业务/结构提供者的空壳实现，也不将 Coordinator 的调查逻辑迁入 Direct。
 
 ## 1. 通用约束
 
@@ -417,6 +425,8 @@ ProjectContext 归属必须先校验；外工程 conversation/session/version �
 旧 run 的 Profile/mode/AST 版本/Trace 永不被新一轮补写。历史没有执行快照时展示未知/原有信息，不推断它当时是 core 或 legacy。新一轮可选择新 Profile，但必须创建新执行记录与新的模型会话身份。
 
 ## 10. 接口验收最小用例
+
+以下覆盖完整设计，不要求阶段 1 一次全部实现。core 先验 File、逐一仓库完整性、禁用能力零探测、会话/授权、基本原文引用、Trace 与停止；Business Context、AST、共享失效和复杂 Evidence 用例随相应能力接入验收。
 
 - 将所有结构解析/索引准备函数替换为「调用即失败」的测试桩，core 仍可从三个仓库完成 Glob/Grep/Read；磁盘有索引或没有索引两种情况工具清单一致。
 - 注册一个返回固定 ToolResult 的新只读能力，Direct 循环不修改即可调用；未注册工具与未知 Profile 被拒绝。

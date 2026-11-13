@@ -2,7 +2,7 @@
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）
 
-本阶段只冻结设计，不修改 `query/`、`codeintel/`、`knowledge/` 等生产代码，不改变数据库、前端、运行配置或业务资料格式。V2 是后续目标，不是已实现的运行时或已验证的答题收益。
+`claudecode` 的 `9a1c71e` 实际包含「V2 设计 + V1 运行配置预备实现」：Profile、Manifest、工具预检、执行/会话配置及 Runtime、API、schema、轨迹前端配套改动已提交，不再按未提交或纯文档描述。架构设计通过，整包提交有条件通过；V2 RunContext、DirectRuntime 和 core-v1 尚未实现，答题收益未验证。本轮先修正文档并补专项测试，不回滚已有代码、不启动 core 开发。
 
 后续新 Agent 功能必须先读 [V2 总体架构](docs/spec/agent-architecture-v2.md)、[能力与运行合同](docs/spec/agent-capability-contract.md) 和 [迁移计划](docs/spec/agent-migration-plan.md)，遵守以下边界：
 
@@ -13,7 +13,9 @@
 - 能力扩展只增加提供者、工具/阅读指导及注册配置，不修改 Direct 核心循环。源码、需求/业务约定和结构导航保留不同证明能力，引用校验不是语义证明。
 - 工程、范围、Profile、可用资料/工具及其版本变化时重建模型会话，历史运行不补写新资料；同名仓库或版本不能跨工程复用。
 - Query 核心依赖公共工具合同，不依赖知识管理或 AST 内部实现；知识管理不调用问答主循环，CodeIntel 不生成最终业务答案，Evaluation 只消费公共 Runtime，API/CLI 只做装配与传输。
-- 下一步仅实现 `core-v1` 并接入现有 QueryService。Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；生产默认切换及旧链删除另行确认。
+- 收尾后下一步仅实现 `core-v1` 并接入现有 QueryService。最小范围是 AgentProfile、RunContext、MaterialSource、简单 Capability 注册、FileTools 和 AgentRuntime；只验基础源码问答、跨仓库搜索、会话、授权、Trace 与停止。完整动态失效、结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定及 AST/Contract 专属授权随能力延后，不成为 core 前置，也不新增抽象层。
+- 当前 Manifest 只枚举实际仓库，可能省略授权范围内缺失仓库；阶段 1 必修并测试按配置展开的预期仓库逐一核验。任一必需仓库缺失/不可读须在模型前失败，错误与 execution/Trace 明确仓库 ID，不能以 File 工具已注册或部分仓库可读代替完整性检查。
+- Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；Direct 不继承其调查逻辑，生产默认切换及旧链删除另行确认。
 
 下文 `combined`、`coordinated`、自动补查、既有 Profile/开关与资料模式约定继续服务 V1 及历史对照，不作为 V2 core 的隐含授权。资料来源边界、只读、手动生成、工程隔离、无限制生产调查与真实效果验证原则继续适用；V2 接口和迁移以以上三份文档为准。现有 `profile.py/materials.py/preparation.py` 准备工作不等于 V2 已完成。
 

@@ -4,11 +4,11 @@
 
 ## V2 设计冻结与本文适用范围（2026-11-13）
 
-用户确认先完成 CodeAgent V2 架构设计与接口冻结，再实现零索引 Agent。后续新 Agent 的接口、主链和迁移分别遵循 [V2 总体架构](agent-architecture-v2.md)、[能力与运行合同](agent-capability-contract.md) 和 [迁移计划](agent-migration-plan.md)。本次只改设计文档，不重构旧 Runtime、删除 Coordinator、修改数据库/页面或切换生产默认。
+用户确认先完成 CodeAgent V2 架构设计与接口冻结，再实现零索引 Agent。后续新 Agent 的接口、主链和迁移分别遵循 [V2 总体架构](agent-architecture-v2.md)、[能力与运行合同](agent-capability-contract.md) 和 [迁移计划](agent-migration-plan.md)。`9a1c71e` 已同时提交 V2 设计和 V1 运行配置预备实现，包含 Runtime、API、schema 与轨迹前端配套改动，不是纯文档提交；设计通过、整包有条件通过。本轮仅完成文档与专项测试收尾，不回滚实现、不删除 Coordinator、不切换生产默认。
 
 - 第 11 节的源码、需求、业务语义与结构导航证明边界继续适用；V2 将 AST、Code Map、Contract Index 归入结构资料，Code Map 可作为导航视图，仍保留真实来源和历史版本。Hybrid Search 是技术工具，不是业务知识类别。
 - 第 11.2、13.2、13.3 及第 14 节的 combined 默认、coordinated 调度、自动补查和既有实验收尾继续服务 V1/历史对照，不强制进入 V2 Direct。第 11.3 的旧实施顺序不再作为 V2 的前置，新顺序为设计冻结 → core → Business Context → AST → 可选检索/契约。
-- V2 首个目标 core-v1 仅源码、可选需求与 Read/Glob/Grep；禁用业务资料和所有结构/检索能力，已有产物也不自动使用。未来 Business Context 增资料与阅读指导，AST 增符号/关系工具，都通过 Capability 接口，不增加全局调查编排。
+- V2 首个目标 core-v1 仅源码、可选需求与 Read/Glob/Grep；禁用业务资料和所有结构/检索能力，已有产物也不自动使用。阶段 1 只落实最小上下文、Profile、资料、注册、文件工具与 Runtime，验基础问答、跨仓库搜索、会话、授权、Trace、停止；缺失仓库逐一核验为必修。完整运行期失效/结构版本/复杂 Evidence 联动随能力延后，不新增抽象层或作为 core 前置。未来 Business Context 增资料与阅读指导，AST 增符号/关系工具，都通过 Capability 接口，不增加全局调查编排。
 - RunContext 复用 ProjectContext；Profile 定义 required/optional/disabled，实际状态单独记录。索引缺失/过期不生成、不换 Profile，optional 在原授权范围内继续文件调查，required 不可用明确失败。
 - 显式准备结构资料、只读、工程/会话隔离、历史记录不改写及生产调查无总轮数/总时长限制继续适用。资料可用、工具调用成功、接口走通均不等于业务收益已验证。
 - 现有 V1 功能继续保留，未来 legacy-v1 只提供显式适配/对照；Direct 验收和另行确认前不删除旧链、不改变默认。

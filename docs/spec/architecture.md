@@ -15,9 +15,11 @@ V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构
 | AST 生命周期 | evaluation/ast_service.py，platform 有资料投影 | 阶段 3 收敛到 CodeIntel，Evaluation 只引用固定版本 |
 | 资料边界 | combined 可读业务资料、地图和可用 AST | core 仅源码/可选需求；其他资料按明确能力组合接入 |
 
-当前工作树已含 `query/profile.py`、`materials.py`、`langchain_agent/preparation.py` 的预备实现和执行快照；`standard-v1` 的 direct 分支仍明确未开放，其资料与工具策略也不等价 core-v1。具体差异与旧名称处理见迁移计划，不以文件存在认定 V2 完成。
+`claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
 
-后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。冻结阶段仅改文档，不改 QueryService、Runtime、数据库或页面；Direct 验收前不删除旧链，默认切换需要另行确认。
+已设计但未实现的是 V2 RunContext、统一 Capability 合同及 DirectRuntime；`core-v1/legacy-v1` 尚未开放。当前 `standard-v1` 的 direct 分支仍明确拒绝运行，其资料与工具策略不等价 core。设计通过、整包有条件通过；专项测试范围与缺失仓库缺口见[迁移计划](agent-migration-plan.md#7-本次验证与交付状态)。
+
+后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。本轮收尾仅修订文档和专项测试，不回滚已提交实现；下一阶段只落地最小 core 合同，完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链，默认切换需要另行确认。
 
 ## V1 目标
 
