@@ -155,6 +155,8 @@ class Workspace:
     turn_context_path: Path | None = None
     ast_path: Path | None = None
     ast_status: str | None = None
+    repository_ids: tuple[str, ...] = ()
+    repository_mounts: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,6 +173,7 @@ class Workspace:
             "astPath": str(self.ast_path) if self.ast_path else None,
             "astStatus": self.ast_status,
             "turnContextPath": str(self.turn_context_path) if self.turn_context_path else None,
+            "repositoryIds": list(self.repository_ids),
         }
 
 
@@ -233,6 +236,81 @@ class WorkspaceManager:
 
     def _mode_root(self, mode: str | None = None) -> Path:
         return self.root if not mode else self.root / "modes" / _safe_name(mode)
+
+    def prepare_core(self, *, run_id: str, repository_ids=None,
+                     include_requirements: bool = True) -> Workspace:
+        """Create a run-isolated workspace containing only authorized sources.
+
+        The expected repository set comes from project configuration and the
+        normalized scope, never from directories that happen to exist. All
+        selected repositories are checked before any model call; a missing or
+        unreadable one fails with its repository id. No AST, code map, business
+        context or index is inspected or mounted.
+        """
+        configured = self.repository_sources()
+        if not configured:
+            raise WorkspaceError("项目未配置代码仓库，无法启动 core 调查")
+        available = {repository_id: source for repository_id, source in configured}
+        selected_ids = (sorted(dict.fromkeys(str(repository_id) for repository_id in repository_ids))
+                        if repository_ids else [repository_id for repository_id, _ in configured])
+        unknown = [repository_id for repository_id in selected_ids if repository_id not in available]
+        if unknown:
+            raise WorkspaceError("仓库未在项目配置中登记：" + "、".join(unknown))
+        selected = [(repository_id, available[repository_id]) for repository_id in selected_ids]
+        unusable = []
+        for repository_id, source in selected:
+            if not source.is_dir():
+                unusable.append(f"{repository_id}（目录不存在: {source}）")
+                continue
+            try:
+                with os.scandir(source):
+                    pass
+            except OSError as exc:
+                unusable.append(f"{repository_id}（无法读取: {exc}）")
+        if unusable:
+            raise WorkspaceError("授权仓库不可用，未调用模型：" + "；".join(unusable))
+
+        root = self.root / "core" / _safe_name(run_id)
+        root.mkdir(parents=True, exist_ok=True)
+        repositories = root / "repos"
+        repositories.mkdir(exist_ok=True)
+        desired = {_safe_name(repository_id) for repository_id, _ in selected}
+        for child in repositories.iterdir():
+            if child.is_symlink() and child.name not in desired:
+                child.unlink()
+        for repository_id, source in selected:
+            link = repositories / _safe_name(repository_id)
+            self._link_directory(link, source)
+            if not link.is_dir():
+                raise WorkspaceError(f"仓库挂载失败：{repository_id}")
+        requirements_link = root / "requirements"
+        if include_requirements and self.requirements_root.is_dir():
+            self._link_directory(requirements_link, self.requirements_root)
+        else:
+            self._unlink_directory(requirements_link)
+        claude_file = root / "CLAUDE.md"
+        claude_file.write_text(self._core_instructions(), encoding="utf-8")
+        navigation = build_navigation(
+            self.config,
+            {repository_id: f"repos/{_safe_name(repository_id)}" for repository_id, _ in selected},
+            self.project_id, self.project_name,
+        )
+        (root / NAVIGATION_FILE).write_text(
+            json.dumps(navigation, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        mounts = tuple((repository_id, f"repos/{_safe_name(repository_id)}")
+                       for repository_id, _ in selected)
+        return Workspace(
+            id=self.project_id,
+            path=root,
+            claude_file=claude_file,
+            knowledge_path=root / "knowledge",
+            requirements_path=requirements_link,
+            repositories_path=repositories,
+            mode="core",
+            repository_ids=tuple(repository_id for repository_id, _ in selected),
+            repository_mounts=mounts,
+        )
 
     def ensure(self, *, mode: str | None = None,
                business_context_source: str | Path | None = None,
@@ -338,6 +416,24 @@ class WorkspaceManager:
     def source_summary(self, workspace: Workspace | None = None) -> list[dict[str, Any]]:
         """Report filesystem readiness separately from CLI permission setup."""
         root = workspace.path if workspace else self.root
+        if workspace and workspace.mode == "core":
+            configured = dict(self._repository_sources())
+            slots = []
+            if workspace.requirements_path.is_dir():
+                slots.append(("requirements", "需求原文", workspace.requirements_path,
+                              self.requirements_root))
+            for repository_id, mount in workspace.repository_mounts:
+                slots.append(("repository", repository_id, workspace.path / mount,
+                              configured.get(repository_id)))
+            result = []
+            for kind, name, link, path in slots:
+                mounted = path is not None and link.is_dir() and link.resolve() == Path(path).resolve()
+                result.append({
+                    "id": f"{kind}:{name}", "kind": kind, "name": name,
+                    "path": str(path or link), "status": "READABLE" if mounted else "MISSING",
+                    "authorizationConfigured": mounted,
+                })
+            return result
         slots = [
             (("business_context", "业务补充知识", root / "knowledge" / "business-context", self.business_context_root)
              if self._new_material_layout else
@@ -553,6 +649,16 @@ class WorkspaceManager:
         else:
             lines.append("- 代码仓库：未配置或目录不可用")
         return "\n".join(lines) + "\n"
+
+    def _core_instructions(self) -> str:
+        return """# CodeAgent core
+
+本轮只授权源码仓库和可选需求原文。只读使用 Read、Glob、Grep；不要修改、创建或删除文件。
+
+- 源码是当前实现的依据，需求只说明目标；检索命中只是线索，关键结论必须 Read。
+- 只能访问 repos/ 和 requirements/ 下的相对路径，不得访问其他目录或宿主绝对路径。
+- 无法确认的关系明确列为缺口，不把局部代码当作完整业务链。
+"""
 
     def _claude_instructions(self) -> str:
         return """# CodeAgent
