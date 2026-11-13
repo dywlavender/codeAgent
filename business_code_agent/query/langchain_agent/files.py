@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 from business_code_agent.codeintel.retrieval import IGNORED_DIRS, SOURCE_SUFFIXES
-from business_code_agent.query.workspace import workspace_sources
+from business_code_agent.query.materials import MaterialManifest
 
 
 def matches(path, pattern):
@@ -35,28 +35,20 @@ def matches(path, pattern):
 
 
 class SourceFiles:
-    def __init__(self, workspace, repositories=None):
+    def __init__(self, workspace, repositories=None, *, manifest=None):
         self.workspace = Path(workspace).resolve()
-        mounts = {
-            "业务补充知识": "knowledge/business-context",
-            "业务基线": "knowledge/baseline",
-            "自动代码地图": "knowledge/generated-code-map",
-            "AST 结构资料": "knowledge/ast",
-            "需求原文": "requirements",
-        }
-        self.roots = [
-            (
-                mounts.get(label, "repos/" + label.removeprefix("代码仓库 ")),
-                Path(root).resolve(),
-            )
-            for label, root in workspace_sources(self.workspace, repositories)
-        ]
+        self.roots = (manifest or MaterialManifest.from_workspace(self.workspace, repositories)).roots()
 
     def locate(self, path):
         candidate = Path(path)
-        candidate = (
-            candidate if candidate.is_absolute() else self.workspace / candidate
-        ).resolve()
+        if not candidate.is_absolute():
+            for mount, root in self.roots:
+                if candidate.is_relative_to(mount):
+                    candidate = root / candidate.relative_to(mount)
+                    break
+            else:
+                candidate = self.workspace / candidate
+        candidate = candidate.resolve()
         for label, root in self.roots:
             if candidate.is_relative_to(root):
                 relative = candidate.relative_to(root)

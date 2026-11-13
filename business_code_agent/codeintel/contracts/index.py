@@ -23,6 +23,7 @@ def read_index(root, project_id, *, allow_previous=False):
     if not path.is_file():
         raise ValueError("契约索引尚未显式准备，请先执行 prepare_contract_index.py")
     with closing(open_sqlite(path, readonly=True)) as db:
+        db.execute("BEGIN")
         metadata = json.loads(db.execute("SELECT value FROM metadata WHERE key='snapshot'").fetchone()[0])
         if metadata["projectId"] != project_id:
             raise ValueError("契约索引不属于当前工程")

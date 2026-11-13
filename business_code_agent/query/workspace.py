@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .materials import MaterialManifest
 from .navigation import NAVIGATION_FILE, build_navigation
 
 logger = logging.getLogger(__name__)
@@ -55,28 +56,7 @@ def workspace_sources(root: Path, repositories: set[str] | None = None) -> list[
     repo; a set keeps only the listed ones — this is what enforces a query
     scope at the CLI permission level.
     """
-    business_context = root / "knowledge" / "business-context"
-    legacy_baseline = root / "knowledge" / "baseline"
-    code_map = root / "knowledge" / "generated-code-map"
-    ast = root / "knowledge" / "ast"
-    sources = []
-    if business_context.is_dir():
-        sources.append(("业务补充知识", business_context))
-    elif legacy_baseline.is_dir():
-        # Old single-project workspaces remain readable while new registered
-        # projects use the explicit business-context directory.
-        sources.append(("业务基线", legacy_baseline))
-    if code_map.is_dir():
-        sources.append(("自动代码地图", code_map))
-    if ast.is_dir():
-        sources.append(("AST 结构资料", ast))
-    sources.append(("需求原文", root / "requirements"))
-    repositories_dir = root / "repos"
-    if repositories_dir.is_dir():
-        sources.extend((f"代码仓库 {entry.name}", entry)
-                       for entry in sorted(repositories_dir.iterdir())
-                       if entry.is_dir() and (repositories is None or entry.name in repositories))
-    return [(label, path.resolve()) for label, path in sources if path.is_dir()]
+    return MaterialManifest.from_workspace(root, repositories).labelled_roots()
 
 
 def search_instructions(sources: list[tuple[str, Path]], scoped: bool = False) -> str:

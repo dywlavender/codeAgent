@@ -17,16 +17,18 @@ from langchain_openai import ChatOpenAI
 from pydantic import ValidationError
 
 from business_code_agent.query.runtime import RuntimeResult, RuntimeErrorBase
-from business_code_agent.query.workspace import project_index, read_turn_context, workspace_sources
+from business_code_agent.query.workspace import project_index, read_turn_context
 from business_code_agent.query.navigation import read_navigation, render_navigation
+from business_code_agent.query.materials import MaterialManifest
+from business_code_agent.query.profile import AgentProfile, legacy_langchain_profile
 from .context import SessionStore, compact, retire_changed_sources, answer_evidence
-from .files import SourceFiles
 from .evidence import EvidenceCatalog
 from .answering import RULES as FACT_RULES, request_messages, complete_response
 from .investigation import Investigation, InvestigationState
 from .trace import TraceRecorder
 from .coordinator import RetrievalCoordinator
 from .material import MATERIAL_GUIDANCE, MATERIAL_RULES
+from .preparation import prepare_tools
 
 
 _AGENT_VERSION = 11
@@ -53,6 +55,7 @@ class LangChainRuntime:
         project_id=None,
         answer_mode=None,
         workflow_mode=None,
+        profile: AgentProfile | None = None,
     ):
         self.environment = dict(os.environ if environment is None else environment)
         self.model = model
@@ -70,16 +73,35 @@ class LangChainRuntime:
         if self.code_search_db and not self.code_search_db.is_file():
             raise RuntimeErrorBase("显式指定的代码符号索引不存在: %s" % self.code_search_db)
         self.project_id = project_id
-        self.answer_mode = answer_mode or self.environment.get(
-            "BUSINESS_CODE_AGENT_ANSWER_MODE", "plain"
+        self.profile = profile or legacy_langchain_profile(
+            workflow_mode or self.environment.get("BUSINESS_CODE_AGENT_WORKFLOW", "coordinated"),
+            answer_mode or self.environment.get("BUSINESS_CODE_AGENT_ANSWER_MODE", "plain"),
+            "required" if self.index_root else "disabled",
+            "required" if self.contract_root else "disabled",
         )
-        if self.answer_mode not in {"facts", "plain", "contracts"}:
-            raise ValueError("ANSWER_MODE 仅支持 facts、plain 或 contracts")
-        if self.answer_mode == "contracts" and self.contract_root is None:
-            raise ValueError("contracts 模式需要显式准备的工程契约索引")
-        self.workflow_mode = workflow_mode or self.environment.get("BUSINESS_CODE_AGENT_WORKFLOW", "coordinated")
-        if self.workflow_mode not in {"basic", "tracked", "coordinated"}:
-            raise ValueError("WORKFLOW 仅支持 basic、tracked 或 coordinated")
+        if self.profile.runtime != "langchain" or self.profile.investigation not in {"basic", "tracked", "coordinated"}:
+            raise ValueError(f"当前 LangChain 运行时尚未接入 {self.profile.id} 的调查策略")
+        self.answer_mode = self.profile.answer_mode
+        self.workflow_mode = self.profile.investigation
+
+    def prepare(self, *, workspace, materials, project_id=None):
+        return prepare_tools(self.profile, workspace, materials, project_id=self.project_id or project_id,
+                             index_root=self.index_root, contract_root=self.contract_root,
+                             code_search_db=self.code_search_db)
+
+    def execution_settings(self):
+        return {
+            "agentVersion": _AGENT_VERSION,
+            "requestedModel": getattr(self.model, "model_name", None) or self.environment.get("BUSINESS_CODE_MODEL_NAME"),
+            "maxCalls": self.max_calls, "maxSeconds": self.max_seconds,
+            "answerMode": self.answer_mode, "workflowMode": self.workflow_mode,
+            "outputTokens": self.environment.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096"),
+            "thinking": self.environment.get("BUSINESS_CODE_MODEL_ENABLE_THINKING"),
+            "temperature": self.environment.get("BUSINESS_CODE_MODEL_TEMPERATURE", ".2"),
+            "contextChars": self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"),
+            "networkTimeoutSeconds": self.environment.get("BUSINESS_CODE_MODEL_TIMEOUT", "120"),
+            "maxRetries": 0,
+        }
 
     def chat_model(self):
         if self.model is not None:
@@ -125,20 +147,23 @@ class LangChainRuntime:
         self, question, *, workspace, session_id=None, event_callback=None,
         cancel_check=None, repositories=None,
     ):
-        trace = TraceRecorder(workspace, self.project_id, question, {
-            "agentVersion": _AGENT_VERSION, "requestedModel": self.environment.get("BUSINESS_CODE_MODEL_NAME"),
-            "maxCalls": self.max_calls, "maxSeconds": self.max_seconds,
-            "answerMode": self.answer_mode, "workflowMode": self.workflow_mode,
-            "outputTokens": self.environment.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096"),
-            "thinking": self.environment.get("BUSINESS_CODE_MODEL_ENABLE_THINKING"),
-            "temperature": self.environment.get("BUSINESS_CODE_MODEL_TEMPERATURE", ".2"),
-            "contextChars": self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"), "maxRetries": 0,
-        })
+        return self.ask_prepared(question, workspace=workspace, session_id=session_id, event_callback=event_callback,
+                                 cancel_check=cancel_check, repositories=repositories, preparation=None)
+
+    def ask_prepared(
+        self, question, *, workspace, session_id=None, event_callback=None,
+        cancel_check=None, repositories=None, preparation,
+    ):
+        trace = TraceRecorder(workspace, self.project_id, question, self.execution_settings())
         if event_callback:
             event_callback({"eventType": "trace", "payload": {"tracePath": str(trace.path)}})
         try:
+            if preparation is None:
+                materials = MaterialManifest.from_workspace(workspace, repositories, allowed=self.profile.materials)
+                preparation = self.prepare(workspace=workspace, materials=materials)
+            preparation.require_tools()
             return self._ask(question, workspace=workspace, session_id=session_id, event_callback=event_callback,
-                             cancel_check=cancel_check, repositories=repositories, trace=trace)
+                             cancel_check=cancel_check, preparation=preparation, trace=trace)
         except BaseException as exc:
             trace.complete("failed", errorType=type(exc).__name__, error=str(exc))
             raise
@@ -151,21 +176,22 @@ class LangChainRuntime:
         session_id=None,
         event_callback=None,
         cancel_check=None,
-        repositories=None,
+        preparation,
         trace=None,
     ):
         started = time.monotonic()
         deadline = self.max_seconds
-        sources = workspace_sources(Path(workspace), repositories)
-        files = SourceFiles(workspace, repositories)
+        sources = preparation.materials.labelled_roots()
+        files = preparation.files
         navigation = read_navigation(workspace, files.roots, self.project_id)
         navigation_text = render_navigation(navigation)
         investigation = InvestigationState(self.project_id or navigation.get("projectId"), files, navigation)
         contracts = None
-        if self.contract_root is not None:
+        if preparation.contract_index is not None:
             from .contracts import ContractState
 
-            contracts = ContractState(self.contract_root, self.project_id or navigation.get("projectId"), files, question, navigation)
+            contracts = ContractState(self.contract_root, self.project_id or navigation.get("projectId"), files,
+                                      question, navigation, index=preparation.contract_index)
         trace.value["projectId"] = self.project_id or navigation.get("projectId")
         coordinator = None
         store = SessionStore(workspace)
@@ -174,6 +200,9 @@ class LangChainRuntime:
             "answerMode": self.answer_mode,
             "workflowVersion": 2,
             "workflowMode": self.workflow_mode,
+            "profileId": self.profile.id,
+            "toolVersions": {tool.capability: tool.version for tool in preparation.tool_statuses
+                             if tool.status == "ready"},
             "applications": navigation["applications"],
             "contractVersion": contracts.index.snapshot["version"] if contracts else None,
         }
@@ -394,7 +423,7 @@ class LangChainRuntime:
             "\n跨系统问题按实际路由、配置或事件核对调用端、连接和目标端。"
             "问题涉及页面时，核对该系统页面的请求、字段取值和展示规则，分别说明后端返回和页面行为。"
         )
-        tools = files.tools()
+        tools = list(preparation.file_tools)
         if contracts:
             tools.extend(contracts.tools())
             prompt += (
@@ -417,15 +446,8 @@ class LangChainRuntime:
                 "知道具体文件和位置时提交 next_read，核对后更新同一项的引用。"
                 "相关资料缺失时可标为 unavailable 并说明缺什么。"
             )
-        if self.index_root and (self.index_root / "index.json").is_file():
-            from business_code_agent.codeintel.hybrid.search import search_tool
-
-            metadata = json.loads(
-                (self.index_root / "index.json").read_text(encoding="utf-8")
-            )
-            if self.project_id and metadata["projectId"] != self.project_id:
-                raise RuntimeErrorBase("检索索引不属于当前工程")
-            tools.append(search_tool(self.index_root, files))
+        if preparation.search_code is not None:
+            tools.append(preparation.search_code)
             prompt += "\n可先用 SearchCode 按业务问题定位函数、类和跨文件线索，再用 Read 核对完整条件与连接两端。"
         if self.code_search_db:
             from business_code_agent.query.langchain_agent.code_search import search_symbols_tool
@@ -696,7 +718,7 @@ class LangChainRuntime:
             {
                 **token_usage,
                 "reportedModels": sorted(reported),
-                "requestedModel": self.environment.get("BUSINESS_CODE_MODEL_NAME"),
+                "requestedModel": self.execution_settings()["requestedModel"],
                 "modelCalls": calls,
                 "agentVersion": _AGENT_VERSION,
                 "answerMode": self.answer_mode,

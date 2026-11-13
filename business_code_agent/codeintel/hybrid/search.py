@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
 from business_code_agent.codeintel.retrieval import TextRetriever
-from .index import load_index
+from .index import load_index, read_manifest
 from .models import load_model
 
 
@@ -72,9 +73,9 @@ def assemble(candidates, *, char_limit=12000, line_limit=300, per_unit_lines=100
 
 
 class HybridSearch:
-    def __init__(self, root, *, embedder=None, reranker=None):
+    def __init__(self, root, *, embedder=None, reranker=None, manifest=None):
         self.root = Path(root)
-        self.index, self.vectors = load_index(root)
+        self.index, self.vectors = load_index(root, manifest)
         models = Path(self.index["modelDirectory"])
         self.embedder = embedder or load_model(str(models / "embedding"))
         self.reranker = reranker or load_model(str(models / "reranker"), True)
@@ -152,16 +153,37 @@ class HybridSearch:
         }
 
 
+@dataclass(frozen=True)
+class SearchSnapshot:
+    root: Path
+    version: str
+    manifest: dict = field(compare=False, repr=False)
+
+    @classmethod
+    def open(cls, root, project_id):
+        root = Path(root).resolve()
+        manifest = read_manifest(root)
+        if project_id and manifest["projectId"] != project_id:
+            raise ValueError("检索索引不属于当前工程")
+        if not (root / manifest["vectorsFile"]).is_file():
+            raise FileNotFoundError("缺少混合检索的向量文件")
+        models = Path(manifest["modelDirectory"])
+        for role in ("embedding", "reranker"):
+            if not all((models / role / name).is_file()
+                       for name in ("tokenizer.json", "config.json", "onnx/model_quantized.onnx")):
+                raise FileNotFoundError(f"缺少混合检索的本地 {role} 模型文件")
+        return cls(root, manifest["version"], manifest)
+
+
 @lru_cache(maxsize=4)
-def cached_search(root, version):
-    return HybridSearch(root)
+def cached_search(snapshot):
+    return HybridSearch(snapshot.root, manifest=snapshot.manifest)
 
 
-def search_tool(root, files):
+def search_tool(snapshot, files):
     from langchain_core.tools import tool
 
-    root = Path(root)
-    manifest = json.loads((root / "index.json").read_text(encoding="utf-8"))
+    manifest = snapshot.manifest
     allowed = [
         s["id"]
         for s in manifest["sources"]
@@ -171,7 +193,7 @@ def search_tool(root, files):
     @tool
     def SearchCode(question: str) -> str:
         """按业务问题混合搜索函数、类和资料，返回行号原文、废弃/截断标记。跨系统连接和大方法需继续 Read 核实。"""
-        result = cached_search(str(root), manifest["version"]).search(
+        result = cached_search(snapshot).search(
             question, allowed_sources=allowed
         )
         current, stale = [], []

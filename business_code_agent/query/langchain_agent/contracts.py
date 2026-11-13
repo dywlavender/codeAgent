@@ -12,9 +12,12 @@ from .investigation import PendingRead
 from .business_answer import question_needs
 
 
+CONTRACT_TOOL_NAMES = ("FindCapability", "TraceContract", "TraceResponseFields", "TraceBusinessRules")
+
+
 class ContractState:
-    def __init__(self, root, project_id, files, question="", navigation=None):
-        self.index = ContractIndex(root, project_id, files)
+    def __init__(self, root, project_id, files, question="", navigation=None, *, index=None):
+        self.index = index if index is not None else ContractIndex(root, project_id, files)
         self.files = files
         self.selected = {}
         self.processed = set()

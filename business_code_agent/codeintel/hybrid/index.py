@@ -44,9 +44,13 @@ def diff_ranges(before, after):
         ]
 
 
-def load_index(root):
+def read_manifest(root):
+    return json.loads((Path(root) / "index.json").read_text(encoding="utf-8"))
+
+
+def load_index(root, manifest=None):
     root = Path(root)
-    value = json.loads((root / "index.json").read_text(encoding="utf-8"))
+    value = read_manifest(root) if manifest is None else manifest
     vectors = np.load(root / value["vectorsFile"], allow_pickle=False)
     if len(vectors) != len(value["chunks"]):
         raise ValueError("索引的向量与片段数量不一致，请显式重新准备")

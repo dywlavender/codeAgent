@@ -40,6 +40,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
     return () => { controller.abort(); clearTimeout(timer); };
   }, [projectId, runId, revision]);
   const timeline = useMemo(() => trace ? traceTimeline(trace) : [], [trace]);
+  const execution = trace?.run.execution;
   const visible = timeline.filter((item) => filter === "all" || filter === item.kind);
   const active = visible.find((item) => item.id === selected) || visible.find((item) => item.kind === "model") || visible[0];
   function download() {
@@ -57,7 +58,8 @@ export function TraceDrawer({ projectId, runId, onClose }) {
       <div className="trace-summary"><p>{trace.run.question}</p><div>
         <span>{traceStatus(trace.run.status)}</span><span>{trace.calls.length} 次模型请求</span>
         {["budget", "context"].includes(trace.stopReason) && <span>{trace.stopReason === "context" ? "上下文预算不足" : "达到调查预算"}</span>}
-        {trace.settings?.requestedModel && <span>{trace.settings.requestedModel}</span>}
+        {execution?.profileId && <span>{execution.profileId}</span>}
+        {(execution?.model || trace.settings?.requestedModel) && <span>{execution?.model || trace.settings.requestedModel}</span>}
         <span>{timeline.filter((item) => item.kind === "tool" && item.status !== "skipped").length} 次工具调用</span>
         {trace.run.durationMs > 0 && <span>{(trace.run.durationMs / 1000).toFixed(2)} 秒</span>}
       </div><code>{runId}</code></div>
@@ -82,6 +84,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
           <p className="trace-note">原文已读与结构证据已交付分别记录，不表示业务语义已证明。</p>
           <JsonBlock value={trace.retrievalPlan || trace.investigation || { note: "本轮没有调查事项记录" }} />
         </> },
+        ...(execution?.profileId ? [{ key: "execution", label: "运行配置", children: <JsonBlock value={execution} /> }] : []),
         { key: "raw", label: "完整记录", children: <JsonBlock value={trace} /> },
       ]} />
     </>}

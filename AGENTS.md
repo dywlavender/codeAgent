@@ -1,6 +1,23 @@
 # 项目协作指引
 
-## 知识体系重构与检索诊断（最新方向，2026-11-02）
+## CodeAgent V2 架构与接口冻结（2026-11-13）
+
+本阶段只冻结设计，不修改 `query/`、`codeintel/`、`knowledge/` 等生产代码，不改变数据库、前端、运行配置或业务资料格式。V2 是后续目标，不是已实现的运行时或已验证的答题收益。
+
+后续新 Agent 功能必须先读 [V2 总体架构](docs/spec/agent-architecture-v2.md)、[能力与运行合同](docs/spec/agent-capability-contract.md) 和 [迁移计划](docs/spec/agent-migration-plan.md)，遵守以下边界：
+
+- 唯一调查主链为 QueryService → RunContext → AgentRuntime → 模型自主选择工具 → Answer → 证据检查与持久化；Trace 从运行开始持续记录。Business Context、AST、检索与契约不能各自建立全局调查编排。
+- RunContext 复用现有 ProjectContext，固定工程、Profile、范围、工作区、资料和实际能力。工具只能使用授权快照，不再自行读取环境变量或探测相邻资料。
+- 首个实现目标 `core-v1` 只使用源码、可选需求和 Read/Glob/Grep；业务资料、AST、Code Map、Hybrid 与 Contract 均禁用，即使机器上已有产物也不探测/使用。`legacy-v1` 是未来对现有 coordinated 的显式适配，不是本次已开放的配置名称。
+- required/optional/disabled 是授权策略，ready/missing/stale/unavailable 是实际状态；optional 缺失/过期只收缩原 Profile 内可用能力，required 不可用明确失败，不自动换 Profile 或生成索引。
+- 能力扩展只增加提供者、工具/阅读指导及注册配置，不修改 Direct 核心循环。源码、需求/业务约定和结构导航保留不同证明能力，引用校验不是语义证明。
+- 工程、范围、Profile、可用资料/工具及其版本变化时重建模型会话，历史运行不补写新资料；同名仓库或版本不能跨工程复用。
+- Query 核心依赖公共工具合同，不依赖知识管理或 AST 内部实现；知识管理不调用问答主循环，CodeIntel 不生成最终业务答案，Evaluation 只消费公共 Runtime，API/CLI 只做装配与传输。
+- 下一步仅实现 `core-v1` 并接入现有 QueryService。Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；生产默认切换及旧链删除另行确认。
+
+下文 `combined`、`coordinated`、自动补查、既有 Profile/开关与资料模式约定继续服务 V1 及历史对照，不作为 V2 core 的隐含授权。资料来源边界、只读、手动生成、工程隔离、无限制生产调查与真实效果验证原则继续适用；V2 接口和迁移以以上三份文档为准。现有 `profile.py/materials.py/preparation.py` 准备工作不等于 V2 已完成。
+
+## V1 知识体系重构与检索诊断（2026-11-02）
 
 2026-11-02 用户确认资料组合使用：主问答默认 `mode=combined`，基础资料、业务补充知识、已有自动代码地图与可用的手动 AST 版本同时可检索，按问题需要读取；页面取消互斥资料选择。AST 未生成、待更新或暂不可用时继续使用其余资料，不隐式生成。AST 与自动代码地图保留独立来源，结构资料只用于导航。旧 none/backbone/ast 分组保留给历史兼容和显式对照，不再决定日常问答默认资料。工程、范围或 AST 版本变化仍重新建立模型会话，历史运行保留原模式及版本。
 

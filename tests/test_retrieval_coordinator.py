@@ -280,10 +280,16 @@ class RetrievalCoordinatorTest(unittest.TestCase):
         self.assertFalse(request_needs("这个接口需要修改配置文件吗？")["material"])
 
     def test_auto_index_selection_does_not_create_missing_index(self):
+        from business_code_agent.query.materials import MaterialManifest
+
         with patch.dict(os.environ, {}, clear=True):
             runtime = _default_runtime(index_root=self.root / "retrieval-index", project_id="A")
-        self.assertIsNone(runtime.index_root)
-        self.assertIsNone(runtime.contract_root)
+        preparation = runtime.prepare(workspace=self.workspace, materials=MaterialManifest.from_workspace(self.workspace))
+        statuses = {tool.capability: (tool.policy, tool.status) for tool in preparation.tool_statuses}
+        self.assertEqual(("optional", "unavailable"), statuses["search_code"])
+        self.assertEqual(("optional", "unavailable"), statuses["contract_trace"])
+        self.assertIsNone(preparation.search_code)
+        self.assertIsNone(preparation.contract_index)
         self.assertFalse((self.root / "retrieval-index").exists())
 
     def test_current_search_original_is_reused_without_redundant_read(self):

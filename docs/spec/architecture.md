@@ -1,8 +1,25 @@
 # 问答运行时架构
 
-本文记录当前实现。后续涉及知识主干、知识图谱和代码调查的整改，遵循 [项目整改指导方向](knowledge-backbone-direction.md)；本文中的现有实现边界不构成对后续技术方案的固定限制。
+本文记录 V1 当前实现；其中 `combined`、`coordinated`、现有开关和实验收尾继续有效，不因设计冻结而切换生产默认。资料与证据原则遵循 [项目整改指导方向](knowledge-backbone-direction.md)。
 
-## 目标
+## V1 当前实现与 V2 目标的关系（2026-11-13）
+
+V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构](agent-architecture-v2.md)、[能力与运行合同](agent-capability-contract.md) 和 [迁移计划](agent-migration-plan.md)。它们是后续实现目标，不表示零索引 Agent 已实现，也不替换本文记录的 V1 运行行为。
+
+| 维度 | V1 当前实现 | V2 冻结目标 |
+| --- | --- | --- |
+| 调查主链 | LangChainRuntime 默认 coordinated，保留程序补查 | 独立 DirectRuntime，模型自主选择工具；旧链通过 Legacy 入口保留 |
+| 执行配置 | 现有 Profile/环境开关和 combined 等资料模式 | core-v1/legacy-v1；Profile 显式授权，禁用能力不探测 |
+| 上下文 | QueryService 传工作区、仓库范围、会话和预检对象 | 复用 ProjectContext 构建 RunContext，不再散传权限/资料配置 |
+| 扩展 | 既有 File/SearchCode/契约工具与 AST 文件投影 | AgentCapability 的 status/tools/instructions，不改变核心循环 |
+| AST 生命周期 | evaluation/ast_service.py，platform 有资料投影 | 阶段 3 收敛到 CodeIntel，Evaluation 只引用固定版本 |
+| 资料边界 | combined 可读业务资料、地图和可用 AST | core 仅源码/可选需求；其他资料按明确能力组合接入 |
+
+当前工作树已含 `query/profile.py`、`materials.py`、`langchain_agent/preparation.py` 的预备实现和执行快照；`standard-v1` 的 direct 分支仍明确未开放，其资料与工具策略也不等价 core-v1。具体差异与旧名称处理见迁移计划，不以文件存在认定 V2 完成。
+
+后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。冻结阶段仅改文档，不改 QueryService、Runtime、数据库或页面；Direct 验收前不删除旧链，默认切换需要另行确认。
+
+## V1 目标
 
 生产主问答采用项目自有 LangChain 1.2 Agent。模型连接来自 `.env`，Agent 负责规划工具调用、阅读代码、追踪关系和组织答案；Python 提供工具、上下文管理、预算、资料范围和运行记录。原 Claude CLI 运行时保留为显式兼容选项及历史评测／知识维护能力。
 

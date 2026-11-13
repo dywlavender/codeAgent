@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -17,9 +18,11 @@ from typing import Any, Mapping
 from business_code_agent.platform.ast_material import AstMaterial
 
 from .claude_runtime import default_claude_runtime
-from .runtime import RuntimeErrorBase, normalize_runtime_result
+from .materials import MATERIAL_KINDS, MaterialManifest
+from .profile import execution_snapshot, resolve_profile
+from .runtime import RequiredToolUnavailable, RuntimeErrorBase, normalize_runtime_result
 from .traces import RunTraceArchive
-from .workspace import MODE_DESCRIPTIONS, Workspace, WorkspaceManager, _safe_name, workspace_sources
+from .workspace import MODE_DESCRIPTIONS, Workspace, WorkspaceManager, _safe_name
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,10 @@ QUERY_MODE_LABELS = {"combined": "组合资料", "none": "无主干", "backbone"
 
 class QueryRuntimeError(RuntimeErrorBase):
     """A query could not be completed by the configured runtime."""
+
+
+class QueryConfigurationError(QueryRuntimeError):
+    """The selected profile cannot run with the current prerequisites."""
 
 
 class QueryBusyError(ValueError):
@@ -54,6 +61,20 @@ def _load_json(value: Any, default: Any) -> Any:
     except (TypeError, ValueError):
         return default
     return parsed
+
+
+def _session_config(execution, manifest):
+    return {
+        "profileId": execution["profileId"],
+        "investigation": execution["investigation"],
+        "answerMode": execution["answerMode"],
+        "model": execution["model"],
+        "tools": [{key: tool[key] for key in ("capability", "policy", "status", "names", "version")}
+                  for tool in execution["tools"]],
+        "materials": [[source.kind, source.path, str(source.directory), source.version]
+                      for source in manifest.readable()],
+        "settings": execution["settings"],
+    }
 
 
 class QueryService:
@@ -97,8 +118,8 @@ class QueryService:
         )
         if not self.ast_data_root and not self.project_config:
             self.ast_data_root = self.workspace_manager.root / "ast"
-        index_root = retrieval_root or (Path(db_path).parent / 'retrieval-index' if db_path and db_path != ':memory:' else None)
-        self.runtime = runtime or _default_runtime(index_root=index_root, project_id=self.project_id)
+        self.index_root = retrieval_root or (Path(db_path).parent / 'retrieval-index' if db_path and db_path != ':memory:' else None)
+        self.runtime = runtime
         self.trace_root = Path(trace_root or (Path(db_path).parent / "query-traces" if db_path and db_path != ":memory:"
                                             else self.workspace_manager.root / "query-traces"))
 
@@ -130,9 +151,8 @@ class QueryService:
     ) -> dict[str, Any]:
         """Run one question and persist the complete runtime exchange.
 
-        ``history`` remains an accepted argument for old clients, but is
-        deliberately ignored. Session recovery belongs to Claude Code's
-        ``--resume`` mechanism, not to Python-side prompt reconstruction.
+        ``history`` remains an accepted argument for old clients. The selected
+        runtime restores its own session state.
 
         ``scope`` optionally narrows the investigation to configured systems
         and repositories: ``{"systemIds": [...], "repositoryIds": [...]}``.
@@ -145,12 +165,25 @@ class QueryService:
 
         logger.info("查询请求: conversation=%s question_characters=%s", conversation_id or "new", len(question))
         effective_mode = self._normalize_mode(mode)
+        effective_scope = self._normalize_scope(scope)
+        self._validate_owned_id(conversation_id, "conversation")
+        runtime = self.runtime if self.runtime is not None else _default_runtime(index_root=self.index_root, project_id=self.project_id)
+        runtime_name = str(getattr(runtime, "runtime_name", "CLAUDE_CODE"))
+        profile = getattr(runtime, "profile", None)
         workspace = self._workspace_for_mode(effective_mode)
         ast_version_id = workspace.ast_version_id
         logger.info("查询工作区就绪: workspace=%s path=%s", workspace.id, workspace.path)
-        effective_scope = self._normalize_scope(scope)
         repositories = {_safe_name(repo) for repo in effective_scope["repositoryIds"]} if effective_scope else None
-        self._validate_owned_id(conversation_id, "conversation")
+        manifest = MaterialManifest.from_workspace(
+            workspace.path, repositories, allowed=profile.materials if profile else MATERIAL_KINDS,
+            mode=effective_mode, ast_version=ast_version_id, ast_status=workspace.ast_status,
+        )
+        preparation = (runtime.prepare(workspace=workspace.path, materials=manifest, project_id=self.project_id or workspace.id)
+                       if profile else None)
+        settings = runtime.execution_settings() if profile else {}
+        execution = execution_snapshot(profile, manifest, preparation.tool_statuses if preparation else (), settings=settings)
+        session_config = _session_config(execution, manifest) if profile else None
+        execution_json = _json(execution)
         run_id = self._new_id("RUN")
         started_at = _now()
         started_clock = time.monotonic()
@@ -158,23 +191,21 @@ class QueryService:
         # another tab/request cannot start the same session concurrently.
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            conversation = self._get_or_create_conversation(conversation_id, workspace, effective_mode)
+            conversation = self._get_or_create_conversation(conversation_id, workspace, effective_mode, runtime_name)
             stored_scope = _load_json(conversation.get("scope_json"), None)
             stored_mode = str(conversation.get("mode") or "backbone")
             stored_ast_version_id = conversation.get("ast_version_id")
             version_changed = ast_version_id != stored_ast_version_id
             if (effective_scope != stored_scope or effective_mode != stored_mode or version_changed
-                    or conversation.get("runtime") != self._runtime_name()):
-                # 范围变更不续用旧 runtime 会话：resumed session 可能保留上一范围的目录授权。
+                    or conversation.get("runtime") != runtime_name
+                    or session_config != _load_json(conversation.get("session_config_json"), None)):
                 self.db.execute(
-                    "UPDATE query_conversation SET scope_json=?,mode=?,ast_version_id=?,runtime_session_id=NULL,updated_at=? WHERE id=?",
+                    """UPDATE query_conversation SET scope_json=?,mode=?,ast_version_id=?,
+                       runtime_session_id=NULL,session_config_json=?,updated_at=? WHERE id=?""",
                     (_json(effective_scope) if effective_scope else None, effective_mode, ast_version_id,
-                     _now(), conversation["id"]),
+                     _json(session_config) if session_config is not None else None, _now(), conversation["id"]),
                 )
                 conversation["runtime_session_id"] = None
-                conversation["scope_json"] = _json(effective_scope) if effective_scope else None
-                conversation["mode"] = effective_mode
-                conversation["ast_version_id"] = ast_version_id
             active = self.db.execute(
                 "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
                 (conversation["id"],),
@@ -184,10 +215,10 @@ class QueryService:
             self.db.execute(
                 """INSERT INTO query_run
                    (id,conversation_id,runtime,runtime_session_id,question,status,answer,
-                    error,usage_json,scope_json,mode,ast_version_id,started_at,completed_at,duration_ms)
-                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,?,?,NULL,0)""",
-                (run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"], question,
-                 _json(effective_scope) if effective_scope else None, effective_mode, ast_version_id, started_at),
+                    error,usage_json,scope_json,mode,ast_version_id,execution_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,?,?,?,NULL,0)""",
+                (run_id, conversation["id"], runtime_name, conversation["runtime_session_id"], question,
+                 _json(effective_scope) if effective_scope else None, effective_mode, ast_version_id, execution_json, started_at),
             )
             self._save_message(conversation["id"], run_id, "user", question, started_at)
             self.db.commit()
@@ -196,15 +227,16 @@ class QueryService:
             raise
 
         logger.info("查询开始: run=%s conversation=%s runtime=%s session=%s",
-                    run_id, conversation["id"], self._runtime_name(), conversation["runtime_session_id"] or "new")
+                    run_id, conversation["id"], runtime_name, conversation["runtime_session_id"] or "new")
         emitted: list[dict[str, Any]] = []
         client_connected = True
         archive = RunTraceArchive(self.trace_root, run_id, self.project_id)
         archive.start({"runId": run_id, "conversationId": conversation["id"], "question": question,
-                       "runtime": self._runtime_name(), "mode": effective_mode, "scope": effective_scope,
+                       "runtime": runtime_name, "mode": effective_mode, "scope": effective_scope,
                        "astVersionId": ast_version_id, "astStatus": workspace.ast_status,
                        "materials": [{"label": label, "path": str(path)}
-                                     for label, path in workspace_sources(workspace.path, repositories)],
+                                     for label, path in manifest.labelled_roots()],
+                       "execution": execution,
                        "startedAt": started_at, "status": "running"}, workspace.path)
 
         def on_event(event: Mapping[str, Any]) -> None:
@@ -227,14 +259,17 @@ class QueryService:
             if run_callback:
                 run_callback({"runId": run_id, "conversationId": conversation["id"],
                               "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
-                              "astVersionId": ast_version_id})
-            raw_result = self.runtime.ask(
+                              "astVersionId": ast_version_id, "execution": execution})
+            if preparation is not None:
+                preparation.require_tools()
+            raw_result = (runtime.ask_prepared if hasattr(runtime, "ask_prepared") else runtime.ask)(
                 question,
                 workspace=str(workspace.path),
                 session_id=conversation["runtime_session_id"],
                 event_callback=on_event,
                 cancel_check=lambda: self.db.execute("SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
                 repositories=repositories,
+                **({"preparation": preparation} if hasattr(runtime, "ask_prepared") else {}),
             )
             result = normalize_runtime_result(raw_result)
         except Exception as exc:
@@ -258,6 +293,8 @@ class QueryService:
             self.db.commit()
             if isinstance(exc, QueryRuntimeError):
                 raise
+            if isinstance(exc, RequiredToolUnavailable):
+                raise QueryConfigurationError(error_text) from exc
             raise QueryRuntimeError(error_text) from exc
 
         # A custom runtime may return events without invoking the callback.
@@ -285,7 +322,7 @@ class QueryService:
         self.db.execute(
             """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,ast_version_id=?,updated_at=?
                WHERE id=?""",
-            (self._runtime_name(), session_id, workspace.id, ast_version_id, completed_at, conversation["id"]),
+            (runtime_name, session_id, workspace.id, ast_version_id, completed_at, conversation["id"]),
         )
         self.db.commit()
         logger.info("查询结束: run=%s status=%s conversation=%s session=%s duration_ms=%s events=%s answer_characters=%s",
@@ -294,12 +331,13 @@ class QueryService:
             "runId": run_id,
             "conversationId": conversation["id"],
             "projectId": self.project_id,
-            "runtime": self._runtime_name(),
+            "runtime": runtime_name,
             "sessionId": session_id,
             "workspaceId": workspace.id,
             "mode": effective_mode,
             "modeLabel": QUERY_MODE_LABELS[effective_mode],
             "astVersionId": ast_version_id,
+            "execution": execution,
             "status": final_status,
             "scope": effective_scope,
             "answer": result.answer,
@@ -429,11 +467,12 @@ class QueryService:
             "conversationId": conversation_id,
             "projectId": self.project_id,
             "runtime": value["runtime"],
-            "sessionId": value["runtime_session_id"] or (conversation["runtime_session_id"] if conversation else None),
+            "sessionId": value["runtime_session_id"],
             "workspaceId": conversation["workspace_id"] if conversation else None,
             "mode": value.get("mode") or (conversation["mode"] if conversation else "backbone"),
             "modeLabel": QUERY_MODE_LABELS.get(value.get("mode") or (conversation["mode"] if conversation else "backbone"), "有主干"),
             "astVersionId": ast_version_id,
+            "execution": _load_json(value.get("execution_json"), None),
             "question": value["question"],
             "status": value["status"],
             "scope": _load_json(value["scope_json"], None),
@@ -537,7 +576,7 @@ class QueryService:
         limit = max(1, min(int(limit), 100))
         rows = self.db.execute(
             """SELECT id,conversation_id,runtime,runtime_session_id,question,status,answer,error,
-                      mode,ast_version_id,started_at,completed_at,duration_ms
+                      mode,ast_version_id,execution_json,started_at,completed_at,duration_ms
                  FROM query_run ORDER BY started_at DESC,id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
@@ -554,6 +593,7 @@ class QueryService:
                 "mode": row["mode"] or "backbone",
                 "modeLabel": QUERY_MODE_LABELS.get(row["mode"] or "backbone", "有主干"),
                 "astVersionId": row["ast_version_id"],
+                "execution": _load_json(row["execution_json"], None),
                 "answer": row["answer"],
                 "error": row["error"],
                 "startedAt": row["started_at"],
@@ -633,9 +673,6 @@ class QueryService:
             },
         }
 
-    def _runtime_name(self) -> str:
-        return str(getattr(self.runtime, "runtime_name", "CLAUDE_CODE"))
-
     def _new_id(self, prefix: str) -> str:
         if self.project_scoped:
             return f"{prefix}-{_safe_name(self.project_id)}-{uuid.uuid4().hex}"
@@ -654,11 +691,13 @@ class QueryService:
         conversation_id: str | None,
         workspace: Workspace,
         mode: str,
+        runtime_name: str,
     ) -> dict[str, Any]:
         now = _now()
         if conversation_id:
             row = self.db.execute(
-                "SELECT id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id FROM query_conversation WHERE id=?",
+                """SELECT id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id,
+                   session_config_json FROM query_conversation WHERE id=?""",
                 (conversation_id,),
             ).fetchone()
             if row:
@@ -674,12 +713,12 @@ class QueryService:
             """INSERT INTO query_conversation
                (id,runtime,runtime_session_id,workspace_id,scope_json,mode,ast_version_id,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            (conversation_id, self._runtime_name(), None, workspace.id, None, mode,
+            (conversation_id, runtime_name, None, workspace.id, None, mode,
              workspace.ast_version_id, now, now),
         )
         return {
             "id": conversation_id,
-            "runtime": self._runtime_name(),
+            "runtime": runtime_name,
             "runtime_session_id": None,
             "workspace_id": workspace.id,
             "mode": mode,
@@ -722,18 +761,18 @@ class QueryService:
 
 
 def _default_runtime(*, index_root=None, project_id=None):
-    import os
-    if os.environ.get("BUSINESS_CODE_AGENT_RUNTIME", "langchain").lower() == "claude":
+    environment = dict(os.environ)
+    profile = resolve_profile(environment)
+    if profile.runtime == "claude":
         return default_claude_runtime()
+    if profile.investigation == "agent_direct":
+        raise ValueError("standard-v1 将在自主调查策略接入后开放，当前可使用 coordinated-legacy-v1")
     from .langchain_agent import LangChainRuntime
-    coordinated = os.environ.get('BUSINESS_CODE_AGENT_WORKFLOW', 'coordinated') == 'coordinated'
-    retrieval = os.environ.get('BUSINESS_CODE_AGENT_RETRIEVAL', 'auto' if coordinated else 'files').lower()
-    enabled = retrieval == 'hybrid' or (retrieval == 'auto' and index_root and (Path(index_root) / 'index.json').is_file())
-    contracts = os.environ.get('BUSINESS_CODE_AGENT_CONTRACTS', 'auto' if coordinated else 'off').lower()
-    candidate = Path(index_root).parent / 'contract-index' if index_root else None
-    contract_root = candidate if candidate and (contracts == 'on' or (contracts == 'auto' and (candidate / 'contracts.sqlite').is_file())) else None
-    return LangChainRuntime(index_root=index_root if enabled else None, project_id=project_id,
-                            contract_root=contract_root)
+    return LangChainRuntime(
+        profile=profile, environment=environment, project_id=project_id,
+        index_root=index_root if profile.search_code != "disabled" else None,
+        contract_root=Path(index_root).parent / "contract-index" if index_root and profile.contract_trace != "disabled" else None,
+    )
 
 
 __all__ = ["QueryRuntimeError", "QueryService"]

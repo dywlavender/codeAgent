@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
+from .materials import MaterialManifest
+from .profile import ToolStatus
+
 
 EventCallback = Callable[[Mapping[str, Any]], None]
 
@@ -34,6 +37,22 @@ class RuntimeResult:
 
 class RuntimeErrorBase(RuntimeError):
     """Base error surfaced by a runtime implementation."""
+
+
+class RequiredToolUnavailable(RuntimeErrorBase):
+    """The profile requires a tool whose prerequisites are missing."""
+
+
+@dataclass(frozen=True)
+class RunPreparation:
+    materials: MaterialManifest
+    tool_statuses: tuple[ToolStatus, ...]
+
+    def require_tools(self) -> None:
+        missing = [f"{tool.capability}（{tool.reason}）" for tool in self.tool_statuses
+                   if tool.policy == "required" and tool.status != "ready"]
+        if missing:
+            raise RequiredToolUnavailable("本轮必需工具不可用：" + "、".join(missing))
 
 
 def normalize_runtime_result(value: RuntimeResult | Mapping[str, Any]) -> RuntimeResult:

@@ -18,7 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .runtime import EventCallback, RuntimeErrorBase, RuntimeResult
+from .profile import CLAUDE_COMPAT, ToolStatus
+from .runtime import EventCallback, RunPreparation, RuntimeErrorBase, RuntimeResult
 from .progress import ProgressEvents
 from .workspace import project_index, read_turn_context, search_instructions, workspace_sources
 
@@ -31,6 +32,7 @@ class ClaudeRuntimeError(RuntimeErrorBase):
 
 class ClaudeCodeRuntime:
     runtime_name = "CLAUDE_CODE"
+    profile = CLAUDE_COMPAT
 
     def __init__(
         self,
@@ -44,6 +46,19 @@ class ClaudeCodeRuntime:
         self.timeout_seconds = max(1.0, float(timeout_seconds))
         self.read_tools = tuple(read_tools)
         self.environment = dict(environment or {})
+
+    def execution_settings(self):
+        return {"requestedModel": self.environment.get("ANTHROPIC_MODEL", os.environ.get("ANTHROPIC_MODEL")),
+                "maxSeconds": self.timeout_seconds}
+
+    def prepare(self, *, workspace, materials, project_id=None):
+        ready = bool(shutil.which(self.command) or Path(self.command).is_file())
+        return RunPreparation(materials, (
+            ToolStatus("file_tools", "required", "ready" if ready else "unavailable",
+                       self.read_tools if ready else (), reason=None if ready else "没有找到 Claude Code CLI"),
+            ToolStatus("search_code", "disabled", "disabled"),
+            ToolStatus("contract_trace", "disabled", "disabled"),
+        ))
 
     def build_command(
         self,

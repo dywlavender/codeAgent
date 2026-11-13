@@ -1,0 +1,174 @@
+# CodeAgent V2 架构设计
+
+状态：设计冻结，尚未实现或切换生产默认。确认日期：2026-11-13。
+
+本阶段是「CodeAgent V2 架构设计与接口冻结」，不是 Direct Runtime 实现阶段。基于 `claudecode` 的当前工作树核对设计；其中未提交的 Profile、资料清单和工具预检属于已有准备工作，不视为 V2 已交付。
+
+## 1. 适用范围与冻结内容
+
+- [当前架构](architecture.md)记录 V1；`combined`、`coordinated`、现有 AST、Business Context、混合检索和契约能力继续服务 V1，不在本阶段删除或改变默认值。
+- 本文冻结 V2 的职责、依赖和执行主链；[能力与运行合同](agent-capability-contract.md)是数据类型、状态、工具、会话及证据规则的唯一接口依据；[迁移计划](agent-migration-plan.md)规定迁移顺序、回退和验收。
+- V2 首个实现目标为 `core-v1`：只有源码、模型连接及 Read／Glob／Grep 即可调查；需求是可选资料，不需要任何预建索引。
+- AST、Business Context、SearchCode、Contract 后续通过同一 Capability 接入。不允许因增加能力而复制 Agent、增加全局调查调度器或修改核心循环。
+- 本次只新增三份设计文档，同步现行架构、协作指引、文档索引及指导方向的适用范围。不修改 Python、前端、数据库、配置、依赖或业务资料内容。
+
+架构边界、资料授权、证据边界现在生效；新 Profile 名称和接口签名是后续实现目标，不是当前可运行命令。生产默认切换需要实现验收与单独确认，不由文档冻结自动触发。
+
+## 2. 唯一调查主链
+
+```text
+用户问题 + 显式工程/范围/Profile
+    ↓
+QueryService：校验归属、运行互斥、资料授权、只读工作区
+    ↓
+构建 RunContext + 预检/绑定 Capability + 核对会话身份
+    ↓
+AgentRuntime（langchain-direct）
+    ↓
+模型选择已注册 Tool → 执行 → 原文/导航/缺口 → 模型
+    └───────────────────────────────────────────┘
+    ↓ 模型提交 Answer
+引用/证据边界校验 → RuntimeResult
+    ↓
+QueryService：答案、会话、运行状态与 Trace 持久化
+```
+
+Trace 从运行创建开始持续记录，并非回答之后才开始。资料/能力预检失败、工具失败、模型失败和取消也有记录。验证不能暗中补读源码、调用第二个调查 Agent 或将结构线索升级为实现证明。
+
+### 职责分配
+
+| 模块 | 负责 | 不负责 |
+| --- | --- | --- |
+| QueryService | 工程归属、会话与并发运行管理，调用上下文构建和能力装配，保存/转发事件，取消与终态 | 选择检索词、按业务问题分类调度工具、拼装源码答案 |
+| RunContext / AgentProfile | 固定本轮实际授权及明确的执行配置 | 重新读取环境变量、全局当前工程、自动扩大范围 |
+| Workspace | 将授权资料映射为只读虚拟路径，保存目录/版本映射 | 同步仓库、解析代码、生成/更新索引或下载模型 |
+| Capability 注册层 | 预检、工具绑定、阅读指导、状态及版本描述 | 维护全局待办、按新证据自动补查、调用模型 |
+| AgentRuntime | 单一模型/工具循环、上下文管理、停止响应、引用收集 | 知识维护、AST 生命周期、工程注册、后台资料准备 |
+| Tool | 执行一次受控操作，返回资料、原文、导航或明确缺口 | 建立第二套调查循环、跨授权搜索、生成最终业务答案 |
+| 证据检查 | 检查已交付内容、版本、行号和声明的证据类别 | 任意业务语义证明、保证调用链完整、自动修正业务结论 |
+| Trace / Session | 审计公开交互，按身份隔离会话，管理原文新鲜度 | 将历史回答或摘要当作新一轮源码证据 |
+
+`legacy-v1` 是 V1 coordinated Runtime 的兼容入口，其内部程序调度保留为对照，不属于 Direct 主循环。不能把 Coordinator 放进一个叫 Capability 的包装里，再让 `core-v1` 间接使用它。
+
+## 3. 资料与工具分层
+
+| 类别 | 对象 | 如何交付 | 证明边界 |
+| --- | --- | --- | --- |
+| 原始资料 | Source、仓库 README、Requirements | 受控文件读取 | 源码支持已核对实现；README 是项目背景；需求只说明目标 |
+| 业务认知 | Business Context | 受控业务资料目录和阅读指导 | 项目术语、业务约定、系统协作、数据生命周期；不证明已经实现 |
+| 代码结构 | AST、Code Map、Contract Index | 结构导航、符号/关系工具，必要时另读源码 | 已分析的候选关系；不是完整执行链或业务规则证明 |
+| 检索实现 | Hybrid Search | 可选 SearchCode，受资料授权约束 | 排名算法不是知识类别；命中和高分不证明业务结论 |
+
+Code Map 在 V2 是结构导航的一种视图，不要求永远维持独立知识体系。迁移期间仍保留 `code_map` 来源标识、现有文件目录与版本，避免抹掉历史来源；本阶段不合并 Code Map 与 AST。
+
+工具名不决定证据性质。Read 读取 AST Markdown 仍是结构导航；SearchCode 若交付经过当前文件核对的完整原文片段，可以单独产生源码证据，排名/结构关系本身仍是导航。业务资料中引用的类名、接口或流程只提供调查线索。
+
+BusinessContextCapability 通常不增加工具，复用 FileCapability 的 Read／Glob／Grep 访问已授权业务目录，只提供阅读指导。AstCapability 通过 FindCodeRelation 查询版本化符号/关系；缺少索引时不能用即时解析冒充零索引回退。
+
+## 4. 统一上下文与能力装配
+
+复用 `platform/projects.py` 的 `ProjectContext`，不再建立第二套工程配置/管理对象。`RunContext` 包含工程、Profile、规范化范围、工作区、资料清单、能力决策及可复用的运行时会话 ID；它是本轮授权快照，不是供工具读取任意工程目录的通行证。
+
+上下文构建只读配置和现有资料状态，执行顺序固定为：
+
+1. 由请求关联的 ProjectContext 校验会话归属及系统/仓库 ID，将范围展开成具体仓库集合。先授权，再探测可选资料。
+2. 解析 Profile。`disabled` 的能力不得探测索引、导入其可选依赖、挂载资料、注入指导或恢复历史工具结果。
+3. 根据 Profile 和范围形成 MaterialSource，固定目录、所属仓库及版本；准备最小只读 Workspace。必需源码仓库缺失时失败，不能静默缩小范围。
+4. 创建仅用于预检的 RunContext；对非 disabled 能力调用 `status`，required 不可用则记录配置失败，optional 不可用则排除该能力。
+5. 对 ready 能力绑定工具和指导，检查名字冲突与来源范围，形成最终能力快照。会话尚未确定时，工具只能绑定资料授权，不能绑定旧会话状态。
+6. 先解析冻结的 RuntimeSettings/RunOptions，用工程、范围、完整 Profile、资料、工具定义与这两份设置计算会话身份；同一设置依次传入工厂和 ask，核对后设置 `session_id`。只有冻结完成的上下文允许进入模型循环。
+
+预检排除业务/结构能力时，其资料正文也从 File 授权中排除并整体重新绑定；运行中由全部工具共用的 RunAccess 只做权限收缩。失效通过类型化 AvailabilityChange 记录，不能只停用关系工具却允许 Read 继续访问旧 AST 文档；单个文件不可读与整个必需能力失效分别处理。
+
+具体两阶段类型和接口见[合同第 5 节](agent-capability-contract.md#5-装配协议与-bootstrap-顺序)。工具不得从全局环境、相邻工作区或其他 Profile 的缓存再次发现能力。
+
+## 5. Profile 与运行期行为
+
+| Profile | Runtime | 资料与能力 | 当前状态 |
+| --- | --- | --- | --- |
+| `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 下一实施阶段目标 |
+| `legacy-v1` | `langchain-legacy` | 保留当前 combined/coordinated 及已准备索引的使用语义 | 需未来兼容适配；本阶段仍用现有入口 |
+| `core-business-v1` | 同一 `langchain-direct` | core 加 Business Context | 预留，未开放 |
+| `core-ast-v1` | 同一 `langchain-direct` | core 加 AST 结构导航 | 预留，未开放 |
+| `core-business-ast-v1` | 同一 `langchain-direct` | core 加两种能力 | 预留，未开放 |
+
+首次只设计并实现前两个正式 Profile 的注册。未来组合 Profile 的接口走查使用内存测试配置，不表示当前名称已可运行。不同组合不能对应不同 DirectRuntime 子类或不同调查算法。
+
+- `required` 是必须具备的能力/资料，不要求模型每题必须调用或读取。
+- `optional` 是授权尝试使用现有可用资料，不允许准备、下载或补建。
+- `disabled` 是禁止使用，不是「没有找到」；即使本机有索引也不能启用。
+- 预检/执行期不可用不能自动切换 Profile 或 Legacy。索引过期时，在原 Profile 已允许的 File 能力内继续调查；required 能力失效则明确失败。
+- 新索引在运行途中准备完成也不能临时启用，必须下一轮重新构建上下文。
+
+Direct 的模型自主决定下一次 Read／Glob／Grep 和何时回答。不继承 V1 的固定补读、Investigation 待办、按连续无命中次数收尾或 Coordinator。生产不设置模型调用次数、调查总时长或有限 LangGraph 步数；保留取消、上下文容量、单次工具上限和单次网络请求超时。独立有界评测可通过公开运行参数设限并记录，不读取旧预算环境变量。
+
+上下文不足时可以丢弃/摘要历史工具正文，但必须标明原文未在当前上下文中，不能伪装为仍可引用。证据不足可以回答「尚未确认」，不是强制打开其他能力的理由。
+
+## 6. 逻辑目标结构与依赖规则
+
+以下是职责位置，不是本阶段要创建的 Python 文件清单。
+
+```text
+business_code_agent/
+├── platform/projects.py        ProjectContext 与工程注册
+├── query/
+│   ├── service.py              会话与运行管理
+│   ├── runtime.py              公共 Runtime 协议和既有 RuntimeResult
+│   ├── context.py              RunContext 与 QueryScope
+│   ├── profile.py              AgentProfile 与解析
+│   ├── materials.py            MaterialSource 与授权清单
+│   ├── capabilities.py         Capability 协议、注册和绑定
+│   ├── workspace.py            工作区与资料授权
+│   ├── agent/direct.py         唯一 Direct 模型/工具循环
+│   ├── agent/session.py        会话身份与原文新鲜度
+│   ├── tools/files.py          无索引文件能力
+│   ├── langchain_agent/        原 V1，迁移期保留
+│   └── traces.py               工程运行归档
+├── knowledge/                 业务认知管理及其公开只读接口
+├── codeintel/                 AST/代码地图/检索/契约及其公开只读接口
+├── requirement/               需求管理
+├── evaluation/                独立评测，消费公共 Runtime
+├── api/                       请求处理与依赖装配
+└── storage/                   数据持久化
+```
+
+依赖规则：
+
+- `query/service.py`、`agent/direct.py` 和通用注册层依赖协议，不引用 knowledge、AST 或混合检索内部模块。领域适配器经 API/CLI 组合根注入注册层；后续可放在既有 `query/tools/` 下，但只能调用对应领域的公开只读接口。
+- 核心文件工具不应为后缀/忽略目录常量依赖 `codeintel/retrieval.py`；下一阶段在文件工具范围内收敛这类通用策略，不连带迁移检索算法。
+- `knowledge/` 不调用问答 Agent 主循环。现有知识维护中的模型能力不因此删除，但不能复用它建立第二套问答调查。
+- `codeintel/` 不生成最终业务答案、不依赖 LangChain；解析/生成与只读查询分开，生成仍由显式管理操作触发。
+- `evaluation/ → query/runtime` 是单向的公共接口消费。`query/` 不依赖 evaluation，`platform/` 不为问答导入 evaluation。AST 生命周期在阶段 3 移入 CodeIntel，评测只冻结和引用版本。
+- `api/` 与 CLI 是组合根，只构造/注入服务与提供传输；领域逻辑不得搬到路由。
+- ProjectContext 继续提供工程存储边界，底层 storage/shared 不反向依赖领域。已有包边界规则继续生效，V2 的更细隔离需要未来新增测试，不声称现有测试全部覆盖。
+
+这些规则限制的是依赖方向与公共行为，不要求为每个能力制造独立管理层或插件框架。
+
+## 7. 零索引完整执行示例
+
+输入为工程配置中已有的三个本地仓库及其系统归属：
+
+```text
+repos/
+├── channel/
+├── middle/
+└── decision/
+```
+
+没有 AST、Code Map、Hybrid Index、Contract Index 或 Business Context。
+
+1. **工程准备**：复用 ProjectContext 和工程配置，核对三个仓库真实目录；配置系统职责仅作导航。建立只读映射，不运行 Git 同步、解析器或索引准备器；无仓库内容时明确失败。
+2. **开始运行**：QueryService 创建运行记录、Trace 与 `core-v1`，规范化 QueryScope 为三个仓库，生成三个 source MaterialSource，记录需求 missing/ready 和其他资料 disabled。
+3. **工具装配**：FileCapability ready，只绑定 Read／Glob／Grep。禁用能力不执行 status，更不扫描机器上已有索引。基于最终快照确定是否复用 session。
+4. **自主调查**：模型用 Glob 看目录、Grep 定位业务词/符号、Read 读取正文；发现客户端调用或事件名后，自行在其他授权仓库继续搜索。不需要预建符号库，不保证所有动态连接都能找到。
+5. **形成答案**：区分已确认代码行为、读取到的配置/需求，以及没有找到连接证据的部分。源码引用来自本轮交付的原文及行号；README 说明不升级为实现证明。
+6. **校验与记录**：Runtime 记录来源校验与 `semanticProof=false`，返回既有 RuntimeResult。QueryService 保存 Profile、实际资料、工具、引用、答案、会话身份和完整 Trace；完成不表示所有关系均已查明。
+7. **追问**：工程/范围/Profile/资料或能力版本变化重建模型会话；相同身份下仍校验旧原文新鲜度。历史轮次不被新资料补写。
+
+增加业务知识只增加授权资料与阅读指导；增加 AST 只增加结构查询能力。上述步骤与 Runtime 循环均不改变。五个接口级场景及反例见[迁移计划第 5 节](agent-migration-plan.md#5-五个接口级走查)。
+
+## 8. 交付与后续闸门
+
+本阶段通过条件为 A01—A12 能由接口和场景解释清楚，三组现有回归没有本次引入的失败，且差异仅限文档。不能把文档走查或既有测试通过写成零索引 Agent、业务认知收益或 AST 收益已验证。
+
+下一阶段只实现 `core-v1` 与现有 QueryService 的接入，保留 Legacy 回退。业务知识、AST、检索与契约都不参与基础 Runtime 验收；以后按能力分别接入、分别做同模型同资料条件的增量评测。

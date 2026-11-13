@@ -16,7 +16,7 @@ from business_code_agent.evaluation.service import EvaluationService
 from business_code_agent.evaluation.ast_service import AstService
 from business_code_agent.evaluation.retrieval_service import RetrievalEvaluationService
 from business_code_agent.platform.projects import ProjectContext, ProjectRegistry, ProjectRegistryError
-from business_code_agent.query.service import QueryBusyError, QueryRuntimeError, QueryService
+from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryRuntimeError, QueryService
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 def _user_facing_internal_error(exc: Exception) -> str:
     """Map runtime failures to short, actionable messages for the browser."""
+    if isinstance(exc, QueryConfigurationError):
+        return str(exc)
     messages = []
     current = exc
     for _ in range(6):
@@ -393,6 +395,8 @@ def make_server(
                         self._sse("result", result)
                     except QueryBusyError as exc:
                         self._sse("error", {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
+                    except ValueError as exc:
+                        self._sse("error", {"error": str(exc)})
                     except Exception as exc:
                         logger.exception("查询流内部错误: %s", type(exc).__name__)
                         try:
