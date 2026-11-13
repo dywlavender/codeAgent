@@ -493,9 +493,13 @@ class QueryService:
         execution = base_execution
         callback_sent = False
         try:
+            include_business_context = profile.business_context != "disabled"
             workspace = self.workspace_manager.prepare_core(
-                run_id=run_id, repository_ids=repositories, include_requirements=True)
-            manifest = MaterialManifest.for_core(workspace.path, workspace.repository_mounts)
+                run_id=run_id, repository_ids=repositories, include_requirements=True,
+                include_business_context=include_business_context)
+            manifest = MaterialManifest.for_core(
+                workspace.path, workspace.repository_mounts,
+                include_requirements=True, include_business_context=include_business_context)
             missing = manifest.missing_required()
             if missing:
                 raise WorkspaceError("授权仓库不可用，未调用模型：" + "、".join(
@@ -942,7 +946,8 @@ class QueryService:
                 "path": str(self.workspace_manager.root),
                 "mode": "core",
             }
-            sources = self.workspace_manager.core_source_summary()
+            sources = self.workspace_manager.core_source_summary(
+                include_business_context=profile.business_context != "disabled")
         else:
             sources = self.workspace_manager.source_summary()
             try:
