@@ -1,0 +1,315 @@
+{
+  "runId": "RUN-296d6aa017f94382a3cc5db42b0ef0e4",
+  "conversationId": "CONV-05df526e151a4335a102fbbb50f06184",
+  "projectId": "complex-loan-validation",
+  "runtime": "LANGCHAIN",
+  "sessionId": "LC-d9973567fa5b46afb35f11dcc0e5bd5b",
+  "workspaceId": "complex-loan-validation",
+  "mode": "backbone",
+  "modeLabel": "有主干",
+  "astVersionId": null,
+  "status": "completed",
+  "scope": null,
+  "answer": "## 结论\n\n**当前渠道接口不能直接区分“外部还没结果”和“中台入账失败”**。  \n原因是：渠道侧 `displayOf` 把中台所有非终态（包括 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`）统一映射为 `\"PROCESSING\"`，而中台 `detail` 返回的 `status` 字段在两种情况下可能都表现为处理中语义，且渠道层没有把 `booking.status` / `paymentStatus` 等细粒度状态透出给运营页面。\n\n---\n\n## 依据字段与源码位置\n\n### 1. 渠道侧展示状态映射（关键瓶颈）\n\n**文件**：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java`  \n**行号**：198–203\n\n```java\nprivate String displayOf(String middleStatus) {\n    return switch (middleStatus) {\n        case \"SUCCESS\", \"FAILED\" -> middleStatus;\n        default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n    };\n}\n```\n\n- **问题**：`EXTERNAL_SUCCESS_BOOKING_PENDING`（外部成功但入账未完成/失败）被归入 `default`，对外只展示 `\"PROCESSING\"`。\n- **影响**：运营无法从 `displayStatus` 区分“外部还在处理”和“外部已成功但中台入账卡住/失败”。\n\n### 2. 渠道查询提款详情时透出的字段\n\n**文件**：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java`  \n**行号**：127–137\n\n```java\npublic Map<String, Object> drawdownDetail(String channelRefNo) {\n    ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\n    Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\n    String display = displayOf(String.valueOf(middleDetail.get(\"status\")));\n    record.setDisplayStatus(display);\n    record.setMiddleRawStatus(String.valueOf(middleDetail.get(\"status\")));\n    ...\n    return Map.of(\"channelRefNo\", channelRefNo, \"displayStatus\", display,\n            \"middleStatus\", middleDetail.get(\"status\"), \"detail\", middleDetail);\n}\n```\n\n- 虽然返回了 `middleStatus`（中台原始 status）和 `detail`（中台完整 detail），但：\n  - `middleStatus` 只是 `DrawdownOrder.Status.name()`，即顶层状态枚举。\n  - `detail` 中包含 `booking.status`（见下），但**渠道层没有对 `booking.status` 做二次映射或单独透出**，运营若只看 `displayStatus` 仍无法区分。\n\n### 3. 中台 `detail` 返回结构（含 booking 子状态）\n\n**文件**：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java`  \n**行号**：257–266\n\n```java\npublic Map<String, Object> detail(String bizOrderNo) {\n    DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\n    return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n            \"amount\", order.getAmount(),\n            \"payments\", List.of(Map.of(\"extSerialNo\", ..., \"status\", order.getPaymentStatus().name(), ...)),\n            \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                    \"loanAccountNo\", ...,\n                    \"retryCount\", order.getBookingRetryCount()));\n}\n```\n\n- **关键字段**：\n  - `status`：顶层业务单状态（如 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`、`SUCCESS`、`FAILED`）。\n  - `payments[0].status`：付款状态（`PENDING`、`SUCCESS`、`FAILED`、`RESULT_UNCONFIRMED`）。\n  - `booking.status`：入账状态（`TO_BOOK`、`BOOKED`、`RETRY_NEEDED`）。\n  - `booking.retryCount`：入账重试次数。\n\n- **区分逻辑**：\n  - “外部还没结果” → `status == PROCESSING` 且 `payments[0].status != SUCCESS`。\n  - “中台入账失败/卡住” → `status == EXTERNAL_SUCCESS_BOOKING_PENDING` 且 `booking.status == RETRY_NEEDED`（或 `TO_BOOK` 但长时间未变 `BOOKED`）。\n\n### 4. 中台状态流转佐证\n\n**文件**：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java`  \n**行号**：188–211（`onPaymentResult`）、217–242（`book`）\n\n- 外部成功时：`order.setStatus(EXTERNAL_SUCCESS_BOOKING_PENDING)` + `order.setBookingStatus(TO_BOOK)`，然后同步调 `book(order)`。\n- `book` 失败时：`order.setBookingStatus(RETRY_NEEDED)`，但 **`order.status` 仍保持 `EXTERNAL_SUCCESS_BOOKING_PENDING`**（未改为 FAILED）。\n- 因此，仅看顶层 `status` 无法区分“入账进行中”和“入账失败待补偿”，必须结合 `booking.status`。\n\n---\n\n## 如果只能改一处代码，改哪里收益最大？\n\n**推荐修改点**：`ChannelService.displayOf` 方法（第 198–203 行），将其从“仅根据顶层 status 映射”升级为“根据顶层 status + booking/payment 子状态映射出更细粒度的展示状态”。\n\n### 具体建议\n\n将 `drawdownDetail`（第 127–137 行）中计算 `display` 的逻辑，从单纯调用 `displayOf(middleStatus)` 改为：\n\n```java\nString middleStatus = String.valueOf(middleDetail.get(\"status\"));\nString bookingStatus = String.valueOf(((Map<?, ?>) middleDetail.get(\"booking\")).get(\"status\"));\nString paymentStatus = String.valueOf(((List<?>) middleDetail.get(\"payments\")).get(0)); // 需安全取值\n\nString display;\nif (\"SUCCESS\".equals(middleStatus)) {\n    display = \"SUCCESS\";\n} else if (\"FAILED\".equals(middleStatus)) {\n    display = \"FAILED\";\n} else if (\"EXTERNAL_SUCCESS_BOOKING_PENDING\".equals(middleStatus)) {\n    display = \"BOOKING_PENDING\"; // 或 \"BOOKING_FAILED\" if bookingStatus == RETRY_NEEDED\n} else {\n    display = \"PROCESSING\";\n}\n```\n\n或者更简洁地：**在 `displayOf` 中增加对 `EXTERNAL_SUCCESS_BOOKING_PENDING` 的独立分支**，并让 `drawdownDetail` 传入 `booking.status` 作为辅助参数。\n\n### 为什么这里收益最大？\n\n1. **单一入口**：所有提款详情的展示状态都经过 `displayOf`（第 130 行、第 109 行、第 121 行等），改这一处即可全局生效。\n2. **数据已具备**：中台 `detail` 已经返回 `booking.status` 和 `payments[].status`，无需改中台接口。\n3. **运营可感知**：新增一个展示状态（如 `BOOKING_PENDING` 或 `BOOKING_FAILED`）后，运营页面可直接区分两类“处理中”，无需额外查询或人工核对。\n4. **改动最小**：只需调整渠道服务内的映射逻辑，不涉及数据库 schema、中台契约或前端大改（前端只需多识别一个新枚举值）。\n\n---\n\n## 缺口说明\n\n- 未读取 `ChannelApplicationRecord` 实体定义，无法确认 `middleRawStatus` 字段是否已在数据库中持久化并可被运营后台直接查询（但从第 132 行 `record.setMiddleRawStatus(...)` 推断已存在）。\n- 未读取前端页面代码，无法确认当前页面是否已展示 `middleStatus` 或 `detail.booking.status`；若前端已展示这些字段，则运营理论上可通过高级筛选区分，但**默认视图仍依赖 `displayStatus`**，因此上述修改仍是最高收益点。\n- 未读取 `DrawdownOrder.Status` 枚举完整定义，但根据第 199 行注释和第 199–201 行 switch 分支，可确认至少包含 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`、`SUCCESS`、`FAILED` 四个值。",
+  "events": [
+    {
+      "sequence": 1,
+      "eventType": "status",
+      "payload": {
+        "phase": "starting",
+        "label": "正在准备资料"
+      }
+    },
+    {
+      "sequence": 2,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 1 轮）"
+      }
+    },
+    {
+      "sequence": 3,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_f6411dbf1166467da4ee45a4",
+        "name": "Glob",
+        "input": {
+          "pattern": "knowledge/business-context/**/*"
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 4,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_7282660ab6024142a4848867",
+        "name": "Grep",
+        "input": {
+          "pattern": "处理中",
+          "path": "repos/channel-service-repo",
+          "limit": 40
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 5,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_7282660ab6024142a4848867",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [{\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"line\": 195, \"text\": \"     * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态\"}, {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"line\": 201, \"text\": \"            default -> \\\"PROCESSING\\\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\"}], \"truncated\": false}"
+      }
+    },
+    {
+      "sequence": 6,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_f6411dbf1166467da4ee45a4",
+        "name": "Glob",
+        "status": "completed",
+        "output": "{\"paths\": [], \"truncated\": false}"
+      }
+    },
+    {
+      "sequence": 7,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 2 轮）"
+      }
+    },
+    {
+      "sequence": 8,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_1af373addc2f4d0081768091",
+        "name": "Read",
+        "input": {
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 9,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_1af373addc2f4d0081768091",
+        "name": "Read",
+        "status": "completed",
+        "output": "{\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"lineStart\": 1, \"lineEnd\": 160, \"totalLines\": 226, \"sourceMtimeNs\": 1788686135144092996, \"truncated\": true, \"nextLine\": 161, \"deprecated\": false, \"content\": \"1: package com.rsd.channel;\\n2: \\n3: import com.rsd.channel.ChannelApplicationRecord.BizType;\\n4: import com.rsd.channel.ChannelProductRule;\\n5: import com.rsd.channel.ChannelProductRuleRepository;\\n6: import com.rsd.channel.ChannelApplicationRecordRepository;\\n7: import com.rsd.channel.MiddleClient;\\n8: import org.springframework.http.HttpStatus;\\n9: import org.springframework.stereotype.Service;\\n10: import org.springframework.web.server.ResponseStatusException;\\n11: import java.math.BigDecimal;\\n12: import java.time.LocalDateTime;\\n13: import java.util.Arrays;\\n14: import java.util.List;\\n15: import java.util.Map;\\n16: import java.util.concurrent.ThreadLocalRandom;\\n17: \\n18: /**\\n19:  * 渠道业务服务：开放条件过滤、字段转换、申请入口、展示状态聚合。\\n20:  * 渠道规则（主设计 §四）：企业自助渠道单笔上限 30 万、期限 3/6/12；客户经理渠道上限 100 万、期限同中台。\\n21:  * \\\"同一客户换个入口，可选条件不同\\\"由本服务与中台配置差异复现。\\n22:  */\\n23: @Service\\n24: public class ChannelService {\\n25: \\n26:     private final ChannelProductRuleRepository ruleRepo;\\n27:     private final ChannelApplicationRecordRepository recordRepo;\\n28:     private final MiddleClient middle;\\n29: \\n30:     public ChannelService(ChannelProductRuleRepository ruleRepo, ChannelApplicationRecordRepository recordRepo,\\n31:                           MiddleClient middle) {\\n32:         this.ruleRepo = ruleRepo;\\n33:         this.recordRepo = recordRepo;\\n34:         this.middle = middle;\\n35:     }\\n36: \\n37:     /** 可选条件：先取中台产品能力，再按渠道规则收窄（金额上限、期限、开放开关）。 */\\n38:     @SuppressWarnings(\\\"unchecked\\\")\\n39:     public Map<String, Object> options(String channelId, String creditId) {\\n40:         Map<String, Object> middleOptions = middle.drawdownOptions(creditId);\\n41:         List<Map<String, Object>> products = ((List<Object>) middleOptions.get(\\\"products\\\")).stream()\\n42:                 .map(item -> (Map<String, Object>) item)\\n43:                 .map(p -> narrowByChannel(channelId, p))\\n44:                 .filter(p -> p != null)\\n45:                 .toList();\\n46:         return Map.of(\\\"channelId\\\", channelId, \\\"creditId\\\", creditId, \\\"products\\\", products);\\n47:     }\\n48: \\n49:     @SuppressWarnings(\\\"unchecked\\\")\\n50:     private Map<String, Object> narrowByChannel(String channelId, Map<String, Object> product) {\\n51:         return ruleRepo.findByChannelId(channelId).stream()\\n52:                 .filter(rule -> rule.isEnabled() && rule.getProductId().equals(product.get(\\\"productId\\\")))\\n53:                 .findFirst()\\n54:                 .map(rule -> {\\n55:                     BigDecimal capped = ((BigDecimal) product.get(\\\"maxAmount\\\")).min(rule.getMaxAmount());\\n56:                     List<Integer> terms = ((List<Integer>) product.get(\\\"terms\\\")).stream()\\n57:                             .filter(t -> rule.termList().contains(t))\\n58:                             .toList();\\n59:                     if (terms.isEmpty() || capped.compareTo((BigDecimal) product.get(\\\"minAmount\\\")) < 0) {\\n60:                         return null; // 渠道开放范围收窄到不可用时直接不透出\\n61:                     }\\n62:                     return Map.<String, Object>of(\\n63:                             \\\"productId\\\", product.get(\\\"productId\\\"),\\n64:                             \\\"productName\\\", product.get(\\\"productName\\\"),\\n65:                             \\\"minAmount\\\", product.get(\\\"minAmount\\\"),\\n66:                             \\\"maxAmount\\\", capped,\\n67:                             \\\"terms\\\", terms,\\n68:                             \\\"repaymentModes\\\", product.get(\\\"repaymentModes\\\"),\\n69:                             \\\"availableAmount\\\", product.get(\\\"availableAmount\\\"),\\n70:                             \\\"channelMaxAmount\\\", rule.getMaxAmount());\\n71:                 })\\n72:                 .orElse(null);\\n73:     }\\n74: \\n75:     /** 提款申请入口：渠道校验自己的开放规则（金额、期限），转换字段后调用中台。 */\\n76:     @SuppressWarnings(\\\"unchecked\\\")\\n77:     public Map<String, Object> applyDrawdown(String channelId, Map<String, Object> request) {\\n78:         String creditId = String.valueOf(request.get(\\\"creditId\\\"));\\n79:         String productId = String.valueOf(request.get(\\\"productId\\\"));\\n80:         BigDecimal amount = new BigDecimal(String.valueOf(request.get(\\\"amount\\\")));\\n81:         int termMonths = Integer.parseInt(String.valueOf(request.get(\\\"termMonths\\\")));\\n82: \\n83:         ChannelProductRule rule = ruleRepo.findByChannelId(channelId).stream()\\n84:                 .filter(r -> r.getProductId().equals(productId) && r.isEnabled())\\n85:                 .findFirst()\\n86:                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \\\"PRODUCT_NOT_OPEN\\\"));\\n87:         if (amount.compareTo(rule.getMaxAmount()) > 0) {\\n88:             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \\\"CHANNEL_AMOUNT_LIMIT\\\");\\n89:         }\\n90:         if (!rule.termList().contains(termMonths)) {\\n91:             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \\\"CHANNEL_TERM_LIMIT\\\");\\n92:         }\\n93: \\n94:         // 字段转换：渠道语义 → 中台契约（quote → apply 两步，均按 docs/接口契约-阶段2.md）\\n95:         Map<String, Object> quote = middle.quote(Map.of(\\n96:                 \\\"creditId\\\", creditId,\\n97:                 \\\"productId\\\", productId,\\n98:                 \\\"amount\\\", amount,\\n99:                 \\\"termMonths\\\", termMonths,\\n100:                 \\\"repaymentMode\\\", String.valueOf(request.get(\\\"repaymentMode\\\")),\\n101:                 \\\"firstRepaymentDate\\\", String.valueOf(request.getOrDefault(\\\"firstRepaymentDate\\\", \\\"\\\"))));\\n102:         Map<String, Object> applied = middle.applyDrawdown(String.valueOf(quote.get(\\\"quoteNo\\\")),\\n103:                 String.valueOf(request.get(\\\"payeeName\\\")),\\n104:                 String.valueOf(request.get(\\\"payeeAccount\\\")),\\n105:                 String.valueOf(request.getOrDefault(\\\"purpose\\\", \\\"\\\")));\\n106: \\n107:         String channelRefNo = nextRef();\\n108:         saveRecord(channelRefNo, channelId, BizType.DRAWDOWN, String.valueOf(applied.get(\\\"bizOrderNo\\\")),\\n109:                 displayOf(String.valueOf(applied.get(\\\"status\\\"))));\\n110:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", \\\"PROCESSING\\\");\\n111:     }\\n112: \\n113:     public Map<String, Object> applyRepayment(String channelId, Map<String, Object> request) {\\n114:         Map<String, Object> applied = middle.applyRepayment(\\n115:                 String.valueOf(request.get(\\\"loanAccountNo\\\")),\\n116:                 String.valueOf(request.get(\\\"payerAccount\\\")),\\n117:                 String.valueOf(request.get(\\\"type\\\")),\\n118:                 new BigDecimal(String.valueOf(request.get(\\\"amount\\\"))));\\n119:         String channelRefNo = nextRef();\\n120:         saveRecord(channelRefNo, channelId, BizType.REPAYMENT, String.valueOf(applied.get(\\\"bizOrderNo\\\")),\\n121:                 displayOf(String.valueOf(applied.get(\\\"status\\\"))));\\n122:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", \\\"PROCESSING\\\");\\n123:     }\\n124: \\n125:     /** 结果查询：取中台原始状态，按映射合并为展示状态，同时保存原始状态供追踪。 */\\n126:     @SuppressWarnings(\\\"unchecked\\\")\\n127:     public Map<String, Object> drawdownDetail(String channelRefNo) {\\n128:         ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\\n129:         Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\\n130:         String display = displayOf(String.valueOf(middleDetail.get(\\\"status\\\")));\\n131:         record.setDisplayStatus(display);\\n132:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n133:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n134:         recordRepo.save(record);\\n135:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display,\\n136:                 \\\"middleStatus\\\", middleDetail.get(\\\"status\\\"), \\\"detail\\\", middleDetail);\\n137:     }\\n138: \\n139:     /**\\n140:      * 授信申请入口（阶段 3）：渠道做准入（允许发起授信申请的渠道），透传到中台走外部审批。\\n141:      * 申请单同时保存渠道侧快照，便于追溯当时从哪个渠道、以什么条件发起。\\n142:      */\\n143:     public Map<String, Object> applyCredit(String channelId, Map<String, Object> request) {\\n144:         if (!channelAllowsCredit(channelId)) {\\n145:             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \\\"CHANNEL_CREDIT_NOT_OPEN\\\");\\n146:         }\\n147:         Map<String, Object> applied = middle.applyCredit(request);\\n148:         String channelRefNo = nextRef();\\n149:         ChannelApplicationRecord record = new ChannelApplicationRecord();\\n150:         record.setChannelRefNo(channelRefNo);\\n151:         record.setChannelId(channelId);\\n152:         record.setBizType(BizType.CREDIT);\\n153:         record.setBizOrderNo(String.valueOf(applied.get(\\\"bizOrderNo\\\")));\\n154:         record.setDisplayStatus(\\\"PROCESSING\\\");\\n155:         record.setChannelRuleSnapshotJson(\\\"{\\\\\\\"channelId\\\\\\\":\\\\\\\"\\\" + channelId + \\\"\\\\\\\",\\\\\\\"entry\\\\\\\":\\\\\\\"credit-application\\\\\\\"}\\\");\\n156:         record.setCreatedAt(LocalDateTime.now().withNano(0));\\n157:         record.setUpdatedAt(record.getCreatedAt());\\n158:         recordRepo.save(record);\\n159:         return Map.of(\\\"channelRefNo\\\", channelRefNo,\\n160:                 \\\"bizOrderNo\\\", applied.get(\\\"bizOrderNo\\\"),\"}"
+      }
+    },
+    {
+      "sequence": 10,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 3 轮）"
+      }
+    },
+    {
+      "sequence": 11,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_42cd413ec06245cfb5694dd8",
+        "name": "Read",
+        "input": {
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "offset": 160
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 12,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_42cd413ec06245cfb5694dd8",
+        "name": "Read",
+        "status": "completed",
+        "output": "{\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"lineStart\": 160, \"lineEnd\": 226, \"totalLines\": 226, \"sourceMtimeNs\": 1788686135144092996, \"truncated\": false, \"nextLine\": null, \"deprecated\": false, \"content\": \"160:                 \\\"bizOrderNo\\\", applied.get(\\\"bizOrderNo\\\"),\\n161:                 \\\"displayStatus\\\", \\\"PROCESSING\\\");\\n162:     }\\n163: \\n164:     public Map<String, Object> creditApplicationDetail(String channelRefNo) {\\n165:         ChannelApplicationRecord record = recordRepo.findById(channelRefNo)\\n166:                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, \\\"APPLICATION_NOT_FOUND\\\"));\\n167:         Map<String, Object> middleDetail = middle.creditApplicationDetail(record.getBizOrderNo());\\n168:         String display = \\\"APPROVED\\\".equals(String.valueOf(middleDetail.get(\\\"status\\\"))) ? \\\"SUCCESS\\\"\\n169:                 : \\\"REJECTED\\\".equals(String.valueOf(middleDetail.get(\\\"status\\\"))) ? \\\"FAILED\\\" : \\\"PROCESSING\\\";\\n170:         record.setDisplayStatus(display);\\n171:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n172:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n173:         recordRepo.save(record);\\n174:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display, \\\"detail\\\", middleDetail);\\n175:     }\\n176: \\n177:     /** 渠道准入：阶段 3 两个渠道均允许发起授信申请；规则集中在此便于后续按渠道差异调整。 */\\n178:     private boolean channelAllowsCredit(String channelId) {\\n179:         return \\\"SELF_SERVICE\\\".equals(channelId) || \\\"RM_ASSISTED\\\".equals(channelId);\\n180:     }\\n181: \\n182:     @SuppressWarnings(\\\"unchecked\\\")\\n183:     public Map<String, Object> repaymentDetail(String channelRefNo) {\\n184:         ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.REPAYMENT);\\n185:         Map<String, Object> middleDetail = middle.repaymentDetail(record.getBizOrderNo());\\n186:         String display = displayOf(String.valueOf(middleDetail.get(\\\"status\\\")));\\n187:         record.setDisplayStatus(display);\\n188:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n189:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n190:         recordRepo.save(record);\\n191:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display, \\\"detail\\\", middleDetail);\\n192:     }\\n193: \\n194:     /**\\n195:      * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态\\n196:      * 对外统一展示\\\"PROCESSING\\\"；成功与失败直传。映射关系保留在 record.middleRawStatus。\\n197:      */\\n198:     private String displayOf(String middleStatus) {\\n199:         return switch (middleStatus) {\\n200:             case \\\"SUCCESS\\\", \\\"FAILED\\\" -> middleStatus;\\n201:             default -> \\\"PROCESSING\\\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\\n202:         };\\n203:     }\\n204: \\n205:     private void saveRecord(String channelRefNo, String channelId, BizType type, String bizOrderNo, String display) {\\n206:         ChannelApplicationRecord record = new ChannelApplicationRecord();\\n207:         record.setChannelRefNo(channelRefNo);\\n208:         record.setChannelId(channelId);\\n209:         record.setBizType(type);\\n210:         record.setBizOrderNo(bizOrderNo);\\n211:         record.setDisplayStatus(display);\\n212:         record.setCreatedAt(LocalDateTime.now().withNano(0));\\n213:         record.setUpdatedAt(record.getCreatedAt());\\n214:         recordRepo.save(record);\\n215:     }\\n216: \\n217:     private ChannelApplicationRecord requireRecord(String channelRefNo, BizType type) {\\n218:         return recordRepo.findById(channelRefNo)\\n219:                 .filter(record -> record.getBizType() == type)\\n220:                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, \\\"APPLICATION_NOT_FOUND\\\"));\\n221:     }\\n222: \\n223:     private String nextRef() {\\n224:         return \\\"CHN-%06d\\\".formatted(ThreadLocalRandom.current().nextInt(1000000));\\n225:     }\\n226: }\"}"
+      }
+    },
+    {
+      "sequence": 13,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 4 轮）"
+      }
+    },
+    {
+      "sequence": 14,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_8845d0d6fa5042749d63f6ab",
+        "name": "Grep",
+        "input": {
+          "pattern": "EXTERNAL_SUCCESS_BOOKING_PENDING|BOOKING",
+          "path": "repos/loan-middle-repo",
+          "limit": 40
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 15,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_8845d0d6fa5042749d63f6ab",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [{\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java\", \"line\": 18, \"text\": \"        BOOKING_RETRY_EXHAUSTED(\\\"入账重试次数已用尽，需人工处理\\\"),\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 40, \"text\": \"    private final int bookingRetryMax;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 46, \"text\": \"                            @Value(\\\"${compensation.booking-retry-max:5}\\\") int bookingRetryMax) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 54, \"text\": \"        this.bookingRetryMax = bookingRetryMax;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 72, \"text\": \"        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 75, \"text\": \"        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java\", \"line\": 76, \"text\": \"            if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 18, \"text\": \"    public enum Status { PROCESSING, EXTERNAL_SUCCESS_BOOKING_PENDING, SUCCESS, FAILED, CANCELLED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 24, \"text\": \"    public enum BookingStatus { NONE, TO_BOOK, BOOKED, RETRY_NEEDED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 39, \"text\": \"    private BookingStatus bookingStatus;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 40, \"text\": \"    private Integer bookingRetryCount;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 41, \"text\": \"    private String bookingLastError;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 73, \"text\": \"    public BookingStatus getBookingStatus() { return bookingStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 74, \"text\": \"    public void setBookingStatus(BookingStatus bookingStatus) { this.bookingStatus = bookingStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 75, \"text\": \"    public Integer getBookingRetryCount() { return bookingRetryCount; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 76, \"text\": \"    public void setBookingRetryCount(Integer bookingRetryCount) { this.bookingRetryCount = bookingRetryCount; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 77, \"text\": \"    public String getBookingLastError() { return bookingLastError; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 78, \"text\": \"    public void setBookingLastError(String bookingLastError) { this.bookingLastError = bookingLastError; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrderRepository.java\", \"line\": 10, \"text\": \"    List<DrawdownOrder> findByBookingStatus(DrawdownOrder.BookingStatus bookingStatus);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 147, \"text\": \"        order.setBookingStatus(DrawdownOrder.BookingStatus.NONE);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 148, \"text\": \"        order.setBookingRetryCount(0);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 199, \"text\": \"            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 200, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 219, \"text\": \"        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 228, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 236, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 237, \"text\": \"            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 238, \"text\": \"            order.setBookingLastError(e.getMessage());\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 240, \"text\": \"            log.warn(\\\"入账失败转补偿: {} retry={}\\\", order.getBizOrderNo(), order.getBookingRetryCount());\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 263, \"text\": \"                \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 265, \"text\": \"                        \\\"retryCount\\\", order.getBookingRetryCount()));\"}, {\"path\": \"repos/loan-middle-repo/src/main/resources/application.yml\", \"line\": 28, \"text\": \"  booking-retry-max: 5                # 入账最大重试次数\"}], \"truncated\": false}"
+      }
+    },
+    {
+      "sequence": 16,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 5 轮）"
+      }
+    },
+    {
+      "sequence": 17,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_4db05ec9faba491cb0e940b8",
+        "name": "Read",
+        "input": {
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "offset": 180,
+          "limit": 100
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 18,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_4db05ec9faba491cb0e940b8",
+        "name": "Read",
+        "status": "completed",
+        "output": "{\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"lineStart\": 180, \"lineEnd\": 279, \"totalLines\": 295, \"sourceMtimeNs\": 1788685969302827907, \"truncated\": true, \"nextLine\": 280, \"deprecated\": false, \"content\": \"180:         }\\n181:     }\\n182: \\n183:     // -------------------------------------------------- 外部结果确认（回调与查单共用）\\n184: \\n185:     /**\\n186:      * 付款结果落业务单。幂等：业务单已终态、或该结果已生效时，直接确认不产生任何新记录。\\n187:      */\\n188:     @Transactional\\n189:     public void onPaymentResult(DrawdownOrder order, String result) {\\n190:         if (order.terminal()) {\\n191:             return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\\n192:         }\\n193:         order.setUpdatedAt(Ids.now());\\n194:         if (\\\"SUCCESS\\\".equals(result)) {\\n195:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\\n196:                 return; // 幂等：成功已受理过\\n197:             }\\n198:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\\n199:             order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\\n200:             order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\\n201:             book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\\n202:         } else {\\n203:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\\n204:                 return;\\n205:             }\\n206:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\\n207:             order.setStatus(DrawdownOrder.Status.FAILED);\\n208:             limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\\n209:                     requiresGuarantee(order.getProductId()), order.getAmount());\\n210:         }\\n211:     }\\n212: \\n213:     /**\\n214:      * 中台入账：调用 Fineract 放款登记 + 逐层预占转实占。\\n215:      * 幂等：入账前先查借据是否已 ACTIVE（重复回调/查单/重试不会重复放款）。\\n216:      */\\n217:     @Transactional\\n218:     public void book(DrawdownOrder order) {\\n219:         if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\\n220:             return;\\n221:         }\\n222:         try {\\n223:             if (fineract.isLoanActive(order.getLoanAccountNo())) {\\n224:                 log.info(\\\"借据已生效，跳过重复放款登记: {}\\\", order.getLoanAccountNo());\\n225:             } else {\\n226:                 fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\\n227:             }\\n228:             order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\\n229:             order.setBookedAmount(order.getAmount());\\n230:             order.setStatus(DrawdownOrder.Status.SUCCESS);\\n231:             order.setUpdatedAt(Ids.now());\\n232:             limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\\n233:                     order.getLoanAccountNo(), order.getProductId(),\\n234:                     requiresGuarantee(order.getProductId()), order.getAmount());\\n235:         } catch (Exception e) {\\n236:             order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\\n237:             order.setBookingRetryCount(order.getBookingRetryCount() + 1);\\n238:             order.setBookingLastError(e.getMessage());\\n239:             order.setUpdatedAt(Ids.now());\\n240:             log.warn(\\\"入账失败转补偿: {} retry={}\\\", order.getBizOrderNo(), order.getBookingRetryCount());\\n241:         }\\n242:     }\\n243: \\n244:     /** 查单收敛：补偿任务对 PROCESSING 超时的指令主动查单，结果走与回调相同的处理通道。 */\\n245:     @Transactional\\n246:     public void queryAndSettle(DrawdownOrder order) {\\n247:         SimulatorClient.ExternalStatus status = simulator.query(\\\"PAYMENT\\\", order.getExtSerialNo());\\n248:         if (\\\"SUCCESS\\\".equals(status.status()) || \\\"FAILED\\\".equals(status.status())) {\\n249:             onPaymentResult(order, status.status());\\n250:         } else if (\\\"RESULT_UNCONFIRMED\\\".equals(status.status())) {\\n251:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED);\\n252:         }\\n253:     }\\n254: \\n255:     // ------------------------------------------------------------------ 查询\\n256: \\n257:     public Map<String, Object> detail(String bizOrderNo) {\\n258:         DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\\n259:         return Map.of(\\\"bizOrderNo\\\", order.getBizOrderNo(), \\\"status\\\", order.getStatus().name(),\\n260:                 \\\"amount\\\", order.getAmount(),\\n261:                 \\\"payments\\\", List.of(Map.of(\\\"extSerialNo\\\", order.getExtSerialNo() == null ? \\\"\\\" : order.getExtSerialNo(),\\n262:                         \\\"status\\\", order.getPaymentStatus().name(), \\\"amount\\\", order.getAmount())),\\n263:                 \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\\n264:                         \\\"loanAccountNo\\\", order.getLoanAccountNo() == null ? \\\"\\\" : order.getLoanAccountNo(),\\n265:                         \\\"retryCount\\\", order.getBookingRetryCount()));\\n266:     }\\n267: \\n268:     private boolean requiresGuarantee(String productId) {\\n269:         return productRepo.findById(productId).map(ProductConfig::isRequiresGuarantee).orElse(false);\\n270:     }\\n271: \\n272:     private void validateAmountAndTerm(ProductConfigVersion version, BigDecimal amount, Integer termMonths, String repaymentMode) {\\n273:         if (amount.compareTo(version.getMinAmount()) < 0 || amount.compareTo(version.getMaxAmount()) > 0) {\\n274:             throw new BizException(BizException.Code.PRODUCT_NOT_OPEN);\\n275:         }\\n276:         if (!version.termList().contains(termMonths)) {\\n277:             throw new BizException(BizException.Code.TERM_NOT_SUPPORTED);\\n278:         }\\n279:         if (!version.repaymentModeList().contains(repaymentMode)) {\"}"
+      }
+    },
+    {
+      "sequence": 19,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 6 轮）"
+      }
+    },
+    {
+      "sequence": 20,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_aca86e2e92ca4090b6fed29d",
+        "name": "Grep",
+        "input": {
+          "pattern": "drawdownDetail|middleStatus|displayStatus",
+          "path": "repos/mifos-web-repo",
+          "limit": 30
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 21,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_aca86e2e92ca4090b6fed29d",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [], \"truncated\": false}"
+      }
+    },
+    {
+      "sequence": 22,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 7 轮）"
+      }
+    },
+    {
+      "sequence": 23,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_f6d6e20a38ad4421a75a752b",
+        "name": "Grep",
+        "input": {
+          "pattern": "PROCESSING|displayStatus|middleStatus",
+          "path": "repos/mifos-web-repo",
+          "limit": 30
+        },
+        "status": "running"
+      }
+    },
+    {
+      "sequence": 24,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_f6d6e20a38ad4421a75a752b",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [{\"path\": \"repos/mifos-web-repo/src/app/core/error-handler/README.md\", \"line\": 152, \"text\": \"      this.errorHandler.showSuccess('Processing complete!');\"}, {\"path\": \"repos/mifos-web-repo/src/app/core/error-handler/README.md\", \"line\": 159, \"text\": \"        this.errorHandler.handleError(error, 'Data processing');\"}, {\"path\": \"repos/mifos-web-repo/src/app/core/utils/datatables.ts\", \"line\": 186, \"text\": \"      // Ensure parts[1] exists and is not empty before processing\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-preview-step/loans-account-preview-step.component.html\", \"line\": 228, \"text\": \"      loansAccount.transactionProcessingStrategyCode\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-preview-step/loans-account-preview-step.component.html\", \"line\": 229, \"text\": \"        | find: loansAccountProductTemplate.transactionProcessingStrategyOptions : 'code' : 'name'\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 310, \"text\": \"        formControlName=\\\"transactionProcessingStrategyCode\\\"\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 315, \"text\": \"          transactionProcessingStrategy of transactionProcessingStrategyOptions;\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 316, \"text\": \"          track transactionProcessingStrategy\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 318, \"text\": \"          <mat-option [value]=\\\"transactionProcessingStrategy.code\\\">\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 319, \"text\": \"            {{ transactionProcessingStrategy.name | translateKey: 'catalogs' }}\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.html\", \"line\": 323, \"text\": \"      @if (loansAccountTermsForm.controls.transactionProcessingStrategyCode.hasError('required')) {\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 125, \"text\": \"  transactionProcessingStrategyOptions: any = [];\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 217, \"text\": \"        transactionProcessingStrategyCode: this.loansAccountTermsData.transactionProcessingStrategyCode,\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 282, \"text\": \"      if (!allowAttributeOverrides.transactionProcessingStrategyCode) {\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 283, \"text\": \"        this.loansAccountTermsForm.controls.transactionProcessingStrategyCode.disable();\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 349, \"text\": \"        transactionProcessingStrategyCode: this.loansAccountTermsData.transactionProcessingStrategyCode,\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 519, \"text\": \"      transactionProcessingStrategyCode: [\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 674, \"text\": \"    this.transactionProcessingStrategyOptions = [];\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 677, \"text\": \"      this.transactionProcessingStrategyOptions =\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 678, \"text\": \"        this.loansAccountProductTemplate.transactionProcessingStrategyOptions.filter(\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 684, \"text\": \"      this.loansAccountProductTemplate.transactionProcessingStrategyOptions.some((cn: CodeName) => {\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-terms-step/loans-account-terms-step.component.ts\", \"line\": 686, \"text\": \"          this.transactionProcessingStrategyOptions.push(cn);\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-view/loans-view.component.ts\", \"line\": 301, \"text\": \"      if (LoanProducts.isAdvancedPaymentAllocationStrategy(this.loanDetailsData.transactionProcessingStrategyCode)) {\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-view/account-details/account-details.component.html\", \"line\": 7, \"text\": \"      <span class=\\\"flex-50\\\">{{ loanDetails.transactionProcessingStrategyName | translateKey: 'catalogs' }}</span>\"}, {\"path\": \"repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/undo-write-off/undo-write-off.component.ts\", \"line\": 97, \"text\": \"            'An error occurred while processing the undo write-off transaction. Please try again or contact support if the problem persists.'\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/loan-products.ts\", \"line\": 14, \"text\": \"  public static LOAN_SCHEDULE_PROCESSING_TYPE_HORIZONTAL = 'HORIZONTAL';\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/loan-products.ts\", \"line\": 15, \"text\": \"  public static LOAN_SCHEDULE_PROCESSING_TYPE_VERTICAL = 'VERTICAL';\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/common/loan-product-summary/loan-product-summary.component.html\", \"line\": 356, \"text\": \"        loanProduct.transactionProcessingStrategyName | translateKey: 'catalogs'\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/common/loan-product-summary/loan-product-summary.component.html\", \"line\": 361, \"text\": \"        <span class=\\\"flex-40\\\">{{ 'labels.inputs.Loan Schedule Processing Type' | translate }}:</span>\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/common/loan-product-summary/loan-product-summary.component.html\", \"line\": 362, \"text\": \"        <span class=\\\"flex-60\\\">{{ loanProduct.loanScheduleProcessingType.value }}</span>\"}], \"truncated\": true}"
+      }
+    },
+    {
+      "sequence": 25,
+      "eventType": "status",
+      "payload": {
+        "phase": "composing",
+        "label": "正在依据已读原文整理答案"
+      }
+    },
+    {
+      "sequence": 26,
+      "eventType": "text",
+      "payload": {
+        "id": "answer",
+        "text": "## 结论\n\n**当前渠道接口不能直接区分“外部还没结果”和“中台入账失败”**。  \n原因是：渠道侧 `displayOf` 把中台所有非终态（包括 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`）统一映射为 `\"PROCESSING\"`，而中台 `detail` 返回的 `status` 字段在两种情况下可能都表现为处理中语义，且渠道层没有把 `booking.status` / `paymentStatus` 等细粒度状态透出给运营页面。\n\n---\n\n## 依据字段与源码位置\n\n### 1. 渠道侧展示状态映射（关键瓶颈）\n\n**文件**：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java`  \n**行号**：198–203\n\n```java\nprivate String displayOf(String middleStatus) {\n    return switch (middleStatus) {\n        case \"SUCCESS\", \"FAILED\" -> middleStatus;\n        default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n    };\n}\n```\n\n- **问题**：`EXTERNAL_SUCCESS_BOOKING_PENDING`（外部成功但入账未完成/失败）被归入 `default`，对外只展示 `\"PROCESSING\"`。\n- **影响**：运营无法从 `displayStatus` 区分“外部还在处理”和“外部已成功但中台入账卡住/失败”。\n\n### 2. 渠道查询提款详情时透出的字段\n\n**文件**：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java`  \n**行号**：127–137\n\n```java\npublic Map<String, Object> drawdownDetail(String channelRefNo) {\n    ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\n    Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\n    String display = displayOf(String.valueOf(middleDetail.get(\"status\")));\n    record.setDisplayStatus(display);\n    record.setMiddleRawStatus(String.valueOf(middleDetail.get(\"status\")));\n    ...\n    return Map.of(\"channelRefNo\", channelRefNo, \"displayStatus\", display,\n            \"middleStatus\", middleDetail.get(\"status\"), \"detail\", middleDetail);\n}\n```\n\n- 虽然返回了 `middleStatus`（中台原始 status）和 `detail`（中台完整 detail），但：\n  - `middleStatus` 只是 `DrawdownOrder.Status.name()`，即顶层状态枚举。\n  - `detail` 中包含 `booking.status`（见下），但**渠道层没有对 `booking.status` 做二次映射或单独透出**，运营若只看 `displayStatus` 仍无法区分。\n\n### 3. 中台 `detail` 返回结构（含 booking 子状态）\n\n**文件**：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java`  \n**行号**：257–266\n\n```java\npublic Map<String, Object> detail(String bizOrderNo) {\n    DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\n    return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n            \"amount\", order.getAmount(),\n            \"payments\", List.of(Map.of(\"extSerialNo\", ..., \"status\", order.getPaymentStatus().name(), ...)),\n            \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                    \"loanAccountNo\", ...,\n                    \"retryCount\", order.getBookingRetryCount()));\n}\n```\n\n- **关键字段**：\n  - `status`：顶层业务单状态（如 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`、`SUCCESS`、`FAILED`）。\n  - `payments[0].status`：付款状态（`PENDING`、`SUCCESS`、`FAILED`、`RESULT_UNCONFIRMED`）。\n  - `booking.status`：入账状态（`TO_BOOK`、`BOOKED`、`RETRY_NEEDED`）。\n  - `booking.retryCount`：入账重试次数。\n\n- **区分逻辑**：\n  - “外部还没结果” → `status == PROCESSING` 且 `payments[0].status != SUCCESS`。\n  - “中台入账失败/卡住” → `status == EXTERNAL_SUCCESS_BOOKING_PENDING` 且 `booking.status == RETRY_NEEDED`（或 `TO_BOOK` 但长时间未变 `BOOKED`）。\n\n### 4. 中台状态流转佐证\n\n**文件**：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java`  \n**行号**：188–211（`onPaymentResult`）、217–242（`book`）\n\n- 外部成功时：`order.setStatus(EXTERNAL_SUCCESS_BOOKING_PENDING)` + `order.setBookingStatus(TO_BOOK)`，然后同步调 `book(order)`。\n- `book` 失败时：`order.setBookingStatus(RETRY_NEEDED)`，但 **`order.status` 仍保持 `EXTERNAL_SUCCESS_BOOKING_PENDING`**（未改为 FAILED）。\n- 因此，仅看顶层 `status` 无法区分“入账进行中”和“入账失败待补偿”，必须结合 `booking.status`。\n\n---\n\n## 如果只能改一处代码，改哪里收益最大？\n\n**推荐修改点**：`ChannelService.displayOf` 方法（第 198–203 行），将其从“仅根据顶层 status 映射”升级为“根据顶层 status + booking/payment 子状态映射出更细粒度的展示状态”。\n\n### 具体建议\n\n将 `drawdownDetail`（第 127–137 行）中计算 `display` 的逻辑，从单纯调用 `displayOf(middleStatus)` 改为：\n\n```java\nString middleStatus = String.valueOf(middleDetail.get(\"status\"));\nString bookingStatus = String.valueOf(((Map<?, ?>) middleDetail.get(\"booking\")).get(\"status\"));\nString paymentStatus = String.valueOf(((List<?>) middleDetail.get(\"payments\")).get(0)); // 需安全取值\n\nString display;\nif (\"SUCCESS\".equals(middleStatus)) {\n    display = \"SUCCESS\";\n} else if (\"FAILED\".equals(middleStatus)) {\n    display = \"FAILED\";\n} else if (\"EXTERNAL_SUCCESS_BOOKING_PENDING\".equals(middleStatus)) {\n    display = \"BOOKING_PENDING\"; // 或 \"BOOKING_FAILED\" if bookingStatus == RETRY_NEEDED\n} else {\n    display = \"PROCESSING\";\n}\n```\n\n或者更简洁地：**在 `displayOf` 中增加对 `EXTERNAL_SUCCESS_BOOKING_PENDING` 的独立分支**，并让 `drawdownDetail` 传入 `booking.status` 作为辅助参数。\n\n### 为什么这里收益最大？\n\n1. **单一入口**：所有提款详情的展示状态都经过 `displayOf`（第 130 行、第 109 行、第 121 行等），改这一处即可全局生效。\n2. **数据已具备**：中台 `detail` 已经返回 `booking.status` 和 `payments[].status`，无需改中台接口。\n3. **运营可感知**：新增一个展示状态（如 `BOOKING_PENDING` 或 `BOOKING_FAILED`）后，运营页面可直接区分两类“处理中”，无需额外查询或人工核对。\n4. **改动最小**：只需调整渠道服务内的映射逻辑，不涉及数据库 schema、中台契约或前端大改（前端只需多识别一个新枚举值）。\n\n---\n\n## 缺口说明\n\n- 未读取 `ChannelApplicationRecord` 实体定义，无法确认 `middleRawStatus` 字段是否已在数据库中持久化并可被运营后台直接查询（但从第 132 行 `record.setMiddleRawStatus(...)` 推断已存在）。\n- 未读取前端页面代码，无法确认当前页面是否已展示 `middleStatus` 或 `detail.booking.status`；若前端已展示这些字段，则运营理论上可通过高级筛选区分，但**默认视图仍依赖 `displayStatus`**，因此上述修改仍是最高收益点。\n- 未读取 `DrawdownOrder.Status` 枚举完整定义，但根据第 199 行注释和第 199–201 行 switch 分支，可确认至少包含 `PROCESSING`、`EXTERNAL_SUCCESS_BOOKING_PENDING`、`SUCCESS`、`FAILED` 四个值。",
+        "mode": "replace"
+      }
+    },
+    {
+      "sequence": 27,
+      "eventType": "status",
+      "payload": {
+        "phase": "completed",
+        "label": "已完成"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 44152,
+    "output_tokens": 2330,
+    "total_tokens": 46482,
+    "reportedModels": [
+      "qwen3.8-27b"
+    ],
+    "requestedModel": "qwen3.8-27b",
+    "modelCalls": 8,
+    "agentVersion": 2,
+    "separateFinalization": true,
+    "retrieval": "files",
+    "stopReason": null,
+    "durationSeconds": 61.39
+  },
+  "experiment": {
+    "caseId": "v2-channel-display",
+    "retrieval": "files",
+    "thinking": false,
+    "maxCalls": 8,
+    "maxOutputTokensPerCall": 2048,
+    "requestedModel": "qwen3.8-27b"
+  }
+}

@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from business_code_agent.evaluation.service import FINISHED_STATUSES, EvaluationError, EvaluationService
-from business_code_agent.query_agent.runtime import RuntimeResult
+from business_code_agent.query.runtime import RuntimeResult
 
 
 def wait_for(predicate, timeout=15.0):

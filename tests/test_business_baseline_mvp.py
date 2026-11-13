@@ -5,15 +5,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from business_code_agent.business_tools import BusinessTools
-from business_code_agent.code_intelligence import JavaIndexer
-from business_code_agent.knowledge_update.baseline_service import (
+from business_code_agent.knowledge.tools import BusinessTools
+from business_code_agent.codeintel.analysis import JavaIndexer
+from business_code_agent.knowledge.baseline import (
     BaselineKnowledgeService,
     ClaudeCodeBaselineExtractor,
 )
-from business_code_agent.knowledge_graph import KnowledgeGraphService
-from business_code_agent.query_agent.runtime import RuntimeResult
-from business_code_agent.schema import connect
+from business_code_agent.knowledge.graph import KnowledgeGraphService
+from business_code_agent.query.runtime import RuntimeResult
+from business_code_agent.storage.schema import connect
 
 
 ROOT = Path(__file__).resolve().parent.parent

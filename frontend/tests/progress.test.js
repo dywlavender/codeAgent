@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildProgress, toolTarget, toolTitle } from "../src/lib/progress.js";
+import { buildProgress, fileEvidence, toolTarget, toolTitle } from "../src/lib/progress.js";
 import { streamQuery } from "../src/lib/api.js";
 
 test("tool completion updates one step; partial text and snapshot do not repeat", () => {
@@ -29,6 +29,16 @@ test("old persisted envelopes remain readable without displaying telemetry", () 
   assert.equal(value.tools[0].status, "error");
   assert.equal(value.label, "正在分析");
   assert.equal(value.text, "");
+});
+
+test("source cards include LangChain reads and contract originals without treating grep hits as evidence", () => {
+  const files = fileEvidence([
+    { name: "Read", status: "completed", input: { path: "repos/a.java" }, output: JSON.stringify({ path: "repos/a.java", content: "1: source" }) },
+    { name: "TraceResponseFields", status: "completed", output: JSON.stringify({ evidence: [{ path: "repos/b.java", content: "2: return value;" }] }) },
+    { name: "Grep", status: "completed", input: { path: "repos/search.java" }, output: "match" },
+  ]);
+  assert.deepEqual(files.map((item) => item.path), ["repos/a.java", "repos/b.java"]);
+  assert.equal(files[1].snippet, "2: return value;");
 });
 
 test("SSE handles split UTF-8 and delivers text before final result", async () => {

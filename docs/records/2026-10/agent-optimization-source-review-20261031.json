@@ -1,0 +1,59 @@
+{
+  "reviewSource": "assistant_trace_and_source_check",
+  "humanReviewed": false,
+  "caseId": "v2-channel-display",
+  "knownRegression": true,
+  "newRun": "langchain-v4-files-channel-20261031.json",
+  "trace": "langchain-v4-files-channel-20261031.trace.json",
+  "baseline": "langchain-v2-files-channel-20261031.json",
+  "actualModelRequests": 8,
+  "maxMessageChars": 38469,
+  "toolCalls": 11,
+  "readCalls": 6,
+  "readLines": 654,
+  "reads": [
+    {
+      "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+      "lineStart": 1,
+      "lineEnd": 160
+    },
+    {
+      "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+      "lineStart": 161,
+      "lineEnd": 226
+    },
+    {
+      "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+      "lineStart": 1,
+      "lineEnd": 160
+    },
+    {
+      "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+      "lineStart": 161,
+      "lineEnd": 295
+    },
+    {
+      "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
+      "lineStart": 1,
+      "lineEnd": 58
+    },
+    {
+      "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java",
+      "lineStart": 1,
+      "lineEnd": 75
+    }
+  ],
+  "cumulativeInputRatio": 1.4275,
+  "investigationToolCalls": 1,
+  "automaticReadsObserved": 0,
+  "earlyDraftReopensObserved": 0,
+  "coreAnswerAccepted": false,
+  "coreFinding": "首段声称页面/接口只返回 displayStatus，正文又引用 middleStatus 和完整 detail 透传。接口 JSON 的事实断言仍有矛盾；页面未确认的条件表达有所改善。",
+  "trackedTasksMaintainedAfterCreation": false,
+  "postRunLocalChanges": [
+    "默认 basic，tracked 显式启用",
+    "目录根路径规范化及目录范围引用处理",
+    "补充快照配置元数据"
+  ],
+  "additionalRealRunsAfterLocalChanges": 0
+}

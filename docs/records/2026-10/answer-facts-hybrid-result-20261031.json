@@ -1,0 +1,367 @@
+{
+  "projectId": "complex-loan-validation",
+  "caseId": "v2-channel-display",
+  "status": "completed",
+  "recordedAt": "2026-10-31T06:12:51.488371+00:00",
+  "experiment": {
+    "type": "frozen-evidence-answer-consistency",
+    "retrieval": "hybrid",
+    "requestedModel": "qwen3.8-27b",
+    "modelCalls": 1,
+    "maxOutputTokens": 2048,
+    "thinking": false,
+    "temperature": 0,
+    "retries": 0,
+    "inputChars": 46090,
+    "sourceBlocks": 31,
+    "deliveredRows": 817,
+    "baselineAnswerProvided": false,
+    "referenceLabelsProvided": false
+  },
+  "durationSeconds": 25.856,
+  "answer": "**接口返回数据**：返回数据中已包含：`status`、`payments[].status`、`booking.status`。这些数据可供进一步判断，不能据此认定页面已经使用它们。 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:261` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:263`\n\n**展示字段**：当前未取得可支撑这一层结论的原文，尚不能确认。 \n\n**页面实际使用**：渠道服务在查询提款详情时，将中台原始状态映射为展示状态，并在响应中同时返回 displayStatus、middleStatus 和包含 payments/booking 的 detail 对象。 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:127`",
+  "rawModelResponse": "```json\n{\n  \"resources\": [\n    {\n      \"id\": \"R1\",\n      \"label\": \"中台提款详情接口返回数据\",\n      \"scope\": \"api_data\"\n    },\n    {\n      \"id\": \"R2\",\n      \"label\": \"渠道展示状态映射逻辑\",\n      \"scope\": \"display\"\n    },\n    {\n      \"id\": \"R3\",\n      \"label\": \"渠道前端查询结果使用\",\n      \"scope\": \"ui\"\n    },\n    {\n      \"id\": \"R4\",\n      \"label\": \"业务状态定义与约定\",\n      \"scope\": \"business\"\n    }\n  ],\n  \"facts\": [\n    {\n      \"id\": \"F1\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"status\",\n      \"refs\": [\n        {\n          \"source\": \"S31\",\n          \"start\": 259,\n          \"end\": 259\n        }\n      ]\n    },\n    {\n      \"id\": \"F2\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"payments[].status\",\n      \"refs\": [\n        {\n          \"source\": \"S31\",\n          \"start\": 261,\n          \"end\": 262\n        }\n      ]\n    },\n    {\n      \"id\": \"F3\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"booking.status\",\n      \"refs\": [\n        {\n          \"source\": \"S31\",\n          \"start\": 263,\n          \"end\": 263\n        }\n      ]\n    },\n    {\n      \"id\": \"F4\",\n      \"resource\": \"R2\",\n      \"kind\": \"mapping\",\n      \"field\": \"displayStatus\",\n      \"inputs\": [\n        \"middleStatus\"\n      ],\n      \"output\": \"PROCESSING (when middleStatus is PROCESSING or EXTERNAL_SUCCESS_BOOKING_PENDING)\",\n      \"refs\": [\n        {\n          \"source\": \"S11\",\n          \"start\": 198,\n          \"end\": 203\n        }\n      ]\n    },\n    {\n      \"id\": \"F5\",\n      \"resource\": \"R3\",\n      \"kind\": \"ui\",\n      \"statement\": \"渠道服务在查询提款详情时，将中台原始状态映射为展示状态，并在响应中同时返回 displayStatus、middleStatus 和包含 payments/booking 的 detail 对象。\",\n      \"refs\": [\n        {\n          \"source\": \"S27\",\n          \"start\": 127,\n          \"end\": 137\n        }\n      ]\n    },\n    {\n      \"id\": \"F6\",\n      \"resource\": \"R4\",\n      \"kind\": \"behavior\",\n      \"statement\": \"中台定义了显式状态 EXTERNAL_SUCCESS_BOOKING_PENDING，表示外部付款成功但中台入账未完成；该状态下不判失败，由补偿任务继续入账。\",\n      \"refs\": [\n        {\n          \"source\": \"S2\",\n          \"start\": 46,\n          \"end\": 46\n        },\n        {\n          \"source\": \"S12\",\n          \"start\": 18,\n          \"end\": 18\n        }\n      ]\n    },\n    {\n      \"id\": \"F7\",\n      \"resource\": \"R4\",\n      \"kind\": \"requirement\",\n      \"statement\": \"渠道后端职责包括展示状态聚合，将中台多个内部状态对外合并为“处理中”，但保留原始状态。\",\n      \"refs\": [\n        {\n          \"source\": \"S7\",\n          \"start\": 28,\n          \"end\": 28\n        }\n      ]\n    }\n  ],\n  \"answers\": [\n    {\n      \"resource\": \"R1\",\n      \"kind\": \"data_fields\",\n      \"required_fields\": [\n        \"status\",\n        \"payments[].status\",\n        \"booking.status\"\n      ],\n      \"facts\": [\n        \"F1\",\n        \"F2\",\n        \"F3\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"中台接口已返回区分“外部未决”与“中台入账失败/待入账”所需的字段：status（整体状态）、payments[].status（外部付款指令状态）、booking.status（中台入账状态）。\"\n    },\n    {\n      \"resource\": \"R2\",\n      \"kind\": \"display\",\n      \"required_fields\": [],\n      \"facts\": [\n        \"F4\",\n        \"F6\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"当前展示映射将所有非 SUCCESS/FAILED 的中台状态（包括 PROCESSING 和 EXTERNAL_SUCCESS_BOOKING_PENDING）统一显示为 PROCESSING，导致页面无法直接区分具体原因。\"\n    },\n    {\n      \"resource\": \"R3\",\n      \"kind\": \"ui\",\n      \"required_fields\": [],\n      \"facts\": [\n        \"F5\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"渠道接口响应中已包含 middleStatus 和 detail（含 booking/payments 明细），前端或运营后台理论上可基于这些底层数据做进一步区分，但默认展示层未做细分。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"resource\": \"R2\",\n      \"change\": \"修改 ChannelService.displayOf 方法或新增一个细粒度展示状态字段，当 middleStatus 为 EXTERNAL_SUCCESS_BOOKING_PENDING 时，不再简单映射为 PROCESSING，而是返回如 BOOKING_PENDING 或保持原始状态供前端区分。\",\n      \"benefit\": \"运营可直接在页面上看到“中台入账中/失败”与“外部处理中”的区别，无需查库或看日志。\",\n      \"facts\": [\n        \"F4\",\n        \"F6\",\n        \"F7\"\n      ],\n      \"adds_fields\": [\n        \"displaySubStatus\"\n      ],\n      \"unverified_impacts\": [\n        \"前端是否已适配新的子状态枚举值\",\n        \"其他依赖 displayStatus 为固定三态的逻辑是否受影响\"\n      ]\n    }\n  ],\n  \"gaps\": []\n}\n```",
+  "usage": {
+    "input_tokens": 14945,
+    "output_tokens": 1502,
+    "total_tokens": 16447,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "reportedModel": "qwen3.8-27b",
+  "finishReason": "stop",
+  "verification": {
+    "status": "checked",
+    "issues": [
+      {
+        "code": "mapping_quote",
+        "fact": "F4"
+      },
+      {
+        "code": "implementation_source",
+        "fact": "F6"
+      },
+      {
+        "code": "fact_scope",
+        "fact": "F7"
+      },
+      {
+        "code": "insufficient_scope_evidence",
+        "resource": "R2"
+      },
+      {
+        "code": "recommendation_basis"
+      }
+    ],
+    "acceptedFacts": [
+      {
+        "id": "F1",
+        "resource": "R1",
+        "kind": "returned_field",
+        "field": "status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S31",
+            "start": 259,
+            "end": 259,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F2",
+        "resource": "R1",
+        "kind": "returned_field",
+        "field": "payments[].status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S31",
+            "start": 261,
+            "end": 262,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F3",
+        "resource": "R1",
+        "kind": "returned_field",
+        "field": "booking.status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S31",
+            "start": 263,
+            "end": 263,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F5",
+        "resource": "R3",
+        "kind": "ui",
+        "field": "",
+        "inputs": [],
+        "output": "",
+        "statement": "渠道服务在查询提款详情时，将中台原始状态映射为展示状态，并在响应中同时返回 displayStatus、middleStatus 和包含 payments/booking 的 detail 对象。",
+        "refs": [
+          {
+            "source": "S27",
+            "start": 127,
+            "end": 137,
+            "quote": ""
+          }
+        ]
+      }
+    ],
+    "decisions": [
+      {
+        "resource": "R1",
+        "kind": "data_fields",
+        "verdict": "supported",
+        "present": [
+          "status",
+          "payments[].status",
+          "booking.status"
+        ],
+        "unconfirmed": []
+      },
+      {
+        "resource": "R2",
+        "kind": "display",
+        "verdict": "unknown"
+      },
+      {
+        "resource": "R3",
+        "kind": "ui",
+        "verdict": "supported"
+      }
+    ],
+    "semanticProof": false,
+    "sourceCount": 31,
+    "packet": {
+      "resources": [
+        {
+          "id": "R1",
+          "label": "中台提款详情接口返回数据",
+          "scope": "api_data"
+        },
+        {
+          "id": "R2",
+          "label": "渠道展示状态映射逻辑",
+          "scope": "display"
+        },
+        {
+          "id": "R3",
+          "label": "渠道前端查询结果使用",
+          "scope": "ui"
+        },
+        {
+          "id": "R4",
+          "label": "业务状态定义与约定",
+          "scope": "business"
+        }
+      ],
+      "facts": [
+        {
+          "id": "F1",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S31",
+              "start": 259,
+              "end": 259,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "payments[].status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S31",
+              "start": 261,
+              "end": 262,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "booking.status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S31",
+              "start": 263,
+              "end": 263,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "resource": "R2",
+          "kind": "mapping",
+          "field": "displayStatus",
+          "inputs": [
+            "middleStatus"
+          ],
+          "output": "PROCESSING (when middleStatus is PROCESSING or EXTERNAL_SUCCESS_BOOKING_PENDING)",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S11",
+              "start": 198,
+              "end": 203,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "resource": "R3",
+          "kind": "ui",
+          "field": "",
+          "inputs": [],
+          "output": "",
+          "statement": "渠道服务在查询提款详情时，将中台原始状态映射为展示状态，并在响应中同时返回 displayStatus、middleStatus 和包含 payments/booking 的 detail 对象。",
+          "refs": [
+            {
+              "source": "S27",
+              "start": 127,
+              "end": 137,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F6",
+          "resource": "R4",
+          "kind": "behavior",
+          "field": "",
+          "inputs": [],
+          "output": "",
+          "statement": "中台定义了显式状态 EXTERNAL_SUCCESS_BOOKING_PENDING，表示外部付款成功但中台入账未完成；该状态下不判失败，由补偿任务继续入账。",
+          "refs": [
+            {
+              "source": "S2",
+              "start": 46,
+              "end": 46,
+              "quote": ""
+            },
+            {
+              "source": "S12",
+              "start": 18,
+              "end": 18,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F7",
+          "resource": "R4",
+          "kind": "requirement",
+          "field": "",
+          "inputs": [],
+          "output": "",
+          "statement": "渠道后端职责包括展示状态聚合，将中台多个内部状态对外合并为“处理中”，但保留原始状态。",
+          "refs": [
+            {
+              "source": "S7",
+              "start": 28,
+              "end": 28,
+              "quote": ""
+            }
+          ]
+        }
+      ],
+      "answers": [
+        {
+          "resource": "R1",
+          "kind": "data_fields",
+          "required_fields": [
+            "status",
+            "payments[].status",
+            "booking.status"
+          ],
+          "facts": [
+            "F1",
+            "F2",
+            "F3"
+          ],
+          "verdict": "supported",
+          "summary": "中台接口已返回区分“外部未决”与“中台入账失败/待入账”所需的字段：status（整体状态）、payments[].status（外部付款指令状态）、booking.status（中台入账状态）。"
+        },
+        {
+          "resource": "R2",
+          "kind": "display",
+          "required_fields": [],
+          "facts": [
+            "F4",
+            "F6"
+          ],
+          "verdict": "supported",
+          "summary": "当前展示映射将所有非 SUCCESS/FAILED 的中台状态（包括 PROCESSING 和 EXTERNAL_SUCCESS_BOOKING_PENDING）统一显示为 PROCESSING，导致页面无法直接区分具体原因。"
+        },
+        {
+          "resource": "R3",
+          "kind": "ui",
+          "required_fields": [],
+          "facts": [
+            "F5"
+          ],
+          "verdict": "supported",
+          "summary": "渠道接口响应中已包含 middleStatus 和 detail（含 booking/payments 明细），前端或运营后台理论上可基于这些底层数据做进一步区分，但默认展示层未做细分。"
+        }
+      ],
+      "recommendations": [
+        {
+          "resource": "R2",
+          "change": "修改 ChannelService.displayOf 方法或新增一个细粒度展示状态字段，当 middleStatus 为 EXTERNAL_SUCCESS_BOOKING_PENDING 时，不再简单映射为 PROCESSING，而是返回如 BOOKING_PENDING 或保持原始状态供前端区分。",
+          "benefit": "运营可直接在页面上看到“中台入账中/失败”与“外部处理中”的区别，无需查库或看日志。",
+          "facts": [
+            "F4",
+            "F6",
+            "F7"
+          ],
+          "adds_fields": [
+            "displaySubStatus"
+          ],
+          "unverified_impacts": [
+            "前端是否已适配新的子状态枚举值",
+            "其他依赖 displayStatus 为固定三态的逻辑是否受影响"
+          ]
+        }
+      ],
+      "gaps": []
+    }
+  },
+  "frozenPack": "docs/records/2026-10/answer-facts-hybrid-input-20261031.json"
+}

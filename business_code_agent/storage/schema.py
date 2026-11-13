@@ -1,0 +1,558 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+
+
+SCHEMA = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS repository (
+  id TEXT PRIMARY KEY, root_path TEXT NOT NULL, indexed_at TEXT NOT NULL
+);
+-- Deployment topology is deliberately separate from business_entity(SYSTEM).
+-- It describes where code runs, not what the business means.
+CREATE TABLE IF NOT EXISTS software_system (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE'
+);
+CREATE TABLE IF NOT EXISTS application (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, system_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL, source_root TEXT NOT NULL DEFAULT '.',
+  app_type TEXT NOT NULL, language TEXT NOT NULL DEFAULT '',
+  framework TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ACTIVE',
+  UNIQUE(repository_id, source_root)
+);
+CREATE TABLE IF NOT EXISTS code_file (
+  id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, path TEXT NOT NULL,
+  content_hash TEXT NOT NULL, UNIQUE(repository_id, path)
+);
+CREATE TABLE IF NOT EXISTS application_code_file (
+  application_id TEXT NOT NULL, file_id TEXT NOT NULL,
+  PRIMARY KEY(application_id, file_id)
+);
+CREATE TABLE IF NOT EXISTS code_symbol (
+  id TEXT PRIMARY KEY, file_id TEXT NOT NULL, kind TEXT NOT NULL,
+  qualified_name TEXT NOT NULL, name TEXT NOT NULL, line_start INTEGER NOT NULL,
+  line_end INTEGER NOT NULL, UNIQUE(file_id, qualified_name, line_start)
+);
+CREATE TABLE IF NOT EXISTS evidence (
+  id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+  source_version TEXT NOT NULL, locator TEXT NOT NULL, line_start INTEGER,
+  line_end INTEGER, chunk_id TEXT, content_hash TEXT NOT NULL, excerpt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS evidence_lifecycle (
+  evidence_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+  superseded_at TEXT, trigger_type TEXT, trigger_id TEXT
+);
+CREATE TABLE IF NOT EXISTS code_fact (
+  id TEXT PRIMARY KEY, symbol_id TEXT NOT NULL, fact_type TEXT NOT NULL,
+  subject TEXT NOT NULL, target TEXT NOT NULL, evidence_id TEXT NOT NULL,
+  UNIQUE(symbol_id, fact_type, subject, target, evidence_id)
+);
+CREATE INDEX IF NOT EXISTS idx_code_fact_type_target
+  ON code_fact(fact_type, target);
+-- Exact symbol lookup over the persisted index. The FTS table mirrors
+-- code_symbol through triggers so JavaIndexer/CodeIndexer ingests populate
+-- it with no extra step; casefolded text keeps lookups case-insensitive.
+CREATE VIRTUAL TABLE IF NOT EXISTS code_symbol_fts USING fts5(
+  name_cf, fqn_cf, symbol_id UNINDEXED, file_id UNINDEXED
+);
+CREATE TRIGGER IF NOT EXISTS code_symbol_fts_ai AFTER INSERT ON code_symbol BEGIN
+  INSERT INTO code_symbol_fts(rowid, name_cf, fqn_cf, symbol_id, file_id)
+  VALUES (new.rowid, lower(new.name), lower(new.qualified_name), new.id, new.file_id);
+END;
+CREATE TRIGGER IF NOT EXISTS code_symbol_fts_ad AFTER DELETE ON code_symbol BEGIN
+  DELETE FROM code_symbol_fts WHERE rowid = old.rowid;
+END;
+CREATE TABLE IF NOT EXISTS cross_application_edge (
+  id TEXT PRIMARY KEY, source_application_id TEXT NOT NULL,
+  source_symbol_id TEXT NOT NULL, edge_type TEXT NOT NULL,
+  target_application_id TEXT NOT NULL, target_symbol_id TEXT NOT NULL,
+  protocol TEXT NOT NULL, edge_key TEXT NOT NULL,
+  status TEXT NOT NULL, confidence REAL NOT NULL,
+  evidence_ids_json TEXT NOT NULL DEFAULT '[]', resolved_at TEXT NOT NULL,
+  UNIQUE(source_symbol_id, edge_type, target_symbol_id, edge_key)
+);
+CREATE INDEX IF NOT EXISTS idx_application_repository
+  ON application(repository_id, source_root);
+CREATE INDEX IF NOT EXISTS idx_application_file
+  ON application_code_file(file_id, application_id);
+CREATE INDEX IF NOT EXISTS idx_cross_edge_source
+  ON cross_application_edge(source_symbol_id, status);
+CREATE INDEX IF NOT EXISTS idx_cross_edge_target
+  ON cross_application_edge(target_symbol_id, status);
+CREATE TABLE IF NOT EXISTS ingestion_change (
+  id TEXT PRIMARY KEY, repository_id TEXT NOT NULL, file_path TEXT NOT NULL,
+  change_type TEXT NOT NULL, previous_hash TEXT, current_hash TEXT,
+  indexed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS parse_diagnostic (
+  file_id TEXT PRIMARY KEY, backend TEXT NOT NULL, has_error INTEGER NOT NULL,
+  root_type TEXT NOT NULL, checked_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, source_path TEXT NOT NULL,
+  version TEXT NOT NULL, content_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', current_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS requirement_change (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, change_type TEXT NOT NULL,
+  previous_hash TEXT, current_hash TEXT NOT NULL, recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_version (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, version INTEGER NOT NULL,
+  source_file TEXT NOT NULL, source_type TEXT NOT NULL, content_hash TEXT NOT NULL,
+  original_text TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(requirement_id, version)
+);
+CREATE TABLE IF NOT EXISTS requirement_digest_v2 (
+  requirement_version_id TEXT PRIMARY KEY, business_goal TEXT, background TEXT,
+  digest_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_rule (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL, statement TEXT NOT NULL,
+  objects_json TEXT NOT NULL, conditions_json TEXT NOT NULL, result TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_chunk_v2 (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL,
+  section_path_json TEXT NOT NULL, sequence INTEGER NOT NULL, content TEXT NOT NULL,
+  content_hash TEXT NOT NULL, page INTEGER, paragraph_start INTEGER,
+  paragraph_end INTEGER, start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL,
+  evidence_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_evidence (
+  fact_type TEXT NOT NULL, fact_id TEXT NOT NULL, chunk_id TEXT NOT NULL,
+  start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL,
+  PRIMARY KEY(fact_type, fact_id, chunk_id, start_offset, end_offset)
+);
+CREATE TABLE IF NOT EXISTS requirement_relation (
+  id TEXT PRIMARY KEY, requirement_version_id TEXT NOT NULL,
+  source_object_type TEXT NOT NULL, source_object_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+  origin TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL,
+  reason TEXT NOT NULL, requirement_evidence_id TEXT, code_evidence_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(requirement_version_id, source_object_type, source_object_id, relation_type, target_type, target_id)
+);
+CREATE TABLE IF NOT EXISTS requirement_version_change (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL,
+  from_version_id TEXT, to_version_id TEXT NOT NULL,
+  added_rules_json TEXT NOT NULL, removed_rules_json TEXT NOT NULL,
+  changed_rules_json TEXT NOT NULL, affected_knowledge_json TEXT NOT NULL,
+  affected_code_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS requirement_fts USING fts5(
+  requirement_id UNINDEXED, requirement_version_id UNINDEXED,
+  title, digest, rules, tags
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS requirement_chunk_fts USING fts5(
+  requirement_id UNINDEXED, requirement_version_id UNINDEXED,
+  chunk_id UNINDEXED, section_path, content
+);
+CREATE TABLE IF NOT EXISTS requirement_digest (
+  requirement_id TEXT PRIMARY KEY, digest_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS requirement_chunk (
+  id TEXT PRIMARY KEY, requirement_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+  content TEXT NOT NULL, evidence_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_conversation (
+  id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
+  runtime_session_id TEXT, workspace_id TEXT, scope_json TEXT,
+  mode TEXT NOT NULL DEFAULT 'backbone', ast_version_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS query_run (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+  runtime TEXT NOT NULL, runtime_session_id TEXT,
+  question TEXT NOT NULL, status TEXT NOT NULL,
+  answer TEXT NOT NULL DEFAULT '', error TEXT,
+  usage_json TEXT NOT NULL DEFAULT '{}', scope_json TEXT,
+  mode TEXT NOT NULL DEFAULT 'backbone', ast_version_id TEXT,
+  started_at TEXT NOT NULL, completed_at TEXT, duration_ms REAL NOT NULL DEFAULT 0,
+  FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_run_conversation ON query_run(conversation_id, started_at);
+CREATE TABLE IF NOT EXISTS query_event (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(run_id, sequence), FOREIGN KEY(run_id) REFERENCES query_run(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_event_run ON query_event(run_id, sequence);
+CREATE TABLE IF NOT EXISTS query_message (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+);
+CREATE INDEX IF NOT EXISTS idx_query_message_conversation ON query_message(conversation_id, created_at);
+CREATE TABLE IF NOT EXISTS query_feedback (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
+  comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES query_run(id)
+);
+
+-- MVP business baseline. Human source, structured business knowledge and
+-- runtime code facts are separate records. Re-indexing code therefore never
+-- rewrites a human-authored business statement.
+CREATE TABLE IF NOT EXISTS business_baseline_source (
+  id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+  source_revision TEXT NOT NULL, content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS business_entity (
+  id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, name TEXT NOT NULL,
+  aliases_json TEXT NOT NULL DEFAULT '[]', definition TEXT NOT NULL DEFAULT '',
+  attributes_json TEXT NOT NULL DEFAULT '{}', source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL, source_evidence_id TEXT,
+  confidence REAL NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(source_id, entity_type, name),
+  FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
+);
+CREATE TABLE IF NOT EXISTS business_relation_v2 (
+  id TEXT PRIMARY KEY, from_entity_id TEXT, from_label TEXT NOT NULL,
+  relation_type TEXT NOT NULL, to_entity_id TEXT, to_label TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT '', attributes_json TEXT NOT NULL DEFAULT '{}',
+  source_type TEXT NOT NULL, source_id TEXT NOT NULL, evidence_id TEXT,
+  confidence REAL NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(source_id, from_label, relation_type, to_label, scope),
+  FOREIGN KEY(source_id) REFERENCES business_baseline_source(id)
+);
+
+-- Stable navigation hints maintained with business knowledge. They keep only
+-- an application and a human-authored entry name. The current symbol, method
+-- and source location are resolved at query time from the latest code index.
+CREATE TABLE IF NOT EXISTS business_entry_anchor (
+  id TEXT PRIMARY KEY, business_type TEXT NOT NULL, business_id TEXT NOT NULL,
+  application_id TEXT NOT NULL, entry_type TEXT NOT NULL, entry_name TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'HUMAN', status TEXT NOT NULL DEFAULT 'ACTIVE',
+  source_evidence_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(business_type, business_id, application_id, entry_type, entry_name),
+  FOREIGN KEY(application_id) REFERENCES application(id)
+);
+CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_business
+  ON business_entry_anchor(business_type, business_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_entry_anchor_application
+  ON business_entry_anchor(application_id, entry_name, status);
+CREATE INDEX IF NOT EXISTS idx_business_entity_type_status
+  ON business_entity(entity_type, status, name);
+CREATE INDEX IF NOT EXISTS idx_business_entity_source
+  ON business_entity(source_id, status);
+CREATE INDEX IF NOT EXISTS idx_business_relation_source
+  ON business_relation_v2(source_id, status);
+"""
+
+
+def connect(path: str) -> sqlite3.Connection:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.executescript(SCHEMA)
+    _migrate(connection)
+    return connection
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    """Remove retired schemas and apply additive migrations."""
+    _purge_retired_business_schema(connection)
+    _purge_legacy_function_governance(connection)
+    _purge_legacy_mapping_schema(connection)
+    _purge_legacy_functional_schema(connection)
+    _migrate_query_runtime(connection)
+    additions = {
+        "requirement": (
+            ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
+            ("current_version", "INTEGER NOT NULL DEFAULT 1"),
+            ("created_at", "TEXT"), ("updated_at", "TEXT"),
+        ),
+    }
+    for table, columns in additions.items():
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        for name, declaration in columns:
+            if name not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+    connection.commit()
+
+
+def _purge_legacy_functional_schema(connection: sqlite3.Connection) -> None:
+    """Drop the retired function-centred knowledge tables.
+
+    The function-document model was superseded by the natural-language
+    business baseline (``business_entity`` + ``business_entry_anchor``).
+    Existing local databases may still contain the five tables, so remove
+    them once on the next database open instead of leaving a second,
+    misleading source of truth behind. Only evidence owned by the retired
+    function documents is removed; code and baseline evidence stay.
+    """
+    indexes = (
+        "idx_functional_knowledge_status", "idx_functional_entry_function",
+        "idx_functional_link_function",
+    )
+    tables = (
+        "functional_analysis", "functional_retrieval_link", "functional_key_table",
+        "functional_entry_anchor", "functional_knowledge",
+    )
+    existing = {
+        row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if not existing.intersection(tables):
+        return
+    owned_evidence: list[str] = []
+    if "functional_knowledge" in existing and connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence'"
+    ).fetchone():
+        owned_evidence = [row[0] for row in connection.execute(
+            """SELECT DISTINCT e.id FROM evidence e
+                WHERE e.source_type='BUSINESS' AND e.source_id IN (SELECT id FROM functional_knowledge)"""
+        )]
+    if owned_evidence:
+        marks = ",".join("?" for _ in owned_evidence)
+        connection.execute(f"DELETE FROM evidence_lifecycle WHERE evidence_id IN ({marks})", owned_evidence)
+        connection.execute(f"DELETE FROM evidence WHERE id IN ({marks})", owned_evidence)
+    for index in indexes:
+        connection.execute(f'DROP INDEX IF EXISTS "{index}"')
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in tables:
+            if table in existing:
+                connection.execute(f'DROP TABLE "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _purge_legacy_mapping_schema(connection: sqlite3.Connection) -> None:
+    """Drop the retired Business→Code mapping and observation tables.
+
+    The current model keeps business knowledge and code facts independent;
+    ``business_entry_anchor`` is the only durable navigation hint. Existing
+    local databases may still contain the two tables from earlier MVPs, so
+    remove them once on the next database open instead of leaving a second,
+    misleading source of truth behind.
+    """
+    for index in (
+        "idx_business_mapping_target", "idx_business_mapping_symbol",
+        "idx_mapping_observation_status", "idx_mapping_observation_business",
+        "idx_mapping_observation_symbol",
+    ):
+        connection.execute(f'DROP INDEX IF EXISTS "{index}"')
+    for table in ("business_code_mapping_observation", "business_code_mapping"):
+        connection.execute(f'DROP TABLE IF EXISTS "{table}"')
+    connection.commit()
+
+
+def _purge_legacy_function_governance(connection: sqlite3.Connection) -> None:
+    """Remove the superseded proposal/version model from existing databases."""
+    tables = (
+        "knowledge_proposal_review",
+        "proposal_item_evidence",
+        "knowledge_update_proposal_item",
+        "function_item_evidence",
+        "function_data_impact",
+        "function_entry",
+        "function_rule",
+        "function_scenario",
+        "business_function_version",
+        "knowledge_update_proposal",
+        "business_function",
+    )
+    existing = {
+        row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if not existing.intersection(tables):
+        return
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in tables:
+            if table in existing:
+                connection.execute(f'DROP TABLE "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _purge_retired_business_schema(connection: sqlite3.Connection) -> None:
+    """Remove the pre-governance business-knowledge storage on first open.
+
+    The application no longer has a reader or writer for these tables.  A
+    one-time migration keeps an existing local database from retaining a
+    second, confusing source of truth.  Only evidence owned by the retired
+    records is removed; code and requirement evidence remain untouched.
+    """
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='business_knowledge'"
+    ).fetchone():
+        old_evidence = [row[0] for row in connection.execute(
+            "SELECT evidence_id FROM business_knowledge WHERE evidence_id IS NOT NULL"
+        )]
+        retired_tables = (
+            "business_knowledge_fts", "business_knowledge_fts_config",
+            "business_knowledge_fts_content", "business_knowledge_fts_data",
+            "business_knowledge_fts_docsize", "business_knowledge_fts_idx",
+            "business_review", "relation_evidence", "knowledge_relation",
+            "business_knowledge_tag", "knowledge_change", "business_knowledge",
+        )
+        for table in retired_tables:
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                connection.execute(f'DROP TABLE "{table}"')
+        if old_evidence:
+            marks = ",".join("?" for _ in old_evidence)
+            connection.execute(f"DELETE FROM evidence_lifecycle WHERE evidence_id IN ({marks})", old_evidence)
+            connection.execute(f"DELETE FROM evidence WHERE id IN ({marks})", old_evidence)
+
+
+def _migrate_query_runtime(connection: sqlite3.Connection) -> None:
+    """Replace the self-built query tables with the Claude runtime tables.
+
+    Existing local databases may contain the former ``query_agent_*`` tables.
+    Their run rows are copied as read-only ``LEGACY_QUERY_AGENT`` history when
+    possible, then the old tables are removed. Conversation and message rows
+    remain available for the UI; new requests use only ``query_run`` and
+    ``query_event``.
+    """
+    existing = {
+        row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+
+    if "query_conversation" in existing:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(query_conversation)")}
+        for name, declaration in (
+            ("runtime", "TEXT NOT NULL DEFAULT 'CLAUDE_CODE'"),
+            ("runtime_session_id", "TEXT"),
+            ("workspace_id", "TEXT"),
+            ("scope_json", "TEXT"),
+            ("mode", "TEXT NOT NULL DEFAULT 'backbone'"),
+            ("ast_version_id", "TEXT"),
+        ):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE query_conversation ADD COLUMN {name} {declaration}")
+    if "query_run" in existing:
+        run_columns = {row[1] for row in connection.execute("PRAGMA table_info(query_run)")}
+        if "scope_json" not in run_columns:
+            connection.execute("ALTER TABLE query_run ADD COLUMN scope_json TEXT")
+        if "mode" not in run_columns:
+            connection.execute("ALTER TABLE query_run ADD COLUMN mode TEXT NOT NULL DEFAULT 'backbone'")
+        if "ast_version_id" not in run_columns:
+            connection.execute("ALTER TABLE query_run ADD COLUMN ast_version_id TEXT")
+
+    # These explicit CREATE statements make the migration safe for a database
+    # created by an intermediate build that had not yet shipped the new schema.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS query_conversation (
+          id TEXT PRIMARY KEY, runtime TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
+          runtime_session_id TEXT, workspace_id TEXT, scope_json TEXT,
+          mode TEXT NOT NULL DEFAULT 'backbone', ast_version_id TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS query_run (
+          id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+          runtime TEXT NOT NULL, runtime_session_id TEXT,
+          question TEXT NOT NULL, status TEXT NOT NULL,
+          answer TEXT NOT NULL DEFAULT '', error TEXT,
+          usage_json TEXT NOT NULL DEFAULT '{}', scope_json TEXT,
+          mode TEXT NOT NULL DEFAULT 'backbone', ast_version_id TEXT,
+          started_at TEXT NOT NULL, completed_at TEXT,
+          duration_ms REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY(conversation_id) REFERENCES query_conversation(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_query_run_conversation
+          ON query_run(conversation_id, started_at);
+        CREATE TABLE IF NOT EXISTS query_event (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+          event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
+          UNIQUE(run_id, sequence), FOREIGN KEY(run_id) REFERENCES query_run(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_query_event_run ON query_event(run_id, sequence);
+        """
+    )
+
+    old_run_rows = []
+    if "query_agent_run" in existing:
+        old_run_rows = connection.execute("SELECT * FROM query_agent_run").fetchall()
+        now = _migration_now()
+        for row in old_run_rows:
+            run_id = str(row["id"])
+            conversation_id = f"CONV-LEGACY-{run_id}"
+            connection.execute(
+                """INSERT OR IGNORE INTO query_conversation
+                   (id,runtime,runtime_session_id,workspace_id,created_at,updated_at)
+                   VALUES (?, 'LEGACY_QUERY_AGENT', NULL, NULL, ?, ?)""",
+                (conversation_id, row["created_at"] or now, row["completed_at"] or row["created_at"] or now),
+            )
+            answer = _legacy_answer_text(row["answer_json"])
+            status = str(row["status"] or "completed").lower()
+            status = status if status in {"running", "completed", "failed"} else "completed"
+            connection.execute(
+                """INSERT OR IGNORE INTO query_run
+                   (id,conversation_id,runtime,runtime_session_id,question,status,answer,error,
+                    usage_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, conversation_id, "LEGACY_QUERY_AGENT", None,
+                    row["question"], status, answer, None, "{}",
+                    row["created_at"] or now, row["completed_at"], 0,
+                ),
+            )
+
+    # The old feedback table points at query_agent_run. Recreate it so future
+    # inserts reference query_run while retaining feedback for migrated runs.
+    feedback_fk = []
+    if "query_feedback" in existing:
+        feedback_fk = connection.execute("PRAGMA foreign_key_list(query_feedback)").fetchall()
+    if feedback_fk and any(str(row["table"]) != "query_run" for row in feedback_fk):
+        feedback_rows = connection.execute("SELECT * FROM query_feedback").fetchall()
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute("DROP TABLE query_feedback")
+            connection.execute(
+                """CREATE TABLE query_feedback (
+                   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, rating TEXT NOT NULL,
+                   comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                   FOREIGN KEY(run_id) REFERENCES query_run(id)
+                )"""
+            )
+            for row in feedback_rows:
+                if connection.execute("SELECT 1 FROM query_run WHERE id=?", (row["run_id"],)).fetchone():
+                    connection.execute(
+                        "INSERT OR IGNORE INTO query_feedback(id,run_id,rating,comment,created_at) VALUES (?,?,?,?,?)",
+                        (row["id"], row["run_id"], row["rating"], row["comment"], row["created_at"]),
+                    )
+            connection.commit()
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table in (
+            "query_tool_call", "query_agent_step", "query_checkpoint",
+            "query_agent_run", "agent_run",
+        ):
+            connection.execute(f'DROP TABLE IF EXISTS "{table}"')
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _legacy_answer_text(value: str) -> str:
+    try:
+        payload = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("conclusion") or payload.get("answer") or "")
+
+
+def _migration_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()

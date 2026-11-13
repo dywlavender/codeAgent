@@ -1,0 +1,187 @@
+{
+  "type": "offline_contract_reassembly",
+  "projectId": "complex-loan-validation",
+  "rawModelResponse": "```json\n{\n  \"contracts\": [\"C5\"],\n  \"cases\": [\n    {\n      \"contract\": \"C5\",\n      \"rules\": [\"B1\", \"B2\", \"B3\", \"B4\", \"B5\"],\n      \"meaning\": \"apply 阶段：中台 status=PROCESSING、paymentStatus=TO_SUBMIT/PROCESSING、bookingStatus=NONE。此时外部尚未返回结果，页面 displayStatus 为 PROCESSING，属于“外部还没结果”。\"\n    },\n    {\n      \"contract\": \"C5\",\n      \"rules\": [\"B6\", \"B7\", \"B8\", \"B11\"],\n      \"meaning\": \"onPaymentResult(SUCCESS) 且 book() 成功：status=SUCCESS、paymentStatus=SUCCESS、bookingStatus=BOOKED。displayStatus 映射为 SUCCESS，不属于处理中。\"\n    },\n    {\n      \"contract\": \"C5\",\n      \"rules\": [\"B6\", \"B7\", \"B8\", \"B13\"],\n      \"meaning\": \"onPaymentResult(SUCCESS) 但 book() 抛异常：status=EXTERNAL_SUCCESS_BOOKING_PENDING、paymentStatus=SUCCESS、bookingStatus=RETRY_NEEDED。displayStatus 仍映射为 PROCESSING，但实际是“中台入账失败等待补偿”，与 B1/B5 的外部未决状态业务含义完全不同。\"\n    },\n    {\n      \"contract\": \"C5\",\n      \"rules\": [\"B9\", \"B10\"],\n      \"meaning\": \"onPaymentResult(FAILED)：status=FAILED、paymentStatus=FAILED。displayStatus 映射为 FAILED，不属于处理中。\"\n    }\n  ],\n  \"changes\": [\n    {\n      \"contract\": \"C5\",\n      \"action\": \"reuse_fields\",\n      \"fields\": [\"detail.booking.status\", \"detail.payments[].status\", \"middleStatus\"]\n    }\n  ],\n  \"business_evidence\": [\n    {\"source\": \"S2\", \"start\": 194, \"end\": 203},\n    {\"source\": \"S3\", \"start\": 188, \"end\": 211},\n    {\"source\": \"S3\", \"start\": 217, \"end\": 242},\n    {\"source\": \"S3\", \"start\": 259, \"end\": 265}\n  ]\n}\n```",
+  "answer": "`GET /api/drawdowns/{channelRefNo}`（融商贷渠道后端）\n\n本题相关的已核对返回字段包括：`displayStatus`、`middleStatus`、`detail.status`、`detail.payments[].status`、`detail.booking.status`、`detail.booking.retryCount`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:35`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`。\n\n`displayStatus` 的映射输入是 `middleStatus`、`detail.status`：SUCCESS／FAILED → 保留输入值；其他值 → 返回 `PROCESSING`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`。\n\n单一展示字段的合并不等于完整响应缺少明细；以上已确认字段不需要再次新增。\n\n仍有结构缺口：evidence_context_budget。\n\n源码中的相关写入分支如下。它们是局部条件，不能代替对提前返回、后续写入和实际调用时机的核对；业务解读仍需独立复核。\n\n非 catch 写入点：`middleStatus`／`detail.status` 写入 `DrawdownOrder.Status.PROCESSING`；非 catch 写入点：`detail.payments[].status` 写入 `DrawdownOrder.PaymentStatus.TO_SUBMIT`；非 catch 写入点：`detail.booking.status` 写入 `DrawdownOrder.BookingStatus.NONE`；非 catch 写入点：`detail.booking.retryCount` 写入 `0`；try 分支：`detail.payments[].status` 写入 `DrawdownOrder.PaymentStatus.PROCESSING`。\n\n业务解读：apply 阶段：中台 status=PROCESSING、paymentStatus=TO_SUBMIT/PROCESSING、bookingStatus=NONE。此时外部尚未返回结果，页面 displayStatus 为 PROCESSING，属于“外部还没结果”。\n\n依据：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:122`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:68`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`。\n\n非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`detail.payments[].status` 写入 `DrawdownOrder.PaymentStatus.SUCCESS`；非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`middleStatus`／`detail.status` 写入 `DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING`；非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`detail.booking.status` 写入 `DrawdownOrder.BookingStatus.TO_BOOK`；try 分支：`detail.booking.status` 写入 `DrawdownOrder.BookingStatus.BOOKED`。\n\n业务解读：onPaymentResult(SUCCESS) 且 book() 成功：status=SUCCESS、paymentStatus=SUCCESS、bookingStatus=BOOKED。displayStatus 映射为 SUCCESS，不属于处理中。\n\n依据：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:188`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:70`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`。\n\n非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`detail.payments[].status` 写入 `DrawdownOrder.PaymentStatus.SUCCESS`；非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`middleStatus`／`detail.status` 写入 `DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING`；非 catch 写入点，满足 (\"SUCCESS\".equals(result))：`detail.booking.status` 写入 `DrawdownOrder.BookingStatus.TO_BOOK`；异常 catch 分支：`detail.booking.status` 写入 `DrawdownOrder.BookingStatus.RETRY_NEEDED`。\n\n业务解读：`detail.booking.status` 对应异常处理中的写入 `DrawdownOrder.BookingStatus.RETRY_NEEDED`。可据这些实际返回字段定位异常处理状态；其它成员的最终值还取决于异常发生位置，不能把调用异常前的值当成异常后的保证。\n\n依据：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:188`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:70`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`。\n\n非 catch 写入点，不满足 (\"SUCCESS\".equals(result))：`detail.payments[].status` 写入 `DrawdownOrder.PaymentStatus.FAILED`；非 catch 写入点，不满足 (\"SUCCESS\".equals(result))：`middleStatus`／`detail.status` 写入 `DrawdownOrder.Status.FAILED`。\n\n业务解读：onPaymentResult(FAILED)：status=FAILED、paymentStatus=FAILED。displayStatus 映射为 FAILED，不属于处理中。\n\n依据：`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:188`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:70`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`。\n\n`detail.booking.status`、`detail.payments[].status`、`middleStatus` 已在响应中，先核对消费端能否复用；无需再次新增这些字段。页面改动是否足够仍取决于实际消费代码。\n\n当前没有核对页面消费端。是否已展示、是否只需改一处以及改动收益仍需读取实际页面；若页面仅使用合并后的展示值，应先核对它是否可以利用现有明细。",
+  "verification": {
+    "mode": "contracts",
+    "accepted": [
+      {
+        "contractId": "C5",
+        "fields": [
+          "channelRefNo",
+          "displayStatus",
+          "middleStatus",
+          "detail",
+          "detail.bizOrderNo",
+          "detail.status",
+          "detail.amount",
+          "detail.payments",
+          "detail.payments[].extSerialNo",
+          "detail.payments[].status",
+          "detail.payments[].amount",
+          "detail.booking",
+          "detail.booking.status",
+          "detail.booking.loanAccountNo",
+          "detail.booking.retryCount"
+        ],
+        "mappings": [
+          {
+            "outputField": "displayStatus",
+            "inputFields": [
+              "middleStatus",
+              "detail.status"
+            ],
+            "rules": [
+              {
+                "inputs": [
+                  "SUCCESS",
+                  "FAILED"
+                ],
+                "default": false,
+                "output": "input"
+              },
+              {
+                "inputs": [],
+                "default": true,
+                "output": "PROCESSING"
+              }
+            ],
+            "evidence": [
+              "E20",
+              "E21",
+              "E6",
+              "E7",
+              "E8",
+              "E9",
+              "E10",
+              "E11",
+              "E12",
+              "E13",
+              "E14",
+              "E15",
+              "E16",
+              "E17",
+              "E18",
+              "E19",
+              "E1",
+              "E4",
+              "E5"
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": [],
+    "businessEvidenceCount": 4,
+    "businessEvidence": [
+      {
+        "source": "S2",
+        "start": 194,
+        "end": 203,
+        "quote": ""
+      },
+      {
+        "source": "S3",
+        "start": 188,
+        "end": 211,
+        "quote": ""
+      },
+      {
+        "source": "S3",
+        "start": 217,
+        "end": 242,
+        "quote": ""
+      },
+      {
+        "source": "S3",
+        "start": 259,
+        "end": 265,
+        "quote": ""
+      }
+    ],
+    "proposedBusinessEvidenceCount": 4,
+    "businessCases": [
+      {
+        "contract": "C5",
+        "rules": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "B5"
+        ],
+        "meaning": "apply 阶段：中台 status=PROCESSING、paymentStatus=TO_SUBMIT/PROCESSING、bookingStatus=NONE。此时外部尚未返回结果，页面 displayStatus 为 PROCESSING，属于“外部还没结果”。",
+        "renderedMeaning": "apply 阶段：中台 status=PROCESSING、paymentStatus=TO_SUBMIT/PROCESSING、bookingStatus=NONE。此时外部尚未返回结果，页面 displayStatus 为 PROCESSING，属于“外部还没结果”。",
+        "displayMode": "source_bound_interpretation"
+      },
+      {
+        "contract": "C5",
+        "rules": [
+          "B6",
+          "B7",
+          "B8",
+          "B11"
+        ],
+        "meaning": "onPaymentResult(SUCCESS) 且 book() 成功：status=SUCCESS、paymentStatus=SUCCESS、bookingStatus=BOOKED。displayStatus 映射为 SUCCESS，不属于处理中。",
+        "renderedMeaning": "onPaymentResult(SUCCESS) 且 book() 成功：status=SUCCESS、paymentStatus=SUCCESS、bookingStatus=BOOKED。displayStatus 映射为 SUCCESS，不属于处理中。",
+        "displayMode": "source_bound_interpretation"
+      },
+      {
+        "contract": "C5",
+        "rules": [
+          "B6",
+          "B7",
+          "B8",
+          "B13"
+        ],
+        "meaning": "onPaymentResult(SUCCESS) 但 book() 抛异常：status=EXTERNAL_SUCCESS_BOOKING_PENDING、paymentStatus=SUCCESS、bookingStatus=RETRY_NEEDED。displayStatus 仍映射为 PROCESSING，但实际是“中台入账失败等待补偿”，与 B1/B5 的外部未决状态业务含义完全不同。",
+        "renderedMeaning": "`detail.booking.status` 对应异常处理中的写入 `DrawdownOrder.BookingStatus.RETRY_NEEDED`。可据这些实际返回字段定位异常处理状态；其它成员的最终值还取决于异常发生位置，不能把调用异常前的值当成异常后的保证。",
+        "displayMode": "catch_members_only"
+      },
+      {
+        "contract": "C5",
+        "rules": [
+          "B9",
+          "B10"
+        ],
+        "meaning": "onPaymentResult(FAILED)：status=FAILED、paymentStatus=FAILED。displayStatus 映射为 FAILED，不属于处理中。",
+        "renderedMeaning": "onPaymentResult(FAILED)：status=FAILED、paymentStatus=FAILED。displayStatus 映射为 FAILED，不属于处理中。",
+        "displayMode": "source_bound_interpretation"
+      }
+    ],
+    "changeOptions": [
+      {
+        "contract": "C5",
+        "action": "reuse_fields",
+        "fields": [
+          "detail.booking.status",
+          "detail.payments[].status",
+          "middleStatus"
+        ]
+      }
+    ],
+    "interpretationLimits": [
+      {
+        "contract": "C5",
+        "rules": [
+          "B6",
+          "B7",
+          "B8",
+          "B13"
+        ],
+        "reason": "exception_members_only; earlier_and_later_writes_not_proven"
+      }
+    ],
+    "answerVersion": 2,
+    "questionNeeds": {
+      "business": true,
+      "consumer": true,
+      "changes": false
+    },
+    "businessEvidenceLines": 67,
+    "semanticProof": false
+  },
+  "additionalModelCalls": 0,
+  "sourceTrace": "docs/records/2026-10/langchain-v6-contract-business-channel-20261031.trace.json"
+}

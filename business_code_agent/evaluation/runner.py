@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 
-from ..query_agent.workspace import WorkspaceManager
+from business_code_agent.query.workspace import WorkspaceManager
 from .ast_docs import generate_ast_documents  # compatibility export; web batches receive a manual AST version
 from .harness import (EvaluationRuntime, judge_answer, judge_workspace_for, metadata_capture,
                       run_answer_job, write_json)
@@ -157,7 +157,8 @@ def plan_jobs(cases, *, arms, repeats, case_ids=None, start_repeat=1, blocks=Non
 def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=ARMS_ABC, arm_descriptions=None,
                  variants=None, comparison="abc", repeats=2, case_ids=None, judge=True, workers=2,
                  start_repeat=1, blocks=None, limit_jobs=None, suite_ref=None, timeout_seconds=240,
-                 ast_version_id=None, ast_generation_seconds=None, business_context_root=None,
+                 ast_version_id=None, ast_generation_seconds=None, ast_generator_version=None,
+                 business_context_root=None,
                  code_map_root=None, baseline_root=None, requirements_root=None):
     """Create the output directory, freeze sources/rubric and write ``protocol.json``."""
     arm_descriptions = arm_descriptions or {arm: ARM_DESCRIPTIONS_ABC.get(arm, arm) for arm in arms}
@@ -198,7 +199,7 @@ def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=
         "sourceRepositories": [{"id": rid, "snapshot": name} for rid, name in repository_names],
         "referencePreparation": {"astGenerationSeconds": ast_generation_seconds,
             "astGenerationInBatch": False, "astVersionId": ast_version_id,
-            "astGeneratorVersion": 2 if ast_version_id else None,
+            "astGeneratorVersion": ast_generator_version,
             "arms": {arm: {"documents": len(files), "characters": sum(len(v) for v in files.values()),
                             "overviewCharacters": len(files.get("project-overview.md", ""))} for arm, files in variants.items()}},
         "judgeEnabled": judge,

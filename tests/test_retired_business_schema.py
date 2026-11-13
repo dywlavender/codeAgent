@@ -5,7 +5,7 @@ import unittest
 import sqlite3
 from pathlib import Path
 
-from business_code_agent.schema import connect
+from business_code_agent.storage.schema import connect
 
 
 class RetiredBusinessSchemaTest(unittest.TestCase):

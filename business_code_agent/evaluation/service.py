@@ -47,7 +47,7 @@ def _atomic_write_json(path: Path, value) -> None:
 
 def _load_json(path: Path, default):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        return json.loads(Path(path).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return default
 
@@ -106,7 +106,7 @@ class EvaluationService:
         if not self.project_config or not self.project_config.is_file():
             return None, None
         try:
-            config = json.loads(self.project_config.read_text(encoding="utf-8"))
+            config = json.loads(self.project_config.read_text(encoding="utf-8-sig"))
             project = config.get("project") or {}
             project_id = str(project.get("id") or "").strip() or None
             project_name = str(project.get("name") or "").strip() or project_id
@@ -643,6 +643,7 @@ class EvaluationService:
                     comparison=comparison, repeats=repeats, case_ids=None, judge=judge,
                     variants=variants, ast_version_id=ast_version_id,
                     ast_generation_seconds=(ast_current[1].get("generationSeconds") if ast_current else None),
+                    ast_generator_version=(ast_current[1].get("generatorVersion") if ast_current else None),
                     business_context_root=self.business_context_root, code_map_root=self.code_map_root,
                     requirements_root=self.requirements_root,
                     workers=self.workers, timeout_seconds=self.timeout_seconds,

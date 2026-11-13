@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 
+from business_code_agent.shared.docparse import ParsedSection
+
 
 class RequirementStatus(StrEnum):
     ACTIVE = "ACTIVE"
@@ -57,15 +59,6 @@ class RequirementDigest:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-@dataclass
-class ParsedSection:
-    path: list[str]
-    paragraphs: list[str]
-    paragraph_start: int
-    paragraph_end: int
-    page: int | None = None
 
 
 @dataclass

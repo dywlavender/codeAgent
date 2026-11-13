@@ -1,0 +1,98 @@
+{
+  "reviewSource": "assistant_source_check",
+  "humanReviewed": false,
+  "caseId": "v2-channel-display",
+  "sourceSnapshot": "retrieval-20261030-requirements-restored",
+  "results": [
+    {
+      "strategy": "files",
+      "modelCalls": 8,
+      "readEvidence": {
+        "covered": 3,
+        "required": 3,
+        "coverage": 1.0,
+        "annotatedEvidenceComplete": true,
+        "relationCoverage": null,
+        "groups": [
+          {
+            "id": "channel-fields",
+            "role": "implementation",
+            "covered": true
+          },
+          {
+            "id": "middle-booking-fields",
+            "role": "implementation",
+            "covered": true
+          },
+          {
+            "id": "success-boundary",
+            "role": "business_semantics",
+            "covered": true
+          }
+        ]
+      },
+      "finding": "开头将展示状态不能区分写成渠道接口不能支持，和自身引用的 detail 原文相矛盾。",
+      "qualifiedFact": "完整响应已经包含 detail.payments[].status 和 detail.booking.status；只看 displayStatus 无法区分。",
+      "sources": [
+        {
+          "sourceId": "channel-service-repo",
+          "path": "src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 125,
+          "lineEnd": 136
+        },
+        {
+          "sourceId": "loan-middle-repo",
+          "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 257,
+          "lineEnd": 265
+        }
+      ],
+      "manualReviewRequired": true
+    },
+    {
+      "strategy": "hybrid",
+      "modelCalls": 8,
+      "readEvidence": {
+        "covered": 3,
+        "required": 3,
+        "coverage": 1.0,
+        "annotatedEvidenceComplete": true,
+        "relationCoverage": null,
+        "groups": [
+          {
+            "id": "channel-fields",
+            "role": "implementation",
+            "covered": true
+          },
+          {
+            "id": "middle-booking-fields",
+            "role": "implementation",
+            "covered": true
+          },
+          {
+            "id": "success-boundary",
+            "role": "business_semantics",
+            "covered": true
+          }
+        ]
+      },
+      "finding": "开头将展示状态不能区分写成渠道接口不能支持，和自身引用的 detail 原文相矛盾。",
+      "qualifiedFact": "完整响应已经包含 detail.payments[].status 和 detail.booking.status；只看 displayStatus 无法区分。",
+      "sources": [
+        {
+          "sourceId": "channel-service-repo",
+          "path": "src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 125,
+          "lineEnd": 136
+        },
+        {
+          "sourceId": "loan-middle-repo",
+          "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 257,
+          "lineEnd": 265
+        }
+      ],
+      "manualReviewRequired": true
+    }
+  ]
+}

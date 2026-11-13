@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from ..util import camel_fields
+from business_code_agent.shared.util import camel_fields
 from .models import BusinessRule, RequirementDigest, RequirementRelationType
 
 

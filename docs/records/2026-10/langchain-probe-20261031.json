@@ -1,0 +1,17 @@
+{
+  "status": "completed",
+  "text": "",
+  "seconds": 0.678,
+  "model": "qwen3.8-27b",
+  "usage": {
+    "input_tokens": 51,
+    "output_tokens": 16,
+    "total_tokens": 67,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {
+      "reasoning": 16
+    }
+  }
+}

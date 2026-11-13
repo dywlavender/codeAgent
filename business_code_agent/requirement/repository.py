@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from ..util import digest, dumps, stable_id
+from business_code_agent.shared.util import digest, dumps, stable_id
 
 
 class RequirementRepository:

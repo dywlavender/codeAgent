@@ -49,23 +49,26 @@ export function toolTarget(tool) {
   return input.file_path || input.pattern || input.path || "";
 }
 
-// 从工具调用里提取"实际读取过的文件"：只有带 file_path 的调用算文件证据，
-// Grep/Glob 的目录参数和搜索模式不当作文件卡片展示。
+// Only delivered originals count; search locations and directory matches do not.
 export function fileEvidence(tools = []) {
   const byPath = new Map();
-  for (const tool of tools) {
-    const path = tool.input?.file_path || "";
-    if (!path) continue;
-    // Glob/Bash 常把目录塞进 file_path；没有扩展名末段按目录处理，不生成文件卡片
-    const last = path.split("/").filter(Boolean).at(-1) || "";
-    if (!last.includes(".")) continue;
+  function add(path, content) {
+    if (!path) return;
     const entry = byPath.get(path) || { path, snippet: "" };
-    if (tool.output && tool.output.trim()) {
-      const text = tool.output.trim();
-      entry.snippet = entry.snippet ? `${entry.snippet}\n…\n${text}` : text;
-      if (entry.snippet.length > 1200) entry.snippet = `${entry.snippet.slice(0, 1200)}…`;
-    }
+    if (content?.trim()) entry.snippet = [entry.snippet, content.trim()].filter(Boolean).join("\n…\n").slice(0, 1200);
     byPath.set(path, entry);
+  }
+  for (const tool of tools) {
+    if (tool.status !== "completed") continue;
+    let data;
+    try { data = JSON.parse(tool.output); } catch { data = null; }
+    if (data?.error) continue;
+    if (["TraceContract", "TraceResponseFields", "TraceBusinessRules"].includes(tool.name)) {
+      for (const source of data?.evidence || []) add(source.path, source.content);
+    } else if (tool.name === "Read") {
+      const path = data?.path || tool.input?.file_path || tool.input?.path;
+      add(path, data?.content || tool.output);
+    }
   }
   return [...byPath.values()];
 }

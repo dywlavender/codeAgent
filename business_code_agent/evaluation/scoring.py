@@ -1,8 +1,9 @@
 """Review parsing and quote validation shared by the CLI and the workbench.
 
 A review is only accepted when every satisfied check quotes text that really
-exists in the candidate answer. Failed or malformed reviews stay failures;
-they must never be scored as zero points.
+exists in the candidate answer and supplies a non-empty, inspectable basis.
+Failed or malformed reviews stay failures; they must never be scored as zero
+points.
 """
 
 from __future__ import annotations
@@ -39,12 +40,12 @@ def parse_review(answer, count, candidate=None):
         text = fenced[0]
     value = json.loads(text)
     if value.get("rubricInvalid"):
-        raise RubricInvalid("评分标准与源码冲突，需修订标准后重评：" + str(value["rubricInvalid"]))
+        raise RubricInvalid("评分标准需修订后重评：" + str(value["rubricInvalid"]))
     checks = value.get("checks", [])
     if len(checks) != count or any(type(c.get("met")) is not bool or not c.get("reason") or not isinstance(c.get("evidence"), str) for c in checks):
         raise ValueError("评分格式错误：每项需要 met 布尔值、reason、evidence")
     if any(c["met"] and not c["evidence"].strip() for c in checks):
-        raise ValueError("满足项缺少源码依据")
+        raise ValueError("满足项缺少可核查依据")
     if candidate is not None and any(c["met"] and (not c.get("candidateQuote") or not quote_matches(c["candidateQuote"], candidate)) for c in checks):
         raise ValueError("满足项必须引用候选答案中实际存在的原文")
     if not isinstance(value.get("issues"), list) or any(not isinstance(i, str) for i in value["issues"]):

@@ -9,7 +9,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-offline-windows.ps1" %*
+echo Starting Business Code Agent (offline)...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\launcher\start-offline-windows.ps1" %*
 set "EXIT_CODE=%ERRORLEVEL%"
-if not "%EXIT_CODE%"=="0" pause
+
+if not "%EXIT_CODE%"=="0" (
+  echo.
+  echo Startup failed. Read the error above or the offline log.
+  pause
+)
 exit /b %EXIT_CODE%

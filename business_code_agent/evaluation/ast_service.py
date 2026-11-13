@@ -17,10 +17,15 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from business_code_agent.platform.ast_material import current_stamp, source_stamp as _source_stamp
 from .ast_docs import generate_ast_documents
 from .runner import resolve_project_sources
 
 logger = logging.getLogger(__name__)
+
+# Generation ids live in this process only. A persisted "generating" index
+# without any live generation id belongs to a dead process and can be healed.
+_LIVE_GENERATIONS: set[str] = set()
 
 
 def _now() -> str:
@@ -34,31 +39,9 @@ def _write_json(path: Path, value) -> None:
 
 def _read_json(path: Path, default):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return default
-
-
-def _source_stamp(repository_sources: list[tuple[str, Path]]) -> dict:
-    """Return a human-auditable source stamp without storing a hash."""
-    latest = 0.0
-    files = 0
-    roots = []
-    ignored = {".git", "node_modules", "target", ".venv", "__pycache__", ".data"}
-    for repository_id, root in repository_sources:
-        roots.append({"id": repository_id, "path": str(root)})
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*"):
-            if not path.is_file() or ignored.intersection(path.parts):
-                continue
-            try:
-                latest = max(latest, path.stat().st_mtime)
-                files += 1
-            except OSError:
-                continue
-    modified = datetime.fromtimestamp(latest, timezone.utc).isoformat() if latest else None
-    return {"fileCount": files, "latestModifiedAt": modified, "repositories": roots}
 
 
 class AstService:
@@ -80,6 +63,21 @@ class AstService:
         self.versions_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._active: dict[str, dict] = {}
+        self._heal_interrupted()
+
+    def _heal_interrupted(self) -> None:
+        """Mark a 'generating' index entry failed when no generation is live.
+
+        The in-process active map dies with the server, so a 'generating'
+        index seen without any live generation id belongs to a dead process
+        and would otherwise block status forever.
+        """
+        value = self._index()
+        if value.get("status") != "generating" or _LIVE_GENERATIONS:
+            return
+        self._save_index({**value, "status": "failed",
+                          "error": "服务重启中断了上一次生成，请重新生成",
+                          "updatedAt": _now()})
 
     def _index(self) -> dict:
         return _read_json(self.index_path, {"status": "missing", "currentVersionId": None})
@@ -87,15 +85,11 @@ class AstService:
     def _save_index(self, value: dict) -> None:
         _write_json(self.index_path, value)
 
-    def _read_sources(self):
-        if not self.project_config:
-            raise ValueError("当前服务未配置项目")
-        return resolve_project_sources(self.project_config)[:2]
-
-    def _current_source_stamp(self) -> dict | None:
+    def _current_source_stamp(self, saved_stamp=None) -> dict | None:
         try:
             _, repositories, _, _ = resolve_project_sources(self.project_config)
-            return _source_stamp(repositories)
+            return current_stamp(saved_stamp, repositories,
+                                 cache_path=self.root / "source-stamp-cache.json")
         except Exception as exc:
             logger.info("AST 源码状态暂不可读取: %s", exc)
             return None
@@ -109,11 +103,11 @@ class AstService:
         if not current_id:
             return {**value, "status": value.get("status") or "missing"}
         metadata = _read_json(self.versions_root / current_id / "metadata.json", {})
-        current_stamp = self._current_source_stamp()
+        stamp_value = self._current_source_stamp(metadata.get("sourceStamp"))
         status = "available"
         if value.get("status") == "failed":
             status = "failed"
-        elif current_stamp and metadata.get("sourceStamp") and current_stamp != metadata["sourceStamp"]:
+        elif stamp_value and metadata.get("sourceStamp") and stamp_value != metadata["sourceStamp"]:
             status = "stale"
         return {
             **value,
@@ -175,6 +169,7 @@ class AstService:
             value = {"generationId": generation_id, "status": "generating", "phase": "preparing", "progress": 0,
                      "startedAt": _now(), "error": None}
             self._active[generation_id] = value
+            _LIVE_GENERATIONS.add(generation_id)
             self._save_index({**self._index(), **value, "currentVersionId": self._index().get("currentVersionId")})
             thread = threading.Thread(target=self._run_generation, args=(generation_id,), daemon=True,
                                       name=f"{generation_id}")
@@ -185,10 +180,13 @@ class AstService:
     def _run_generation(self, generation_id: str) -> None:
         started = time.monotonic()
         record = self._active[generation_id]
+        version_root: Path | None = None
         try:
             record.update(phase="preparing", progress=10)
             _, repository_sources, _, _ = resolve_project_sources(self.project_config)
-            source_stamp = _source_stamp(repository_sources)
+            stamp_value = _source_stamp(repositories=repository_sources,
+                                        cache_path=self.root / "source-stamp-cache.json")
+            version_id, version_root = self._allocate_version_root()
             with tempfile.TemporaryDirectory(prefix="ast-generation-") as folder:
                 inputs = Path(folder) / "inputs"
                 inputs.mkdir()
@@ -199,14 +197,8 @@ class AstService:
                     shutil.copytree(source, inputs / name,
                                     ignore=shutil.ignore_patterns(".git", "node_modules", "target", ".venv", "__pycache__"))
                     record.update(phase=f"parsing:{repository_id}", progress=min(75, 20 + number * 15))
-                documents = generate_ast_documents(inputs, repository_names)
-            version_id = f"ast-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            version_root = self.versions_root / version_id
-            number = 1
-            while version_root.exists():
-                number += 1
-                version_id = f"ast-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{number}"
-                version_root = self.versions_root / version_id
+                documents = generate_ast_documents(inputs, repository_names,
+                                                   db_path=version_root / "index.db")
             document_root = version_root / "documents"
             for name, content in documents.items():
                 target = document_root / name
@@ -214,9 +206,9 @@ class AstService:
                 target.write_text(content, encoding="utf-8")
             metadata = {
                 "projectId": self.project_id, "versionId": version_id, "generatedAt": _now(),
-                "sourceStamp": source_stamp, "sourceRepositories": source_stamp["repositories"],
+                "sourceStamp": stamp_value, "sourceRepositories": stamp_value["repositories"],
                 "documentCount": len(documents), "generationSeconds": round(time.monotonic() - started, 3),
-                "generatorVersion": 2,
+                "generatorVersion": 3, "indexDb": "index.db",
             }
             _write_json(version_root / "metadata.json", metadata)
             index = self._index()
@@ -227,9 +219,28 @@ class AstService:
                           versionId=version_id, finishedAt=_now(), metadata=metadata)
         except Exception as exc:
             logger.exception("AST 生成失败")
+            if version_root is not None:
+                shutil.rmtree(version_root, ignore_errors=True)
             record.update(status="failed", phase="failed", progress=100, error=str(exc), finishedAt=_now())
             self._save_index({**self._index(), "status": "failed", "generationId": generation_id,
                               "error": str(exc), "updatedAt": _now()})
         finally:
+            _LIVE_GENERATIONS.discard(generation_id)
             with self._lock:
                 self._active.pop(generation_id, None)
+
+    def _allocate_version_root(self) -> tuple[str, Path]:
+        """Reserve one unused version directory before generation starts.
+
+        Allocating first lets the persisted index database be written straight
+        into its final version directory instead of a temporary location.
+        """
+        version_id = f"ast-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        version_root = self.versions_root / version_id
+        number = 1
+        while version_root.exists():
+            number += 1
+            version_id = f"ast-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{number}"
+            version_root = self.versions_root / version_id
+        version_root.mkdir(parents=True, exist_ok=True)
+        return version_id, version_root

@@ -1,5 +1,6 @@
 .venv/
 .venv-windows/
+.venv-offline/
 .data/
 frontend/node_modules/
 frontend/dist/
@@ -16,6 +17,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+offline-packages/*.zip
 
 # IDE / tooling
 .idea/

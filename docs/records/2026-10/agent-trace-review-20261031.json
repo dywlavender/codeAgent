@@ -1,0 +1,863 @@
+{
+  "reviewSource": "assistant_trace_and_source_check",
+  "humanReviewed": false,
+  "newModelCalls": 0,
+  "caseId": "v2-channel-display",
+  "runs": [
+    {
+      "sourceRun": "langchain-files-channel-20261031.json",
+      "projectId": "complex-loan-validation",
+      "usage": {
+        "input_tokens": 49237,
+        "output_tokens": 438,
+        "total_tokens": 49675,
+        "reportedModels": [
+          "qwen3.8-27b"
+        ],
+        "requestedModel": "qwen3.8-27b",
+        "modelCalls": 8,
+        "retrieval": "files",
+        "stopReason": "budget",
+        "durationSeconds": 28.494
+      },
+      "steps": [
+        {
+          "round": 1,
+          "callSequence": 3,
+          "tool": "Glob",
+          "input": {
+            "pattern": "**/*.md",
+            "limit": 50
+          },
+          "resultSequence": 5,
+          "recordedOutputChars": 1891,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": [
+            "knowledge/business-context/README.md",
+            "knowledge/business-context/boundaries.md",
+            "knowledge/business-context/cross-system.md",
+            "knowledge/business-context/exceptions.md",
+            "knowledge/business-context/terminology.md",
+            "requirements/产品规则.md",
+            "requirements/接口与状态约定.md",
+            "requirements/系统职责.md",
+            "repos/fineract-repo/APACHE_LICENSETEXT.md",
+            "repos/fineract-repo/CHANGELOG.md",
+            "repos/fineract-repo/CODE_OF_CONDUCT.md",
+            "repos/fineract-repo/CONTRIBUTING.md",
+            "repos/fineract-repo/README.md",
+            "repos/fineract-repo/STATIC_WEAVING.md",
+            "repos/fineract-repo/fineract-client/README.md",
+            "repos/fineract-repo/fineract-command/README.md",
+            "repos/fineract-repo/fineract-command/REFACTORING.md",
+            "repos/fineract-repo/fineract-db/multi-tenant-demo-backups/bare-bones-demo/README.md",
+            "repos/fineract-repo/fineract-db/multi-tenant-demo-backups/ceda/README.md",
+            "repos/fineract-repo/fineract-db/multi-tenant-demo-backups/default-demo/README.md",
+            "repos/fineract-repo/fineract-db/multi-tenant-demo-backups/latam-demo/README.md",
+            "repos/fineract-repo/fineract-progressive-loan-embeddable-schedule-generator/README.md",
+            "repos/fineract-repo/integration-tests/README.md",
+            "repos/mifos-web-repo/CONTRIBUTING.md",
+            "repos/mifos-web-repo/README.md",
+            "repos/mifos-web-repo/docs/analytics.md",
+            "repos/mifos-web-repo/docs/backend-proxy.md",
+            "repos/mifos-web-repo/docs/corporate-proxy.md",
+            "repos/mifos-web-repo/docs/i18n.md",
+            "repos/mifos-web-repo/docs/routing.md",
+            "repos/mifos-web-repo/docs/updating.md",
+            "repos/mifos-web-repo/docs/coding-guides/angular.md",
+            "repos/mifos-web-repo/docs/coding-guides/html.md",
+            "repos/mifos-web-repo/docs/coding-guides/sass.md",
+            "repos/mifos-web-repo/docs/coding-guides/typescript.md",
+            "repos/mifos-web-repo/docs/coding-guides/unit-tests.md",
+            "repos/mifos-web-repo/e2e/testRigor/README.md",
+            "repos/mifos-web-repo/src/app/core/error-handler/README.md"
+          ]
+        },
+        {
+          "round": 1,
+          "callSequence": 4,
+          "tool": "Grep",
+          "input": {
+            "pattern": "处理中",
+            "limit": 40
+          },
+          "resultSequence": 6,
+          "recordedOutputChars": 1269,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 6,
+          "firstMatches": [
+            {
+              "path": "knowledge/business-context/terminology.md",
+              "line": 15,
+              "text": "## 处理中"
+            },
+            {
+              "path": "knowledge/business-context/terminology.md",
+              "line": 17,
+              "text": "渠道展示的“处理中”可能对应中台多个尚未完成的内部状态。看到页面仍显示处理中，不能直接推断外部付款失败或业务单已经终止；应先确认中台状态和是否已完成后续入账。"
+            },
+            {
+              "path": "requirements/接口与状态约定.md",
+              "line": 44,
+              "text": "`GET /api/drawdown/options?channelId=&creditId=`、`POST /api/drawdowns?channelId=`、`GET /api/drawdowns/{channelRefNo}`、`POST /api/repayments?channelId=`、`GET /api/repayments/{channelRefNo}`。渠道错误码：`CHANNEL_AMOUNT_LIMIT`、`CHANNEL_TERM_LIMIT`、`PRODUCT_NOT_OPEN`。展示状态映射：中台 `PROCESSING/EXTERNAL_SUCCESS_BOOKING_PENDING` 等处理中状态对外统一为 `PROCESSING`，原始状态保留在渠道申请单。"
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "callSequence": 8,
+          "tool": "Read",
+          "input": {
+            "path": "knowledge/business-context/terminology.md"
+          },
+          "resultSequence": 11,
+          "recordedOutputChars": 706,
+          "recordedOutputParseable": true,
+          "path": "knowledge/business-context/terminology.md",
+          "lineStart": 1,
+          "lineEnd": 19,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 2,
+          "callSequence": 9,
+          "tool": "Read",
+          "input": {
+            "path": "requirements/接口与状态约定.md"
+          },
+          "resultSequence": 10,
+          "recordedOutputChars": 3367,
+          "recordedOutputParseable": true,
+          "path": "requirements/接口与状态约定.md",
+          "lineStart": 1,
+          "lineEnd": 51,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 3,
+          "callSequence": 13,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+          },
+          "resultSequence": 14,
+          "recordedOutputChars": 9442,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 1,
+          "lineEnd": 160,
+          "truncated": true,
+          "nextLine": 161
+        },
+        {
+          "round": 4,
+          "callSequence": 16,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "offset": 160
+          },
+          "resultSequence": 17,
+          "recordedOutputChars": 4027,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 160,
+          "lineEnd": 226,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 5,
+          "callSequence": 19,
+          "tool": "Glob",
+          "input": {
+            "pattern": "repos/middle-service-repo/**/*.java",
+            "limit": 100
+          },
+          "resultSequence": 20,
+          "recordedOutputChars": 33,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": []
+        },
+        {
+          "round": 6,
+          "callSequence": 22,
+          "tool": "Glob",
+          "input": {
+            "pattern": "repos/*",
+            "limit": 100
+          },
+          "resultSequence": 23,
+          "recordedOutputChars": 33,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": []
+        },
+        {
+          "round": 7,
+          "callSequence": 25,
+          "tool": "Glob",
+          "input": {
+            "pattern": "**/MiddleClient.java"
+          },
+          "resultSequence": 27,
+          "recordedOutputChars": 109,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": [
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java"
+          ]
+        },
+        {
+          "round": 7,
+          "callSequence": 26,
+          "tool": "Grep",
+          "input": {
+            "pattern": "EXTERNAL_SUCCESS_BOOKING_PENDING",
+            "limit": 40
+          },
+          "resultSequence": 28,
+          "recordedOutputChars": 1521,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 6,
+          "firstMatches": [
+            {
+              "path": "requirements/接口与状态约定.md",
+              "line": 39,
+              "text": "- 提款业务单：`PROCESSING → EXTERNAL_SUCCESS_BOOKING_PENDING → SUCCESS | FAILED`（提交前可 `CANCELLED`）；付款指令状态 `TO_SUBMIT/PROCESSING/SUCCESS/FAILED/RESULT_UNCONFIRMED`；入账状态 `TO_BOOK/BOOKED/RETRY_NEEDED`。"
+            },
+            {
+              "path": "requirements/接口与状态约定.md",
+              "line": 44,
+              "text": "`GET /api/drawdown/options?channelId=&creditId=`、`POST /api/drawdowns?channelId=`、`GET /api/drawdowns/{channelRefNo}`、`POST /api/repayments?channelId=`、`GET /api/repayments/{channelRefNo}`。渠道错误码：`CHANNEL_AMOUNT_LIMIT`、`CHANNEL_TERM_LIMIT`、`PRODUCT_NOT_OPEN`。展示状态映射：中台 `PROCESSING/EXTERNAL_SUCCESS_BOOKING_PENDING` 等处理中状态对外统一为 `PROCESSING`，原始状态保留在渠道申请单。"
+            },
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+              "line": 195,
+              "text": "     * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态"
+            }
+          ]
+        },
+        {
+          "round": 8,
+          "callSequence": 30,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java"
+          },
+          "resultSequence": 31,
+          "recordedOutputChars": 3766,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java",
+          "lineStart": 1,
+          "lineEnd": 75,
+          "truncated": false,
+          "nextLine": null
+        }
+      ],
+      "hasIntermediateModelTextInEvents": false,
+      "hasRequestSnapshots": false
+    },
+    {
+      "sourceRun": "langchain-hybrid-channel-20261031.json",
+      "projectId": "complex-loan-validation",
+      "usage": {
+        "input_tokens": 89733,
+        "output_tokens": 490,
+        "total_tokens": 90223,
+        "reportedModels": [
+          "qwen3.8-27b"
+        ],
+        "requestedModel": "qwen3.8-27b",
+        "modelCalls": 8,
+        "retrieval": "hybrid",
+        "stopReason": "budget",
+        "durationSeconds": 40.454
+      },
+      "steps": [
+        {
+          "round": 1,
+          "callSequence": 3,
+          "tool": "SearchCode",
+          "input": {
+            "question": "提款单 处理中 状态 渠道接口 入账失败"
+          },
+          "resultSequence": 5,
+          "recordedOutputChars": 10000,
+          "recordedOutputParseable": false
+        },
+        {
+          "round": 1,
+          "callSequence": 4,
+          "tool": "Grep",
+          "input": {
+            "pattern": "处理中",
+            "limit": 60
+          },
+          "resultSequence": 6,
+          "recordedOutputChars": 1269,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 6,
+          "firstMatches": [
+            {
+              "path": "knowledge/business-context/terminology.md",
+              "line": 15,
+              "text": "## 处理中"
+            },
+            {
+              "path": "knowledge/business-context/terminology.md",
+              "line": 17,
+              "text": "渠道展示的“处理中”可能对应中台多个尚未完成的内部状态。看到页面仍显示处理中，不能直接推断外部付款失败或业务单已经终止；应先确认中台状态和是否已完成后续入账。"
+            },
+            {
+              "path": "requirements/接口与状态约定.md",
+              "line": 44,
+              "text": "`GET /api/drawdown/options?channelId=&creditId=`、`POST /api/drawdowns?channelId=`、`GET /api/drawdowns/{channelRefNo}`、`POST /api/repayments?channelId=`、`GET /api/repayments/{channelRefNo}`。渠道错误码：`CHANNEL_AMOUNT_LIMIT`、`CHANNEL_TERM_LIMIT`、`PRODUCT_NOT_OPEN`。展示状态映射：中台 `PROCESSING/EXTERNAL_SUCCESS_BOOKING_PENDING` 等处理中状态对外统一为 `PROCESSING`，原始状态保留在渠道申请单。"
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "callSequence": 8,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+          },
+          "resultSequence": 9,
+          "recordedOutputChars": 9442,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 1,
+          "lineEnd": 160,
+          "truncated": true,
+          "nextLine": 161
+        },
+        {
+          "round": 3,
+          "callSequence": 11,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "offset": 160
+          },
+          "resultSequence": 12,
+          "recordedOutputChars": 4027,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 160,
+          "lineEnd": 226,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 4,
+          "callSequence": 14,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java"
+          },
+          "resultSequence": 15,
+          "recordedOutputChars": 4120,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java",
+          "lineStart": 1,
+          "lineEnd": 77,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 5,
+          "callSequence": 17,
+          "tool": "Grep",
+          "input": {
+            "pattern": "public Map<String, Object> detail|paymentStatus|bookingStatus|payments|booking",
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java"
+          },
+          "resultSequence": 18,
+          "recordedOutputChars": 4563,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 23,
+          "firstMatches": [
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+              "line": 146,
+              "text": "        order.setPaymentStatus(DrawdownOrder.PaymentStatus.TO_SUBMIT);"
+            },
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+              "line": 147,
+              "text": "        order.setBookingStatus(DrawdownOrder.BookingStatus.NONE);"
+            },
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+              "line": 148,
+              "text": "        order.setBookingRetryCount(0);"
+            }
+          ]
+        },
+        {
+          "round": 6,
+          "callSequence": 20,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "offset": 255,
+            "limit": 20
+          },
+          "resultSequence": 21,
+          "recordedOutputChars": 1711,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 255,
+          "lineEnd": 274,
+          "truncated": true,
+          "nextLine": 275
+        },
+        {
+          "round": 7,
+          "callSequence": 23,
+          "tool": "Grep",
+          "input": {
+            "pattern": "displayStatus|middleRawStatus|PROCESSING",
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel"
+          },
+          "resultSequence": 24,
+          "recordedOutputChars": 4610,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 24,
+          "firstMatches": [
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecord.java",
+              "line": 23,
+              "text": "    private String displayStatus;      // 对外展示状态（合并视图）"
+            },
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecord.java",
+              "line": 24,
+              "text": "    private String middleRawStatus;    // 中台原始状态（追踪用）"
+            },
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecord.java",
+              "line": 37,
+              "text": "    public String getDisplayStatus() { return displayStatus; }"
+            }
+          ]
+        },
+        {
+          "round": 8,
+          "callSequence": 26,
+          "tool": "Grep",
+          "input": {
+            "pattern": "displayStatus|middleRawStatus|PROCESSING|处理中",
+            "path": "repos/mifos-web-repo",
+            "limit": "40"
+          },
+          "resultSequence": 27,
+          "recordedOutputChars": 9038,
+          "recordedOutputParseable": true,
+          "truncated": true,
+          "matchCount": 40,
+          "firstMatches": [
+            {
+              "path": "repos/mifos-web-repo/src/app/core/error-handler/README.md",
+              "line": 152,
+              "text": "      this.errorHandler.showSuccess('Processing complete!');"
+            },
+            {
+              "path": "repos/mifos-web-repo/src/app/core/error-handler/README.md",
+              "line": 159,
+              "text": "        this.errorHandler.handleError(error, 'Data processing');"
+            },
+            {
+              "path": "repos/mifos-web-repo/src/app/core/utils/datatables.ts",
+              "line": 186,
+              "text": "      // Ensure parts[1] exists and is not empty before processing"
+            }
+          ]
+        }
+      ],
+      "hasIntermediateModelTextInEvents": false,
+      "hasRequestSnapshots": false
+    },
+    {
+      "sourceRun": "langchain-v2-files-channel-20261031.json",
+      "projectId": "complex-loan-validation",
+      "usage": {
+        "input_tokens": 44152,
+        "output_tokens": 2330,
+        "total_tokens": 46482,
+        "reportedModels": [
+          "qwen3.8-27b"
+        ],
+        "requestedModel": "qwen3.8-27b",
+        "modelCalls": 8,
+        "agentVersion": 2,
+        "separateFinalization": true,
+        "retrieval": "files",
+        "stopReason": null,
+        "durationSeconds": 61.39
+      },
+      "steps": [
+        {
+          "round": 1,
+          "callSequence": 3,
+          "tool": "Glob",
+          "input": {
+            "pattern": "knowledge/business-context/**/*"
+          },
+          "resultSequence": 6,
+          "recordedOutputChars": 33,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": []
+        },
+        {
+          "round": 1,
+          "callSequence": 4,
+          "tool": "Grep",
+          "input": {
+            "pattern": "处理中",
+            "path": "repos/channel-service-repo",
+            "limit": 40
+          },
+          "resultSequence": 5,
+          "recordedOutputChars": 436,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 2,
+          "firstMatches": [
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+              "line": 195,
+              "text": "     * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态"
+            },
+            {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+              "line": 201,
+              "text": "            default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态"
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "callSequence": 8,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+          },
+          "resultSequence": 9,
+          "recordedOutputChars": 9442,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 1,
+          "lineEnd": 160,
+          "truncated": true,
+          "nextLine": 161
+        },
+        {
+          "round": 3,
+          "callSequence": 11,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "offset": 160
+          },
+          "resultSequence": 12,
+          "recordedOutputChars": 4027,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 160,
+          "lineEnd": 226,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 4,
+          "callSequence": 14,
+          "tool": "Grep",
+          "input": {
+            "pattern": "EXTERNAL_SUCCESS_BOOKING_PENDING|BOOKING",
+            "path": "repos/loan-middle-repo",
+            "limit": 40
+          },
+          "resultSequence": 15,
+          "recordedOutputChars": 6204,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 32,
+          "firstMatches": [
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java",
+              "line": 18,
+              "text": "        BOOKING_RETRY_EXHAUSTED(\"入账重试次数已用尽，需人工处理\"),"
+            },
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+              "line": 40,
+              "text": "    private final int bookingRetryMax;"
+            },
+            {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+              "line": 46,
+              "text": "                            @Value(\"${compensation.booking-retry-max:5}\") int bookingRetryMax) {"
+            }
+          ]
+        },
+        {
+          "round": 5,
+          "callSequence": 17,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "offset": 180,
+            "limit": 100
+          },
+          "resultSequence": 18,
+          "recordedOutputChars": 5682,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 180,
+          "lineEnd": 279,
+          "truncated": true,
+          "nextLine": 280
+        },
+        {
+          "round": 6,
+          "callSequence": 20,
+          "tool": "Grep",
+          "input": {
+            "pattern": "drawdownDetail|middleStatus|displayStatus",
+            "path": "repos/mifos-web-repo",
+            "limit": 30
+          },
+          "resultSequence": 21,
+          "recordedOutputChars": 35,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "matchCount": 0,
+          "firstMatches": []
+        },
+        {
+          "round": 7,
+          "callSequence": 23,
+          "tool": "Grep",
+          "input": {
+            "pattern": "PROCESSING|displayStatus|middleStatus",
+            "path": "repos/mifos-web-repo",
+            "limit": 30
+          },
+          "resultSequence": 24,
+          "recordedOutputChars": 6762,
+          "recordedOutputParseable": true,
+          "truncated": true,
+          "matchCount": 30,
+          "firstMatches": [
+            {
+              "path": "repos/mifos-web-repo/src/app/core/error-handler/README.md",
+              "line": 152,
+              "text": "      this.errorHandler.showSuccess('Processing complete!');"
+            },
+            {
+              "path": "repos/mifos-web-repo/src/app/core/error-handler/README.md",
+              "line": 159,
+              "text": "        this.errorHandler.handleError(error, 'Data processing');"
+            },
+            {
+              "path": "repos/mifos-web-repo/src/app/core/utils/datatables.ts",
+              "line": 186,
+              "text": "      // Ensure parts[1] exists and is not empty before processing"
+            }
+          ]
+        },
+        {
+          "round": 8,
+          "phase": "separate_no_tool_finalization",
+          "sequence": 25
+        }
+      ],
+      "hasIntermediateModelTextInEvents": false,
+      "hasRequestSnapshots": false
+    },
+    {
+      "sourceRun": "langchain-v2-hybrid-channel-20261031.json",
+      "projectId": "complex-loan-validation",
+      "usage": {
+        "input_tokens": 92866,
+        "output_tokens": 1861,
+        "total_tokens": 94727,
+        "reportedModels": [
+          "qwen3.8-27b"
+        ],
+        "requestedModel": "qwen3.8-27b",
+        "modelCalls": 8,
+        "agentVersion": 2,
+        "separateFinalization": true,
+        "retrieval": "hybrid",
+        "stopReason": null,
+        "durationSeconds": 66.275
+      },
+      "steps": [
+        {
+          "round": 1,
+          "callSequence": 3,
+          "tool": "SearchCode",
+          "input": {
+            "question": "提款单 处理中 状态 渠道接口 外部结果 中台入账失败"
+          },
+          "resultSequence": 5,
+          "recordedOutputChars": 15643,
+          "recordedOutputParseable": true,
+          "rerankApplied": false,
+          "rerankReason": "latency_budget",
+          "chars": 11998,
+          "lines": 217
+        },
+        {
+          "round": 1,
+          "callSequence": 4,
+          "tool": "Glob",
+          "input": {
+            "pattern": "knowledge/business-context/**/*"
+          },
+          "resultSequence": 6,
+          "recordedOutputChars": 33,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": []
+        },
+        {
+          "round": 2,
+          "callSequence": 8,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+          },
+          "resultSequence": 9,
+          "recordedOutputChars": 9442,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 1,
+          "lineEnd": 160,
+          "truncated": true,
+          "nextLine": 161
+        },
+        {
+          "round": 3,
+          "callSequence": 11,
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "offset": 160
+          },
+          "resultSequence": 12,
+          "recordedOutputChars": 4027,
+          "recordedOutputParseable": true,
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 160,
+          "lineEnd": 226,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 4,
+          "callSequence": 14,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java"
+          },
+          "resultSequence": 15,
+          "recordedOutputChars": 4120,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java",
+          "lineStart": 1,
+          "lineEnd": 77,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 5,
+          "callSequence": 17,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java"
+          },
+          "resultSequence": 18,
+          "recordedOutputChars": 8951,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 1,
+          "lineEnd": 160,
+          "truncated": true,
+          "nextLine": 161
+        },
+        {
+          "round": 6,
+          "callSequence": 20,
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "offset": 160
+          },
+          "resultSequence": 21,
+          "recordedOutputChars": 7325,
+          "recordedOutputParseable": true,
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 160,
+          "lineEnd": 295,
+          "truncated": false,
+          "nextLine": null
+        },
+        {
+          "round": 7,
+          "callSequence": 23,
+          "tool": "Glob",
+          "input": {
+            "pattern": "repos/channel-service-repo/src/main/java/com/rsd/channel/*.java"
+          },
+          "resultSequence": 24,
+          "recordedOutputChars": 806,
+          "recordedOutputParseable": true,
+          "truncated": false,
+          "paths": [
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplication.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecord.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecordRepository.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelProductRule.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelProductRuleRepository.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java"
+          ]
+        },
+        {
+          "round": 8,
+          "phase": "separate_no_tool_finalization",
+          "sequence": 25
+        }
+      ],
+      "hasIntermediateModelTextInEvents": false,
+      "hasRequestSnapshots": false
+    }
+  ],
+  "localReproductions": {
+    "globRecursivePattern": "knowledge/business-context/**/*",
+    "existingDirectChildFile": "knowledge/business-context/terminology.md",
+    "recursivePatternResult": [],
+    "directPatternResult": [
+      "knowledge/business-context/terminology.md"
+    ],
+    "grepCaseSensitiveControlAvailable": false,
+    "grepPROCESSINGMatchesLowercaseProse": true
+  },
+  "assessmentCorrection": "不能仅凭“不能直接区分”标题判错；接口数据能力、显式业务原因字段和页面体验须分开。缺字段断言、未核实前端收益与不完整调用连接是可核对的问题。"
+}

@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AST 资源浏览器 · 设计稿（2026-09-10）</title>
+<style>
+:root {
+  color-scheme: dark;
+  --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-code: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "Roboto Mono", Consolas, monospace;
+  --color-canvas: #151918;
+  --color-surface: #181d1b;
+  --color-surface-raised: #202622;
+  --color-surface-muted: #29312d;
+  --color-well: #141918;
+  --color-text: #e8eeea;
+  --color-text-secondary: #a7b1ab;
+  --color-text-faint: #7d8982;
+  --color-border: #303a35;
+  --color-border-strong: #455149;
+  --color-brand: #63bd99;
+  --color-brand-strong: #8bd5b4;
+  --color-brand-soft: #1d382c;
+  --color-code: #8ebada;
+  --color-code-soft: #213543;
+  --color-requirement: #dfb665;
+  --color-requirement-soft: #3b301b;
+  --color-danger: #ed8b86;
+  --color-danger-soft: #422826;
+  --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px;
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 42%);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-canvas: #f6f7f6; --color-surface: #fcfcfb; --color-surface-raised: #ffffff;
+  --color-surface-muted: #eef0ef; --color-well: #f8f9f8;
+  --color-text: #202622; --color-text-secondary: #59645e; --color-text-faint: #737e78;
+  --color-border: #dfe3e1; --color-border-strong: #c7ceca;
+  --color-brand: #2f7566; --color-brand-strong: #20584d; --color-brand-soft: #e4f0eb;
+  --color-code: #3d6f94; --color-code-soft: #e9f1f6;
+  --color-requirement: #8b621e; --color-requirement-soft: #faf1df;
+  --color-danger: #ad4944; --color-danger-soft: #fbe9e7;
+  --shadow-2: 0 10px 28px rgb(32 38 34 / 10%);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--color-canvas); color: var(--color-text);
+  font: 14px/1.65 var(--font-body); -webkit-font-smoothing: antialiased; }
+
+.spec-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px;
+  padding: 9px 20px; background: #202622; color: #dfe6e1; font-size: 12.5px; border-bottom: 1px solid #2c3631; }
+:root[data-theme="light"] .spec-bar { background: #26251f; color: #f0f2f1; border-bottom-color: #26251f; }
+.spec-bar b { font-weight: 600; }
+.spec-bar .spacer { flex: 1; }
+.spec-bar button { font: 500 12px var(--font-body); padding: 4px 11px; border-radius: 7px; cursor: pointer;
+  border: 1px solid #3b463f; background: transparent; color: inherit; }
+.spec-bar button:hover { background: rgba(255,255,255,.08); }
+
+.page { max-width: 1180px; margin: 0 auto; padding: 26px 22px 90px; }
+.screen-label { display: flex; align-items: center; gap: 10px; margin: 0 0 14px;
+  font: 600 11px var(--font-code); letter-spacing: .1em; color: var(--color-text-faint); text-transform: uppercase; }
+.screen-label::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+.mock-note { font-size: 12.5px; color: var(--color-text-secondary); margin: 0 0 16px; }
+
+/* ============ 被设计的界面本体 ============ */
+.app { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden;
+  background: var(--color-surface); box-shadow: var(--shadow-2); }
+
+.topbar { display: flex; align-items: center; gap: 14px; padding: 13px 18px;
+  background: var(--color-surface-raised); border-bottom: 1px solid var(--color-border); flex-wrap: wrap; }
+.topbar h1 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+.topbar .ver { font: 12px var(--font-code); color: var(--color-text-faint); }
+.topbar .spacer { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 550; border: 1px solid transparent; }
+.chip.ok { color: var(--color-brand); background: var(--color-brand-soft); }
+.chip.warn { color: var(--color-requirement); background: var(--color-requirement-soft); }
+.chip.dot-ok::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.btn { font: 500 12.5px var(--font-body); padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--color-border-strong); background: var(--color-surface-raised); color: var(--color-text); }
+.btn.primary { background: var(--color-brand); border-color: var(--color-brand); color: #0d2118; font-weight: 600; }
+:root[data-theme="light"] .btn.primary { color: #f7fffb; }
+.btn:hover { border-color: var(--color-brand); }
+
+.stalebar { display: flex; align-items: center; gap: 9px; padding: 8px 18px; font-size: 12.5px;
+  color: var(--color-requirement); background: var(--color-requirement-soft); border-bottom: 1px solid var(--color-border); }
+
+.searchbar { display: flex; align-items: center; gap: 8px; padding: 9px 18px;
+  background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.searchbar input { flex: 1; font: 12.5px var(--font-body); padding: 6px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong); background: var(--color-well); color: var(--color-text); outline: none; }
+.searchbar input:focus { border-color: var(--color-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 20%, transparent); }
+.searchbar .hint { font-size: 11.5px; color: var(--color-text-faint); font-family: var(--font-code); }
+
+.cols { display: grid; grid-template-columns: 208px 320px 1fr; min-height: 560px; }
+.col { border-right: 1px solid var(--color-border); overflow: auto; max-height: 560px; }
+.col:last-child { border-right: none; }
+.col-h { position: sticky; top: 0; z-index: 2; padding: 9px 14px; font: 600 11px var(--font-code);
+  letter-spacing: .08em; color: var(--color-text-faint); text-transform: uppercase;
+  background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+
+/* 树 */
+.node { display: flex; align-items: center; gap: 7px; padding: 4px 12px; cursor: pointer;
+  font-size: 12.5px; white-space: nowrap; border-left: 2px solid transparent; }
+.node:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
+.node.sel { background: var(--color-brand-soft); border-left-color: var(--color-brand); }
+.node .caret { width: 11px; color: var(--color-text-faint); font-size: 9px; flex: none; text-align: center; }
+.node .caret.blank { visibility: hidden; }
+.node .name { overflow: hidden; text-overflow: ellipsis; }
+.node .name.mono { font-family: var(--font-code); font-size: 12px; }
+.node .tail { margin-left: auto; font: 10.5px var(--font-code); color: var(--color-text-faint); }
+.node.lv1 { padding-left: 12px; }
+.node.lv2 { padding-left: 26px; }
+.node.lv3 { padding-left: 40px; }
+.node.lv4 { padding-left: 54px; }
+.node .ico { width: 12px; text-align: center; font-size: 10px; color: var(--color-text-faint); flex: none; }
+
+.kind { font: 600 9.5px var(--font-code); letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; flex: none; }
+.kind.CLASS { color: var(--color-brand); background: var(--color-brand-soft); }
+.kind.INTERFACE { color: var(--color-code); background: var(--color-code-soft); }
+.kind.ENUM, .kind.RECORD { color: var(--color-requirement); background: var(--color-requirement-soft); }
+.kind.METHOD, .kind.FIELD, .kind.CONSTRUCTOR { color: var(--color-text-secondary); background: var(--color-surface-muted); }
+.kind.CONSTRUCTOR { font-style: italic; }
+.kind.API { color: var(--color-code); background: var(--color-code-soft); }
+
+.fact { font: 600 9.5px var(--font-code); padding: 1px 5px; border-radius: 4px;
+  color: var(--color-code); background: var(--color-code-soft); }
+.fact.table { color: var(--color-requirement); background: var(--color-requirement-soft); }
+
+/* 详情面板 */
+.detail { padding: 16px 18px 22px; }
+.detail .path { font: 11.5px var(--font-code); color: var(--color-text-faint); word-break: break-all; }
+.detail h2 { margin: 6px 0 2px; font-size: 15px; font-weight: 600; font-family: var(--font-code); }
+.detail .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 9px 0 0; }
+.detail .sect-h { margin: 18px 0 6px; font: 600 11px var(--font-code); letter-spacing: .08em;
+  color: var(--color-text-faint); text-transform: uppercase; }
+.factlist { margin: 0; padding: 0; list-style: none; }
+.factlist li { display: flex; gap: 9px; align-items: baseline; padding: 4px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--color-border); }
+.factlist li .t { font-family: var(--font-code); color: var(--color-text-secondary); font-size: 12px; }
+.factlist li .l { margin-left: auto; font: 11px var(--font-code); color: var(--color-text-faint); flex: none; }
+.empty { color: var(--color-text-faint); font-size: 12.5px; padding: 24px 18px; }
+
+/* 代码块 */
+.code { margin-top: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--color-well); }
+.code-head { display: flex; align-items: center; gap: 9px; padding: 7px 12px;
+  background: var(--color-surface-muted); border-bottom: 1px solid var(--color-border); font-size: 11.5px; }
+.code-head .f { font-family: var(--font-code); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-head .spacer { flex: 1; }
+.code-head .r { font: 11px var(--font-code); color: var(--color-text-faint); flex: none; }
+pre.code-body { margin: 0; padding: 8px 0; max-height: 300px; overflow: auto;
+  font: 12px/1.62 var(--font-code); }
+.crow { display: flex; }
+.crow .ln { flex: none; width: 46px; text-align: right; padding-right: 13px;
+  color: var(--color-text-faint); user-select: none; opacity: .65; }
+.crow .cd { flex: 1; white-space: pre; padding-right: 14px; }
+.crow.hit { background: color-mix(in srgb, var(--color-brand) 13%, transparent); }
+.tok-kw { color: var(--color-brand); }
+.tok-ty { color: var(--color-code); }
+.tok-st { color: var(--color-requirement); }
+.tok-cm { color: var(--color-text-faint); font-style: italic; }
+.tok-an { color: var(--color-requirement); }
+.tok-nm { color: var(--color-code); }
+.note { margin-top: 14px; padding: 10px 13px; border-radius: var(--radius-md); font-size: 12px;
+  color: var(--color-text-secondary); background: var(--color-surface-muted); border: 1px solid var(--color-border); }
+</style>
+</head>
+<body>
+
+<div class="spec-bar">
+  <b>设计稿 · AST 资源浏览器</b>
+  <span>三栏：仓库/包 → 类型与方法 → 详情与源码片段</span>
+  <span class="spacer"></span>
+  <button id="demoStale">演示「待更新」状态</button>
+  <button id="theme">切换浅色</button>
+</div>
+
+<div class="page">
+  <div class="screen-label">Screen 01 · AST 管理页（替换现有主体的结构浏览区）</div>
+  <p class="mock-note">
+    数据取自真实版本 <code>ast-20260909-223144</code> 的 <code>channel-service-repo</code>；源码与行号来自
+    <code>examples/channel-service</code>。树、折叠、搜索、行号跳转为可点击原型。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <h1>AST 管理 <span class="ver">ast-20260909-223144</span></h1>
+      <span class="chip ok dot-ok" id="stateChip">可用</span>
+      <span class="chip warn">结构资料仅用于定位</span>
+      <span class="spacer"></span>
+      <span class="ver">3 个仓库 · 8 份文档 · 生成耗时 4.6 秒</span>
+      <button class="btn">查看 Markdown</button>
+      <button class="btn primary">重新生成</button>
+    </div>
+
+    <div class="stalebar" id="stalebar" hidden>
+      ⚠ 源码发生变化，当前版本为待更新状态。按行号取到的源码可能已偏移，展示时已降级为不保证内容。
+    </div>
+
+    <div class="searchbar">
+      <input id="q" placeholder="搜索符号：名称、限定名或路径；支持 kind:METHOD 前缀">
+      <span class="hint" id="qcount"></span>
+    </div>
+
+    <div class="cols">
+      <div class="col" id="colRepo"><div class="col-h">仓库 / 包</div><div id="treeRepo"></div></div>
+      <div class="col" id="colType"><div class="col-h">类型 / 成员</div><div id="treeType"></div></div>
+      <div class="col" id="colDetail"><div class="col-h">详情</div><div id="detail"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- 真实结构数据（version ast-20260909-223144 / repo-1） ---------- */
+const SRC_SERVICE = [
+"package demo.channel.service;",
+"",
+"import demo.channel.client.LoanMiddleClient;",
+"import demo.channel.model.ContractSignRequest;",
+"import demo.channel.model.TaxAuthorizationRequest;",
+"import demo.channel.model.WithdrawApplyRequest;",
+"import org.springframework.stereotype.Service;",
+"",
+"@Service",
+"public class ChannelWithdrawService {",
+"    private final LoanMiddleClient loanMiddleClient;",
+"",
+"    public ChannelWithdrawService(LoanMiddleClient loanMiddleClient) {",
+"        this.loanMiddleClient = loanMiddleClient;",
+"    }",
+"",
+"    public Object queryLimit(String customerId) {",
+"        return loanMiddleClient.queryLimit(customerId);",
+"    }",
+"",
+"    public Object queryCoupons(String customerId, long amount) {",
+"        return loanMiddleClient.queryCoupons(customerId, amount);",
+"    }",
+"",
+"    public Object queryRepaymentMethods(String customerId) {",
+"        return loanMiddleClient.queryRepaymentMethods(customerId);",
+"    }",
+"",
+"    public Object queryRepaymentDates(String customerId) {",
+"        return loanMiddleClient.queryRepaymentDates(customerId);",
+"    }",
+"",
+"    public Object queryGuaranteeCompanies(String customerId) {",
+"        return loanMiddleClient.queryGuaranteeCompanies(customerId);",
+"    }",
+"",
+"    public Object queryBankCards(String customerId) {",
+"        return loanMiddleClient.queryBankCards(customerId);",
+"    }",
+"",
+"    public Object signContract(ContractSignRequest request) {",
+"        return loanMiddleClient.signContract(request);",
+"    }",
+"",
+"    public Object authorizeTax(TaxAuthorizationRequest request) {",
+"        return loanMiddleClient.authorizeTax(request);",
+"    }",
+"",
+"    public Object applyWithdraw(WithdrawApplyRequest request) {",
+"        return loanMiddleClient.applyWithdraw(request);",
+"    }",
+"}"];
+
+const SRC_CLIENT = [
+"package demo.channel.client;",
+"",
+"import demo.channel.model.ContractSignRequest;",
+"import demo.channel.model.TaxAuthorizationRequest;",
+"import demo.channel.model.WithdrawApplyRequest;",
+"import org.springframework.cloud.openfeign.FeignClient;",
+"import org.springframework.web.bind.annotation.GetMapping;",
+"import org.springframework.web.bind.annotation.PostMapping;",
+"import org.springframework.web.bind.annotation.RequestBody;",
+"import org.springframework.web.bind.annotation.RequestMapping;",
+"import org.springframework.web.bind.annotation.RequestParam;",
+"",
+"@FeignClient(name = \"loan-middle\")",
+"@RequestMapping(\"/middle/withdraw\")",
+"public interface LoanMiddleClient {",
+"    @GetMapping(\"/limit\")",
+"    Object queryLimit(@RequestParam String customerId);",
+"",
+"    @GetMapping(\"/coupons\")",
+"    Object queryCoupons(@RequestParam String customerId, @RequestParam long amount);",
+"",
+"    @GetMapping(\"/repayment-methods\")",
+"    Object queryRepaymentMethods(@RequestParam String customerId);",
+"",
+"    @GetMapping(\"/repayment-dates\")",
+"    Object queryRepaymentDates(@RequestParam String customerId);",
+"",
+"    @GetMapping(\"/guarantee-companies\")",
+"    Object queryGuaranteeCompanies(@RequestParam String customerId);",
+"",
+"    @GetMapping(\"/bank-cards\")",
+"    Object queryBankCards(@RequestParam String customerId);",
+"",
+"    @PostMapping(\"/contracts/sign\")",
+"    Object signContract(@RequestBody ContractSignRequest request);",
+"",
+"    @PostMapping(\"/tax-authorizations\")",
+"    Object authorizeTax(@RequestBody TaxAuthorizationRequest request);",
+"",
+"    @PostMapping(\"/apply\")",
+"    Object applyWithdraw(@RequestBody WithdrawApplyRequest request);",
+"}"];
+
+const P = "src/main/java/demo/channel/";
+/* 行号取自 ChannelWithdrawService.java 实际源码与 AST 分片中的方法清单 */
+const SET = {
+  "queryLimit":17, "queryCoupons":21, "queryRepaymentMethods":25, "queryRepaymentDates":29,
+  "queryGuaranteeCompanies":33, "queryBankCards":37, "signContract":41, "authorizeTax":45, "applyWithdraw":49
+};
+function serviceMethods(lines) {
+  return Object.keys(SET).map(function (name) {
+    var at = SET[name] - 1;
+    var body = lines[at].trim();
+    var text = /\((.*)\)/.exec(body) || [null, ""];
+    var params = (text[1] || "").split(",").filter(Boolean).map(function (s) { return s.trim(); });
+    return { kind: "METHOD", name: name, line: SET[name], params: params,
+             returns: "Object", calls: ["loanMiddleClient." + name + "()"], lineEnd: SET[name] + 2 };
+  });
+}
+function clientMethods(lines) {
+  var out = [], names = ["queryLimit","queryCoupons","queryRepaymentMethods","queryRepaymentDates",
+    "queryGuaranteeCompanies","queryBankCards","signContract","authorizeTax","applyWithdraw"];
+  /* 注解行号：tree-sitter 的方法节点起点包含 @GetMapping，索引与分片均记为 L16 起 */
+  var at = { "queryLimit":16, "queryCoupons":19, "queryRepaymentMethods":22, "queryRepaymentDates":25,
+    "queryGuaranteeCompanies":28, "queryBankCards":31, "signContract":34, "authorizeTax":37, "applyWithdraw":40 };
+  names.forEach(function (n, i) {
+    out.push({ kind: "API", name: n, line: at[n], lineStart: at[n],
+      http: (["signContract","authorizeTax","applyWithdraw"].indexOf(n) >= 0 ? "POST " : "GET ")
+        + ["/limit","/coupons","/repayment-methods","/repayment-dates","/guarantee-companies",
+           "/bank-cards","/contracts/sign","/tax-authorizations","/apply"][i],
+      params: [], lineEnd: at[n] + 1 });
+  });
+  return out;
+}
+
+const TREE = {
+  repository: { id: "channel-service-repo", snapshot: "repo-1", root: "src/main/java",
+                files: 6, symbols: 41 },
+  packages: [
+    { name: "demo.channel", types: [
+      { kind: "CLASS", name: "ChannelApplication", lineStart: 6, path: P + "ChannelApplication.java", lineEnd: 13,
+        members: [{ kind: "METHOD", name: "main", line: 10, params: ["String[] args"], returns: "void", lineEnd: 12 }] }
+    ]},
+    { name: "demo.channel.client", types: [
+      { kind: "INTERFACE", name: "LoanMiddleClient", lineStart: 13, path: P + "client/LoanMiddleClient.java", lineEnd: 42,
+        note: "13 行起含 @FeignClient / @RequestMapping 注解，与索引中的 line_start 一致",
+        members: clientMethods(SRC_CLIENT),
+        facts: [
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/limit", line: 16 },
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/coupons", line: 19 },
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/repayment-methods", line: 22 },
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/repayment-dates", line: 25 },
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/guarantee-companies", line: 28 },
+          { type: "RPC_CALL", subject: "GET", target: "/middle/withdraw/bank-cards", line: 31 },
+          { type: "RPC_CALL", subject: "POST", target: "/middle/withdraw/contracts/sign", line: 34 },
+          { type: "RPC_CALL", subject: "POST", target: "/middle/withdraw/tax-authorizations", line: 37 },
+          { type: "RPC_CALL", subject: "POST", target: "/middle/withdraw/apply", line: 40 }
+        ] }
+    ]},
+    { name: "demo.channel.controller", types: [
+      { kind: "CLASS", name: "ChannelWithdrawController", lineStart: 13, path: P + "controller/ChannelWithdrawController.java", lineEnd: 66,
+        members: [{ kind: "CONSTRUCTOR", name: "ChannelWithdrawController", line: 19, params: ["ChannelWithdrawService service"], returns: null, lineEnd: 21 }]
+          .concat(["queryLimit","queryCoupons","queryRepaymentMethods","queryRepaymentDates","queryGuaranteeCompanies","queryBankCards","signContract","authorizeTax","applyWithdraw"]
+            .map(function (n, i) {
+              return { kind: "API", name: n, line: [23,28,33,38,43,48,53,58,63][i],
+                       http: ["GET /api/withdraw/limit","GET /api/withdraw/coupons","GET /api/withdraw/repayment-methods",
+                              "GET /api/withdraw/repayment-dates","GET /api/withdraw/guarantee-companies","GET /api/withdraw/bank-cards",
+                              "POST /api/withdraw/contracts/sign","POST /api/withdraw/tax-authorizations","POST /api/withdraw/apply"][i],
+                       params: [], lineEnd: [23,28,33,38,43,48,53,58,63][i] + 2 };
+            })),
+        facts: [
+          { type: "HTTP_ENDPOINT", subject: "GET", target: "/api/withdraw/limit", line: 23 },
+          { type: "HTTP_ENDPOINT", subject: "POST", target: "/api/withdraw/apply", line: 63 }
+        ] }
+    ]},
+    { name: "demo.channel.model", types: [
+      { kind: "CLASS", name: "ContractSignRequest", lineStart: 3, path: P + "model/ContractSignRequest.java", lineEnd: 8,
+        note: "同一包下三个类型在 Markdown 分片里会重复输出三次 ## demo.channel.model（见评审文档缺口 5）", members: [] },
+      { kind: "CLASS", name: "TaxAuthorizationRequest", lineStart: 3, path: P + "model/TaxAuthorizationRequest.java", lineEnd: 8, members: [] },
+      { kind: "CLASS", name: "WithdrawApplyRequest", lineStart: 3, path: P + "model/WithdrawApplyRequest.java", lineEnd: 8, members: [] }
+    ]},
+    { name: "demo.channel.service", types: [
+      { kind: "CLASS", name: "ChannelWithdrawService", lineStart: 9, path: P + "service/ChannelWithdrawService.java", lineEnd: 52,
+        members: [{ kind: "CONSTRUCTOR", name: "ChannelWithdrawService", line: 13, params: ["LoanMiddleClient loanMiddleClient"], returns: null, lineEnd: 15 }]
+          .concat(serviceMethods(SRC_SERVICE)),
+        facts: [
+          { type: "CALL", subject: "queryLimit", target: "loanMiddleClient.queryLimit(customerId)", line: 18 },
+          { type: "CALL", subject: "applyWithdraw", target: "loanMiddleClient.applyWithdraw(request)", line: 50 },
+          { type: "WRITE_FIELD", subject: "loanMiddleClient", target: "this.loanMiddleClient", line: 14 }
+        ] }
+    ]}
+  ]
+};
+
+const SOURCES = {};
+SOURCES["repo-1/" + P + "service/ChannelWithdrawService.java"] = SRC_SERVICE;
+SOURCES["repo-1/" + P + "client/LoanMiddleClient.java"] = SRC_CLIENT;
+
+/* ---------- 语法高亮（轻量 Java tokenizer，逐行） ---------- */
+const KW = new Set(["package","import","public","private","protected","static","final","class","interface",
+  "enum","record","void","new","return","if","else","for","while","do","switch","case","break","continue",
+  "this","super","extends","implements","throws","throw","try","catch","finally","abstract","synchronized",
+  "boolean","byte","short","int","long","float","double","char","true","false","null","instanceof","default"]);
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function span(cls, text) { return '<span class="tok-' + cls + '">' + esc(text) + "</span>"; }
+function highlight(line) {
+  let out = "", i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (line.startsWith("//", i)) { out += span("cm", line.slice(i)); break; }
+    if (line.startsWith("/*", i)) {
+      const e = line.indexOf("*/", i + 2), end = e === -1 ? line.length : e + 2;
+      out += span("cm", line.slice(i, end)); i = end; continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== ch) { if (line[j] === "\\") j++; j++; }
+      const end = Math.min(j + 1, line.length);
+      out += span("st", line.slice(i, end)); i = end; continue;
+    }
+    if (ch === "@") {
+      const m = /^@[A-Za-z_$][\w$]*/.exec(line.slice(i));
+      if (m) { out += span("an", m[0]); i += m[0].length; continue; }
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      const w = /^[A-Za-z_$][\w$]*/.exec(line.slice(i))[0];
+      out += KW.has(w) ? span("kw", w) : (/^[A-Z]/.test(w) ? span("ty", w) : esc(w));
+      i += w.length; continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      const m = /^[0-9][\w.]*/.exec(line.slice(i))[0];
+      out += span("nm", m[0]); i += m.length; continue;
+    }
+    out += esc(ch); i++;
+  }
+  return out;
+}
+
+/* ---------- 状态 ---------- */
+const state = { pkg: TREE.packages[0].name, type: null, member: null, openPkgs: new Set(), filter: "" };
+TREE.packages.forEach(function (p) { state.openPkgs.add(p.name); });
+
+function allTypes() {
+  const out = [];
+  TREE.packages.forEach(function (p) {
+    p.types.forEach(function (t) { out.push({ pkg: p.name, type: t }); });
+  });
+  return out;
+}
+
+/* ---------- 渲染：左栏 ---------- */
+function renderRepo() {
+  const box = document.getElementById("treeRepo");
+  let html = '<div class="node lv1" data-repo="1"><span class="caret">▾</span><span class="ico">▣</span>'
+    + '<span class="name">' + esc(TREE.repository.id) + '</span><span class="tail">' + TREE.repository.snapshot + "</span></div>";
+  html += '<div class="node lv2"><span class="caret blank">·</span><span class="ico">▤</span>'
+    + '<span class="name mono">' + esc(TREE.repository.root) + '</span><span class="tail">'
+    + TREE.repository.files + " 文件</span></div>";
+  TREE.packages.forEach(function (p) {
+    const typeCount = p.types.reduce(function (n, t) { return n + 1 + (t.members || []).length; }, 0);
+    const id = "pkg:" + p.name;
+    const open = state.openPkgs.has(p.name);
+    html += '<div class="node lv3' + (state.pkg === p.name ? " sel" : "") + '" data-pkg="' + esc(p.name) + '">'
+      + '<span class="caret">' + (open ? "▾" : "▸") + '</span><span class="ico">◇</span>'
+      + '<span class="name mono">' + esc(p.name) + '</span><span class="tail">' + typeCount + "</span></div>";
+    if (!open) return;
+    p.types.forEach(function (t) {
+      html += '<div class="node lv4' + (state.type === t.name ? " sel" : "") + '" data-type="' + esc(t.name) + '">'
+        + '<span class="caret blank">·</span><span class="kind ' + t.kind + '">' + t.kind + '</span>'
+        + '<span class="name mono">' + esc(t.name) + "</span></div>";
+    });
+  });
+  box.innerHTML = html;
+  box.querySelectorAll("[data-pkg]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      const name = el.getAttribute("data-pkg");
+      if (state.pkg === name) {
+        state.openPkgs.has(name) ? state.openPkgs.delete(name) : state.openPkgs.add(name);
+      } else { state.pkg = name; state.openPkgs.add(name); }
+      render();
+    });
+  });
+  box.querySelectorAll("[data-type]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      selectType(el.getAttribute("data-type"));
+    });
+  });
+}
+
+/* ---------- 渲染：中栏 ---------- */
+function currentPackage() {
+  return TREE.packages.filter(function (p) { return p.name === state.pkg; })[0];
+}
+function matches(text) {
+  if (!state.filter) return true;
+  return text.toLowerCase().indexOf(state.filter) >= 0;
+}
+function renderType() {
+  const box = document.getElementById("treeType");
+  const pkg = currentPackage();
+  if (!pkg) { box.innerHTML = '<div class="empty">选择左侧包</div>'; return; }
+  let html = "", shown = 0;
+  pkg.types.forEach(function (t) {
+    if (!matches(t.name) && !matches(state.filter === "" ? "" : t.path)) return;
+    shown++;
+    const isOpen = state.type === t.name;
+    html += '<div class="node lv1' + (isOpen ? " sel" : "") + '" data-t="' + esc(t.name) + '">'
+      + '<span class="caret">' + (isOpen ? "▾" : "▸") + '</span><span class="kind ' + t.kind + '">' + t.kind + '</span>'
+      + '<span class="name mono">' + esc(t.name) + '</span><span class="tail">L' + t.lineStart + "</span></div>";
+    if (!isOpen) return;
+    (t.facts || []).filter(function (f) { return matches(f.target) || !state.filter; }).forEach(function (f) {
+      html += '<div class="node lv2" data-fact="' + f.line + '">'
+        + '<span class="caret blank">·</span>'
+        + '<span class="fact' + (/TABLE/.test(f.type) ? " table" : "") + '">' + esc(f.type) + '</span>'
+        + '<span class="name mono">' + esc(f.subject + " " + f.target) + '</span>'
+        + '<span class="tail">L' + f.line + "</span></div>";
+    });
+    (t.members || []).forEach(function (m) {
+      if (!matches(m.name)) return;
+      html += '<div class="node lv2" data-m="' + esc(m.name) + '" data-line="' + m.line + '">'
+        + '<span class="caret blank">·</span><span class="kind ' + m.kind + '">' + m.kind + '</span>'
+        + '<span class="name mono">' + esc(m.name) + "()</span>"
+        + (m.http ? '<span class="fact">' + esc(m.http) + "</span>" : "")
+        + '<span class="tail">L' + m.line + "</span></div>";
+    });
+  });
+  if (!shown) html = '<div class="empty">没有匹配的类型</div>';
+  box.innerHTML = html;
+  box.querySelectorAll("[data-t]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      const name = el.getAttribute("data-t");
+      if (state.type === name) { state.type = null; state.member = null; }
+      else selectType(name);
+      render();
+    });
+  });
+  box.querySelectorAll("[data-m]").forEach(function (el) {
+    el.addEventListener("click", function (e) {
+      e.stopPropagation();
+      state.member = el.getAttribute("data-m");
+      state.memberLine = parseInt(el.getAttribute("data-line"), 10);
+      render();
+    });
+  });
+  box.querySelectorAll("[data-fact]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      state.member = null;
+      state.memberLine = parseInt(el.getAttribute("data-fact"), 10);
+      render();
+    });
+  });
+}
+function selectType(name) {
+  state.type = name; state.member = null;
+  const found = allTypes().filter(function (x) { return x.type.name === name; })[0];
+  if (found) state.pkg = found.pkg;
+}
+
+/* ---------- 渲染：右栏 ---------- */
+function findType() {
+  const found = allTypes().filter(function (x) { return x.type.name === state.type; })[0];
+  return found ? found : null;
+}
+function renderDetail() {
+  const box = document.getElementById("detail");
+  const found = findType();
+  if (!found) {
+    box.innerHTML = '<div class="empty">从左侧选择类型，展开后点击方法或事实徽章，这里显示节点详情与源码片段。<br><br>'
+      + "源码片段由 /api/ast/source 按 lineStart–lineEnd 返回，语法高亮在前端完成。</div>";
+    return;
+  }
+  const t = found.type;
+  let html = '<div class="detail">';
+  html += '<div class="path">' + esc(found.pkg) + " · " + esc(t.path) + "</div>";
+  html += "<h2>" + esc(t.name) + "</h2>";
+  html += '<div class="meta"><span class="kind ' + t.kind + '">' + t.kind + "</span>"
+    + '<span class="fact">L' + t.lineStart + "–" + t.lineEnd + "</span>"
+    + '<span class="chip ok dot-ok">ACTIVE</span></div>';
+  if (t.note) html += '<div class="note">' + esc(t.note) + "</div>";
+
+  if ((t.facts || []).length) {
+    html += '<div class="sect-h">索引事实（' + t.facts.length + '）</div><ul class="factlist">';
+    t.facts.forEach(function (f) {
+      html += "<li>" + '<span class="fact' + (/TABLE/.test(f.type) ? " table" : "") + '">' + esc(f.type) + "</span>"
+        + '<span class="t">' + esc(f.subject + " → " + f.target) + "</span>"
+        + '<span class="l">L' + f.line + "</span></li>";
+    });
+    html += "</ul>";
+    if (t.facts.some(function (f) { return f.type === "CALL"; })) {
+      html += '<div class="note">CALL 事实的 target 是调用表达式字符串，不是符号 ID，因此不渲染为可跳转链接。</div>';
+    }
+  }
+
+  if ((t.members || []).length) {
+    const m = state.member ? t.members.filter(function (x) { return x.name === state.member; })[0] : null;
+    if (m) {
+      html += '<div class="sect-h">成员</div><ul class="factlist">'
+        + "<li>" + '<span class="kind ' + m.kind + '">' + m.kind + "</span>"
+        + '<span class="t">' + esc(m.name + "(...)") + "</span>"
+        + '<span class="l">L' + m.line + (m.lineEnd ? "–" + m.lineEnd : "") + "</span></li></ul>";
+    }
+  }
+  html += "</div>";
+  html += codeBlock(t);
+  box.innerHTML = html;
+}
+function codeBlock(t) {
+  const key = "repo-1/" + t.path;
+  const lines = SOURCES[key];
+  if (!lines) {
+    return '<div class="code"><div class="code-head"><span class="f">' + esc(t.path) + "</span>"
+      + '<span class="spacer"></span><span class="r">未内嵌</span></div>'
+      + '<div class="empty">该文件未嵌入本设计稿。实际由 GET /api/ast/source 按行区间返回，前端再高亮。</div></div>';
+  }
+  const from = Math.max(1, state.member && state.memberLine ? state.memberLine - 1 : t.lineStart);
+  const to = Math.min(lines.length, Math.max(from, from + 24));
+  let body = "";
+  for (let n = from; n <= to; n++) {
+    const hit = (state.memberLine && n === state.memberLine) ? " hit" : "";
+    body += '<div class="crow' + hit + '"><span class="ln">' + n + '</span><span class="cd">'
+      + highlight(lines[n - 1] || "") + "</span></div>";
+  }
+  return '<div class="code"><div class="code-head"><span class="f">' + esc(t.path) + "</span>"
+    + '<span class="spacer"></span><span class="r">L' + from + "–" + to + " / " + lines.length + "</span></div>"
+    + '<pre class="code-body">' + body + "</pre></div>";
+}
+
+/* ---------- 汇总渲染 ---------- */
+function render() { renderRepo(); renderType(); renderDetail(); }
+
+/* ---------- 搜索 ---------- */
+document.getElementById("q").addEventListener("input", function (e) {
+  let v = e.target.value.trim();
+  state.filter = v.toLowerCase();
+  const m = /^kind:(\w+)\s*/i.exec(v);
+  if (m) state.filter = v.slice(m[0].length).toLowerCase();
+  render();
+  const total = allTypes().length;
+  document.getElementById("qcount").textContent = state.filter
+    ? "过滤中 · 共 " + total + " 个类型"
+    : "共 " + total + " 个类型 · " + TREE.repository.symbols + " 个符号";
+});
+
+/* ---------- 主题 ---------- */
+document.getElementById("theme").addEventListener("click", function (e) {
+  const root = document.documentElement;
+  const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  root.setAttribute("data-theme", next);
+  e.target.textContent = next === "dark" ? "切换浅色" : "切换深色";
+});
+
+/* ---------- 演示「待更新」状态（真实实现里由 status() 返回 stale 决定） ---------- */
+(function () {
+  const bar = document.getElementById("stalebar");
+  const chip = document.getElementById("stateChip");
+  document.getElementById("demoStale").addEventListener("click", function (e) {
+    const on = bar.hidden;
+    bar.hidden = !on;
+    e.target.textContent = on ? "恢复「可用」状态" : "演示「待更新」状态";
+    if (chip) {
+      chip.className = on ? "chip warn" : "chip ok dot-ok";
+      chip.textContent = on ? "待更新" : "可用";
+    }
+  });
+})();
+
+selectType("ChannelWithdrawService");
+state.member = "applyWithdraw";
+state.memberLine = SET["applyWithdraw"];
+render();
+document.getElementById("qcount").textContent = "共 " + allTypes().length + " 个类型 · " + TREE.repository.symbols + " 个符号";
+</script>
+</body>
+</html>

@@ -13,8 +13,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from business_code_agent.evaluation.service import EvaluationService
-from business_code_agent.query_agent.api import make_server
-from business_code_agent.schema import connect
+from business_code_agent.api.server import make_server
+from business_code_agent.storage.schema import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_evaluation_service import ScriptedRuntime, make_project, suite_payload, wait_for

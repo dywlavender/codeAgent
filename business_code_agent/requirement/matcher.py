@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from ..code_matching import CodeKnowledge, CodeMatcher, SearchPlan
-from ..util import stable_id
-from ..tools import EvidenceTools
+from business_code_agent.codeintel.matching import CodeKnowledge, CodeMatcher, SearchPlan
+from business_code_agent.shared.util import stable_id
+from business_code_agent.codeintel.evidence import EvidenceTools
 from .models import RequirementRelationType
 
 

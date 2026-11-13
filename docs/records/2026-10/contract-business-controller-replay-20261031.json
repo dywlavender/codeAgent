@@ -1,0 +1,46 @@
+{
+  "type": "local_investigation_controller_replay",
+  "sourceTrace": "langchain-v6-contract-business-channel-20261031.trace.json",
+  "sourceBoundary": "uses original public tool history and currently matching project/index; not a new model run or frozen-only QA",
+  "indexVersion": "20261031T121301626257",
+  "wouldFinalizeBeforeOriginalInvestigationRequest": 6,
+  "originalActualModelCalls": 8,
+  "additionalModelCalls": 0,
+  "workflow": {
+    "indexVersion": "20261031T121301626257",
+    "needsBusinessConditions": true,
+    "selected": [
+      {
+        "contractId": "C5",
+        "responseTraced": true,
+        "fields": 15,
+        "gaps": []
+      }
+    ],
+    "businessTraced": [
+      "C5"
+    ],
+    "obligations": [
+      {
+        "contractId": "C5",
+        "response": "read",
+        "businessConditions": "source_sites_read",
+        "consumer": {
+          "status": "not_registered_in_scope",
+          "candidates": []
+        },
+        "changePreconditions": "需核对判别输入与实际消费端；无消费证据时不得给出单点收益保证或排序"
+      }
+    ],
+    "followups": [],
+    "consumerSearchStall": {
+      "scope": "repos/mifos-web-repo",
+      "count": 2
+    },
+    "finalizationReason": "consumer_unregistered_and_repeated_foreign_frontend_no_matches",
+    "semanticProof": false
+  },
+  "currentBusinessRuleCount": 14,
+  "currentBusinessGaps": [],
+  "qualityOrCostGainVerified": false
+}

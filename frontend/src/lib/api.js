@@ -28,7 +28,8 @@ export async function request(path, options = {}, signal) {
   if (projectId) headers["X-Project-Id"] = projectId;
   const adminPath = path.startsWith("/api/knowledge-admin/") || path.startsWith("/api/knowledge/")
     || path.startsWith("/api/ast/generate")
-    || path.startsWith("/api/evaluations") || path.startsWith("/api/evaluation-suites");
+    || path.startsWith("/api/evaluations") || path.startsWith("/api/evaluation-suites")
+    || path.startsWith("/api/retrieval-evaluations") || path.startsWith("/api/retrieval-suites");
   if (adminToken && adminPath) headers.Authorization = `Bearer ${adminToken}`;
   let response;
   try {

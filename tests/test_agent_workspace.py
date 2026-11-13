@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from business_code_agent.query_agent.workspace import WorkspaceManager, workspace_sources
-from business_code_agent.query_agent.claude_runtime import ClaudeCodeRuntime
+from business_code_agent.query.workspace import WorkspaceManager, workspace_sources
+from business_code_agent.query.claude_runtime import ClaudeCodeRuntime
 
 
 class AgentWorkspaceTest(unittest.TestCase):
@@ -29,8 +29,10 @@ class AgentWorkspaceTest(unittest.TestCase):
             self.assertIn("短项目索引：渠道负责接入", prompt)
             self.assertNotIn("旧的完整项目总览", prompt)
             self.assertIn(str(baseline.resolve()), prompt)
+            self.assertEqual(1, prompt.count(str(baseline.resolve())))
             self.assertNotIn("按需读取的流程详情", prompt)
             self.assertNotIn("渠道负责接入", workspace.claude_file.read_text())
+            self.assertNotIn("## 本轮检索范围", workspace.claude_file.read_text())
             index.write_text("更新后的短项目索引", encoding="utf-8")
             command = runtime.build_command("继续", workspace=workspace.path, session_id="existing")
             prompt = command[command.index("--append-system-prompt") + 1]
@@ -39,6 +41,30 @@ class AgentWorkspaceTest(unittest.TestCase):
             index.unlink()
             command = runtime.build_command("继续", workspace=workspace.path, session_id="existing")
             self.assertNotIn("索引来源", command[command.index("--append-system-prompt") + 1])
+
+    def test_combined_context_includes_both_short_indexes_without_repeating_source_roots(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            context = root / "business-context"
+            context.mkdir()
+            (context / "project-index.md").write_text("业务索引", encoding="utf-8")
+            code_map = root / "generated-code-map"
+            code_map.mkdir()
+            (code_map / "project-index.md").write_text("结构索引", encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({
+                "project": {"name": "组合资料"},
+                "knowledge": {"businessContextRoot": "business-context", "codeMapRoot": "generated-code-map"},
+            }), encoding="utf-8")
+            workspace = WorkspaceManager(project_config=config).ensure()
+            command = ClaudeCodeRuntime().build_command("问题", workspace=workspace.path)
+            prompt = command[command.index("--append-system-prompt") + 1]
+            self.assertIn("业务补充知识的 project-index.md：", prompt)
+            self.assertIn("业务索引", prompt)
+            self.assertIn("自动代码地图的 project-index.md：", prompt)
+            self.assertIn("结构索引", prompt)
+            self.assertEqual(1, prompt.count(str(context.resolve())))
+            self.assertEqual(1, prompt.count(str(code_map.resolve())))
 
     def test_source_summary_distinguishes_readable_empty_missing_and_mounts(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -94,7 +120,7 @@ class AgentWorkspaceTest(unittest.TestCase):
             self.assertIn("业务补充知识", workspace.claude_file.read_text(encoding="utf-8"))
             instructions = workspace.claude_file.read_text(encoding="utf-8")
             for directory in (repository, baseline, requirements):
-                self.assertIn(str(directory.resolve()), instructions)
+                self.assertNotIn(str(directory.resolve()), instructions)
             # Real targets must be authorised for both new and resumed turns,
             # not merely their links under the generated workspace.
             runtime = ClaudeCodeRuntime()
@@ -132,9 +158,12 @@ class AgentWorkspaceTest(unittest.TestCase):
             self.assertFalse(workspace.requirements_path.is_symlink())
             self.assertTrue((workspace.path / "CLAUDE.md").is_file())
             instructions = workspace.claude_file.read_text(encoding="utf-8")
-            self.assertIn("需求原文：不可用", instructions)
-            self.assertIn("代码仓库 repo：不可用", instructions)
+            self.assertNotIn("需求原文：不可用", instructions)
+            self.assertNotIn("代码仓库 repo：不可用", instructions)
             command = ClaudeCodeRuntime().build_command("q", workspace=workspace.path)
+            prompt = command[command.index("--append-system-prompt") + 1]
+            self.assertIn("需求原文：目录缺失", prompt)
+            self.assertIn("代码仓库：已登记 1 个，其中 1 个目录不可用", prompt)
             self.assertEqual([str(workspace.path.resolve())],
                              command[command.index("--add-dir") + 1:command.index("-p")])
             workspace.requirements_path.symlink_to(root / "missing", target_is_directory=True)
@@ -194,6 +223,11 @@ class AgentWorkspaceTest(unittest.TestCase):
             ast_sources = dict(workspace_sources(ast.path))
             self.assertNotIn("业务补充知识", ast_sources)
             self.assertEqual(ast_documents.resolve(), ast_sources["自动代码地图"])
+            ast_command = ClaudeCodeRuntime().build_command("定位结构", workspace=ast.path)
+            ast_prompt = ast_command[ast_command.index("--append-system-prompt") + 1]
+            self.assertIn("业务补充知识：本模式不提供", ast_prompt)
+            self.assertIn("自动代码地图：可读取", ast_prompt)
+            self.assertIn("AST 资料版本已固定", ast_prompt)
 
 
 if __name__ == "__main__":

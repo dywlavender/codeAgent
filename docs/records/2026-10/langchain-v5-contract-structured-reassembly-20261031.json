@@ -1,0 +1,104 @@
+{
+  "type": "offline_contract_reassembly",
+  "projectId": "complex-loan-validation",
+  "rawModelResponse": "```json\n{\"contracts\":[\"C5\"],\"business_evidence\":[{\"source\":\"S23\",\"start\":199,\"end\":202},{\"source\":\"S6\",\"start\":259,\"end\":265},{\"source\":\"S32\",\"start\":188,\"end\":242}]}\n```",
+  "answer": "`GET /api/drawdowns/{channelRefNo}`（融商贷渠道后端）\n\n当前已核对的正常返回字段包括：`channelRefNo`、`displayStatus`、`middleStatus`、`detail`、`detail.bizOrderNo`、`detail.status`、`detail.amount`、`detail.payments`、`detail.payments[].extSerialNo`、`detail.payments[].status`、`detail.payments[].amount`、`detail.booking`、`detail.booking.status`、`detail.booking.loanAccountNo`、`detail.booking.retryCount`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:35`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`。\n\n`displayStatus` 的映射输入是 `middleStatus`、`detail.status`：SUCCESS／FAILED → 保留输入值；其他值 → 返回 `PROCESSING`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:14`。\n\n单一展示字段的合并不等于完整响应缺少明细；以上已确认字段不需要再次新增。\n\n源码 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`：\n```text\n        return switch (middleStatus) {\n            case \"SUCCESS\", \"FAILED\" -> middleStatus;\n            default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n        };\n```\n\n源码 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`：\n```text\n        return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n                \"amount\", order.getAmount(),\n                \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n                        \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n                \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                        \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n                        \"retryCount\", order.getBookingRetryCount()));\n```\n\n源码 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:188`：\n```text\n    @Transactional\n    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        }\n    }\n\n    /**\n     * 中台入账：调用 Fineract 放款登记 + 逐层预占转实占。\n     * 幂等：入账前先查借据是否已 ACTIVE（重复回调/查单/重试不会重复放款）。\n     */\n    @Transactional\n    public void book(DrawdownOrder order) {\n        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n            return;\n        }\n        try {\n            if (fineract.isLoanActive(order.getLoanAccountNo())) {\n                log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n            } else {\n                fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n            }\n            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n            order.setBookedAmount(order.getAmount());\n            order.setStatus(DrawdownOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        } catch (Exception e) {\n            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n            order.setBookingLastError(e.getMessage());\n            order.setUpdatedAt(Ids.now());\n            log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());\n        }\n    }\n```\n\n当前没有核对页面消费端。是否已展示、是否只需改一处以及改动收益仍需读取实际页面；若页面仅使用合并后的展示值，应先核对它是否可以利用现有明细。\n\n业务规则和恢复路径以以上原文为据；本实验模式只自动确认受支持的契约结构，不据此保证业务解释完整。",
+  "verification": {
+    "mode": "contracts",
+    "accepted": [
+      {
+        "contractId": "C5",
+        "fields": [
+          "channelRefNo",
+          "displayStatus",
+          "middleStatus",
+          "detail",
+          "detail.bizOrderNo",
+          "detail.status",
+          "detail.amount",
+          "detail.payments",
+          "detail.payments[].extSerialNo",
+          "detail.payments[].status",
+          "detail.payments[].amount",
+          "detail.booking",
+          "detail.booking.status",
+          "detail.booking.loanAccountNo",
+          "detail.booking.retryCount"
+        ],
+        "mappings": [
+          {
+            "outputField": "displayStatus",
+            "inputFields": [
+              "middleStatus",
+              "detail.status"
+            ],
+            "rules": [
+              {
+                "inputs": [
+                  "SUCCESS",
+                  "FAILED"
+                ],
+                "default": false,
+                "output": "input"
+              },
+              {
+                "inputs": [],
+                "default": true,
+                "output": "PROCESSING"
+              }
+            ],
+            "evidence": [
+              "E23",
+              "E24",
+              "E6",
+              "E7",
+              "E8",
+              "E9",
+              "E10",
+              "E11",
+              "E12",
+              "E13",
+              "E14",
+              "E15",
+              "E16",
+              "E17",
+              "E18",
+              "E19",
+              "E25",
+              "E1",
+              "E4",
+              "E5"
+            ]
+          }
+        ]
+      }
+    ],
+    "issues": [],
+    "businessEvidenceCount": 3,
+    "businessEvidence": [
+      {
+        "source": "S23",
+        "start": 199,
+        "end": 202,
+        "quote": ""
+      },
+      {
+        "source": "S6",
+        "start": 259,
+        "end": 265,
+        "quote": ""
+      },
+      {
+        "source": "S32",
+        "start": 188,
+        "end": 242,
+        "quote": ""
+      }
+    ],
+    "proposedBusinessEvidenceCount": 3,
+    "businessEvidenceLines": 66,
+    "semanticProof": false
+  },
+  "additionalModelCalls": 0,
+  "sourceTrace": "docs/records/2026-10/langchain-v5-contract-structured-channel-20261031.trace.json"
+}

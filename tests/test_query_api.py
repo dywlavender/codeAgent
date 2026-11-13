@@ -10,10 +10,10 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from unittest.mock import patch
 
-from business_code_agent.query_agent.api import make_server
-from business_code_agent.query_agent.runtime import RuntimeResult
-from business_code_agent.query_agent.service import QueryService as RealQueryService
-from business_code_agent.schema import connect
+from business_code_agent.api.server import make_server
+from business_code_agent.query.runtime import RuntimeResult
+from business_code_agent.query.service import QueryService as RealQueryService
+from business_code_agent.storage.schema import connect
 
 
 class _Runtime:
@@ -46,7 +46,7 @@ class QueryApiTest(unittest.TestCase):
             connect(str(db_path)).close()
             def service_factory(db, **kwargs):
                 return RealQueryService(db, runtime=WaitingRuntime(), **kwargs)
-            with patch("business_code_agent.query_agent.api.QueryService", service_factory):
+            with patch("business_code_agent.api.server.QueryService", service_factory):
                 server = make_server(str(db_path), port=0)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -97,7 +97,7 @@ class QueryApiTest(unittest.TestCase):
             def service_factory(db, **kwargs):
                 return RealQueryService(db, runtime=_Runtime(), **kwargs)
 
-            with patch("business_code_agent.query_agent.api.QueryService", service_factory):
+            with patch("business_code_agent.api.server.QueryService", service_factory):
                 server = make_server(str(db_path), port=0, project_config=str(config))
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()

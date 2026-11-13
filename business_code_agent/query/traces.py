@@ -1,0 +1,68 @@
+"""Run-owned trace archives survive workspace refreshes and failed requests."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import uuid
+
+
+class RunTraceArchive:
+    def __init__(self, root, run_id, project_id=None):
+        self.path = Path(root) / f"{run_id}.json"
+        self.project_id = project_id
+        self.run_id = run_id
+        self.runtime_path = None
+        self.workspace = None
+        self.value = {}
+
+    def start(self, run, workspace):
+        self.workspace = Path(workspace).resolve()
+        self.value = {"schemaVersion": 1, "runId": self.run_id, "projectId": self.project_id,
+                      "run": run, "calls": [], "events": [], "modelSnapshotAvailable": False,
+                      "snapshotStage": "langchain_before_provider_serialization", "semanticProof": False}
+        self.write()
+
+    def event(self, event):
+        self.value["events"].append(event)
+        if event.get("eventType") == "trace":
+            candidate = Path(event["payload"]["tracePath"]).resolve()
+            if candidate.is_relative_to(self.workspace / ".langchain-traces") and candidate.name.endswith(".trace.json"):
+                self.runtime_path = candidate
+        self.refresh()
+        self.write()
+
+    def refresh(self):
+        if not self.runtime_path or not self.runtime_path.is_file():
+            return
+        snapshot = json.loads(self.runtime_path.read_text(encoding="utf-8"))
+        if self.project_id and snapshot.get("projectId") != self.project_id:
+            raise ValueError("调用轨迹不属于当前工程")
+        for key in ("calls", "settings", "investigation", "contracts", "retrievalPlan", "finalAnswer", "stopReason", "status"):
+            if key in snapshot:
+                self.value[key] = snapshot[key]
+        # Runtime events have precise timing; the archive also retains all API events.
+        self.value["runtimeEvents"] = snapshot.get("events", [])
+        self.value["modelSnapshotAvailable"] = bool(snapshot.get("calls"))
+
+    def finish(self, **run):
+        self.refresh()
+        self.value["run"].update(run)
+        self.value["status"] = run["status"]
+        self.write()
+
+    def write(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(json.dumps(self.value, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.path)
+
+    def read(self, run):
+        if self.path.is_file():
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            if value.get("projectId") != self.project_id or value.get("runId") != self.run_id:
+                raise ValueError("调用轨迹不属于当前工程或运行")
+            return {**value, "run": {**value.get("run", {}), **run}}
+        return {"schemaVersion": 1, "runId": self.run_id, "projectId": self.project_id, "run": run,
+                "calls": [], "events": run["events"], "modelSnapshotAvailable": False,
+                "historical": True, "semanticProof": False}

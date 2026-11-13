@@ -9,8 +9,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from business_code_agent.query_agent.api import _user_facing_internal_error, make_server
-from business_code_agent.schema import connect
+from business_code_agent.api.server import _user_facing_internal_error, make_server
+from business_code_agent.storage.schema import connect
 
 
 class KnowledgeAdminApiTest(unittest.TestCase):

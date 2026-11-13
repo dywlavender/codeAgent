@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from business_code_agent.project_sync import sync_project
-from business_code_agent.knowledge_update.baseline_service import BaselineKnowledgeService
-from business_code_agent.schema import connect
-from business_code_agent.tools import EvidenceTools
+from business_code_agent.codeintel.sync import sync_project
+from business_code_agent.knowledge.baseline import BaselineKnowledgeService
+from business_code_agent.storage.schema import connect
+from business_code_agent.codeintel.evidence import EvidenceTools
 
 
 ROOT = Path(__file__).resolve().parent.parent

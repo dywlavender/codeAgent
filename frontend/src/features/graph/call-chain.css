@@ -1,0 +1,44 @@
+.graph-feature { gap: var(--space-4); }
+.graph-feature-heading { display: flex; align-items: center; gap: var(--space-5); }
+.graph-feature-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
+.call-chain-view { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; flex: 1; }
+.call-chain-toolbar { display: flex; align-items: center; gap: var(--space-3); }
+.call-chain-select { width: min(720px, calc(100% - 90px)); }
+.call-chain-canvas { position: relative; min-height: 430px; height: max(430px, calc(100dvh - 255px)); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.call-chain-canvas > svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
+.call-chain-canvas > svg:active { cursor: grabbing; }
+.call-chain-controls { position: absolute; z-index: 1; right: var(--space-4); top: var(--space-4); display: flex; gap: var(--space-2); }
+.call-chain-pan-hint { position: absolute; bottom: var(--space-3); right: var(--space-4); color: var(--color-text-faint); font-size: var(--type-xs); pointer-events: none; }
+.call-chain-caption { color: var(--color-text-faint); font-size: var(--type-sm); margin: 0; }
+.call-chain-canvas marker path { fill: var(--color-brand); }
+.call-chain-edge { cursor: pointer; outline: none; }
+.call-chain-edge > path { fill: none; stroke: var(--color-border-strong); stroke-width: 2; }
+.call-chain-edge.http > path { stroke: var(--color-brand); stroke-width: 2.4; }
+.call-chain-edge.uncertain > path { stroke: var(--color-requirement); stroke-dasharray: 7 5; }
+.call-chain-edge > .call-chain-edge-hit { stroke: transparent; stroke-width: 18; stroke-dasharray: none; }
+.call-chain-edge:hover > path:not(.call-chain-edge-hit), .call-chain-edge:focus > path:not(.call-chain-edge-hit), .call-chain-edge.selected > path:not(.call-chain-edge-hit) { stroke: var(--color-brand-strong); stroke-width: 3; }
+.call-chain-edge text { fill: var(--color-text-secondary); font: 12px var(--font-body); paint-order: stroke; stroke: var(--color-surface-raised); stroke-width: 6; stroke-linejoin: round; }
+.call-chain-node { cursor: pointer; outline: none; }
+.call-chain-node rect { fill: var(--color-surface-raised); stroke: var(--color-border-strong); stroke-width: 1.5; }
+.call-chain-node.endpoint rect { fill: var(--color-brand-soft); stroke: var(--color-brand); }
+.call-chain-node.http_client rect { fill: var(--color-code-soft); stroke: var(--color-code); }
+.call-chain-node.uncertain rect { stroke: var(--color-requirement); stroke-dasharray: 6 4; }
+.call-chain-node:hover rect, .call-chain-node:focus rect, .call-chain-node.selected rect { stroke: var(--color-brand-strong); stroke-width: 3; }
+.call-chain-node text { pointer-events: none; }
+.call-chain-node-type { font: 12px var(--font-body); fill: var(--color-text-secondary); }
+.call-chain-node-owner { font: 600 18px var(--font-code); fill: var(--color-text); }
+.call-chain-node-method { font: 14px var(--font-code); fill: var(--color-text-secondary); }
+.call-chain-node-route { font: 11.5px var(--font-code); fill: var(--color-text-secondary); }
+.call-chain-node-app { font: 11px var(--font-body); fill: var(--color-text-faint); }
+.call-chain-inspector-title { display: flex; flex-direction: column; gap: var(--space-2); color: var(--color-text-secondary); margin-bottom: var(--space-4); overflow-wrap: anywhere; }
+.call-chain-inspector-title code { font-size: var(--type-sm); }
+.call-chain-source { margin: var(--space-5) 0; }
+.call-chain-source-path { font: var(--type-sm) var(--font-code); color: var(--color-text-secondary); overflow-wrap: anywhere; margin-bottom: var(--space-2); }
+.call-chain-source pre { background: var(--color-well); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-3); overflow: auto; max-height: 440px; font: 12px/1.8 var(--font-code); }
+.call-chain-version { margin-top: var(--space-5); color: var(--color-text-faint); font-size: var(--type-sm); }
+.call-chain-version code { display: block; margin-top: var(--space-2); overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .call-chain-canvas { min-height: 370px; }
+  .graph-feature-heading { gap: var(--space-3); }
+  .call-chain-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+}

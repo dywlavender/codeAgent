@@ -6,10 +6,10 @@ import threading
 import unittest
 from pathlib import Path
 
-from business_code_agent.query_agent.claude_runtime import ClaudeCodeRuntime
-from business_code_agent.query_agent.runtime import RuntimeResult
-from business_code_agent.query_agent.service import QueryBusyError, QueryService
-from business_code_agent.schema import connect
+from business_code_agent.query.claude_runtime import ClaudeCodeRuntime
+from business_code_agent.query.runtime import RuntimeResult
+from business_code_agent.query.service import QueryBusyError, QueryService
+from business_code_agent.storage.schema import connect
 
 
 class _FakeRuntime:

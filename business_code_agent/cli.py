@@ -9,11 +9,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .code_intelligence import JavaIndexer
-from .env import EnvFileError, load_env_file
-from .requirements import RequirementBuilder
-from .project_context import ProjectContext
-from .schema import connect
+from business_code_agent.codeintel.analysis import JavaIndexer
+from business_code_agent.platform.env import EnvFileError, load_env_file
+from business_code_agent.requirement.builder import RequirementBuilder
+from business_code_agent.platform.projects import ProjectContext
+from business_code_agent.storage.schema import connect
 
 
 def _configure_logging() -> None:
@@ -102,10 +102,6 @@ def main() -> None:
     req_changes = sub.add_parser("requirement-changes")
     req_changes.add_argument("requirement_id")
     req_changes.add_argument("--db", required=True)
-    serve_requirement = sub.add_parser("serve-requirement")
-    serve_requirement.add_argument("--db", required=True)
-    serve_requirement.add_argument("--host", default="127.0.0.1")
-    serve_requirement.add_argument("--port", type=int, default=8081)
     query = sub.add_parser("query")
     query.add_argument("question")
     query.add_argument("--db", required=True)
@@ -144,7 +140,7 @@ def main() -> None:
     if args.command in {"sync-project", "baseline-refresh"} and args.project_registry:
         if not args.project_id:
             parser.error(f"{args.command} 使用 --project-registry 时必须提供 --project-id")
-        from .project_context import ProjectRegistry
+        from business_code_agent.platform.projects import ProjectRegistry
         project_context = ProjectRegistry(args.project_registry).get(args.project_id)
         expected_config = project_context.config_path
         expected_db = project_context.db_path
@@ -166,7 +162,7 @@ def main() -> None:
     elif args.command == "ingest-repo":
         print(JavaIndexer(connect(args.db)).ingest(args.repo, args.repository_id))
     elif args.command == "sync-project":
-        from .project_sync import ProjectSyncError, sync_project
+        from business_code_agent.codeintel.sync import ProjectSyncError, sync_project
         try:
             sync_context = project_context or ProjectContext.legacy(args.db, args.config)
             result = sync_project(args.config, args.db, offline=args.offline,
@@ -176,7 +172,7 @@ def main() -> None:
             raise SystemExit(1) from None
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "baseline-refresh":
-        from .knowledge_update.baseline_service import BaselineKnowledgeService
+        from business_code_agent.knowledge.baseline import BaselineKnowledgeService
         service = BaselineKnowledgeService(
             connect(args.db), project_config=args.config,
             business_context_root=(project_context.business_context_root if project_context else None),
@@ -193,7 +189,7 @@ def main() -> None:
         else:
             parser.error("非 JSON 需求原文必须提供 --id")
     elif args.command == "ask":
-        from .query_agent.service import QueryService
+        from business_code_agent.query.service import QueryService
         db = connect(args.db)
         try:
             runtime_context = ProjectContext.legacy(args.db, args.project_config)
@@ -204,15 +200,15 @@ def main() -> None:
         finally:
             db.close()
     elif args.command == "discover":
-        from .discovery import RepositoryAnalyzer
+        from business_code_agent.codeintel.discovery import RepositoryAnalyzer
         result = RepositoryAnalyzer(connect(args.db)).discover(args.limit, include_declared=args.include_declared)
         _print_analysis(result, args.json)
     elif args.command == "explain":
-        from .discovery import RepositoryAnalyzer
+        from business_code_agent.codeintel.discovery import RepositoryAnalyzer
         result = RepositoryAnalyzer(connect(args.db)).explain(args.field)
         _print_explanation(result, args.json)
     elif args.command == "analyze-repo":
-        from .discovery import RepositoryAnalyzer
+        from business_code_agent.codeintel.discovery import RepositoryAnalyzer
         if args.db:
             db = connect(args.db)
             JavaIndexer(db).ingest(args.repo, args.repository_id)
@@ -224,7 +220,7 @@ def main() -> None:
                 result = RepositoryAnalyzer(db).discover(args.limit, include_declared=args.include_declared)
         _print_analysis(result, args.json)
     elif args.command.startswith("requirement-"):
-        from .requirement.service import RequirementService
+        from business_code_agent.requirement.service import RequirementService
         service = RequirementService(connect(args.db))
         if args.command == "requirement-import":
             result = service.import_document(args.path, requirement_id=args.requirement_id, title=args.title)
@@ -241,11 +237,8 @@ def main() -> None:
         else:
             result = service.changes(args.requirement_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    elif args.command == "serve-requirement":
-        from .requirement.api import serve
-        serve(args.db, args.host, args.port)
     elif args.command == "query":
-        from .query_agent.service import QueryService
+        from business_code_agent.query.service import QueryService
         db = connect(args.db)
         try:
             runtime_context = ProjectContext.legacy(args.db, args.project_config)
@@ -260,25 +253,25 @@ def main() -> None:
         finally:
             db.close()
     elif args.command == "query-run":
-        from .query_agent.service import QueryService
+        from business_code_agent.query.service import QueryService
         print(json.dumps(QueryService(connect(args.db), db_path=args.db).get_run(args.run_id), ensure_ascii=False, indent=2))
     elif args.command == "serve-query":
-        from .query_agent.api import serve
+        from business_code_agent.api.server import serve
         serve(
             args.db, args.host, args.port, project_config=args.project_config,
             project_registry=args.project_registry, project_id=args.project_id,
         )
     elif args.command == "project-register":
-        from .project_context import ProjectRegistry
+        from business_code_agent.platform.projects import ProjectRegistry
         context = ProjectRegistry(args.registry).register(
             args.config, data_root=args.data_root, name=args.name,
         )
         print(json.dumps(context.to_dict(), ensure_ascii=False, indent=2))
     elif args.command == "project-list":
-        from .project_context import ProjectRegistry
+        from business_code_agent.platform.projects import ProjectRegistry
         print(json.dumps({"items": ProjectRegistry(args.registry).list()}, ensure_ascii=False, indent=2))
     elif args.command == "project-import-materials":
-        from .project_context import ProjectRegistry
+        from business_code_agent.platform.projects import ProjectRegistry
         result = ProjectRegistry(args.registry).import_materials(
             args.project_id,
             business_context_root=args.business_context_root,

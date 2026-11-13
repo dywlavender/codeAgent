@@ -1,0 +1,433 @@
+{
+  "projectId": "complex-loan-validation",
+  "caseId": "v2-channel-display",
+  "status": "completed",
+  "recordedAt": "2026-10-31T06:12:49.300509+00:00",
+  "experiment": {
+    "type": "frozen-evidence-answer-consistency",
+    "retrieval": "files",
+    "requestedModel": "qwen3.8-27b",
+    "modelCalls": 1,
+    "maxOutputTokens": 2048,
+    "thinking": false,
+    "temperature": 0,
+    "retries": 0,
+    "inputChars": 19779,
+    "sourceBlocks": 3,
+    "deliveredRows": 327,
+    "baselineAnswerProvided": false,
+    "referenceLabelsProvided": false
+  },
+  "durationSeconds": 23.668,
+  "answer": "**接口返回数据**：已确认返回：`detail.status`。尚未确认：`detail.booking.status`、`detail.payments[].status`；未确认不能当作接口没有这些数据。 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`\n\n**展示字段**：当前未取得可支撑这一层结论的原文，尚不能确认。 \n\n**业务行为**：当外部支付成功但入账失败时，中台订单状态保持为 EXTERNAL_SUCCESS_BOOKING_PENDING，且 booking.status 变为 RETRY_NEEDED。；当外部结果未确认时，中台订单的 payment.status 会被设置为 RESULT_UNCONFIRMED。 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:199` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:236` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:250`\n\n建议：修改 ChannelService.drawdownDetail 方法，不再仅返回统一的 displayStatus，而是根据 middleDetail 中的 booking.status 和 payments[].status 细化返回给前端的展示状态或增加一个 subStatus 字段。；预期收益：运营可以直接在页面上看到更细粒度的状态（如'等待外部结果' vs '入账重试中'），无需查询后台日志或数据库。。尚需核对：前端页面是否已适配新的子状态字段显示逻辑。。 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:199` `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:236`",
+  "rawModelResponse": "```json\n{\n  \"resources\": [\n    {\n      \"id\": \"R1\",\n      \"label\": \"渠道接口返回数据\",\n      \"scope\": \"api_data\"\n    },\n    {\n      \"id\": \"R2\",\n      \"label\": \"中台提款详情返回数据\",\n      \"scope\": \"api_data\"\n    },\n    {\n      \"id\": \"R3\",\n      \"label\": \"展示状态映射逻辑\",\n      \"scope\": \"display\"\n    },\n    {\n      \"id\": \"R4\",\n      \"label\": \"中台业务行为与状态流转\",\n      \"scope\": \"business\"\n    }\n  ],\n  \"facts\": [\n    {\n      \"id\": \"F1\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"detail.status\",\n      \"refs\": [\n        {\n          \"source\": \"S1\",\n          \"start\": 135,\n          \"end\": 136\n        }\n      ]\n    },\n    {\n      \"id\": \"F2\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"detail.booking.status\",\n      \"refs\": [\n        {\n          \"source\": \"S1\",\n          \"start\": 135,\n          \"end\": 136\n        }\n      ]\n    },\n    {\n      \"id\": \"F3\",\n      \"resource\": \"R1\",\n      \"kind\": \"returned_field\",\n      \"field\": \"detail.payments[].status\",\n      \"refs\": [\n        {\n          \"source\": \"S1\",\n          \"start\": 135,\n          \"end\": 136\n        }\n      ]\n    },\n    {\n      \"id\": \"F4\",\n      \"resource\": \"R2\",\n      \"kind\": \"returned_field\",\n      \"field\": \"status\",\n      \"refs\": [\n        {\n          \"source\": \"S3\",\n          \"start\": 259,\n          \"end\": 259\n        }\n      ]\n    },\n    {\n      \"id\": \"F5\",\n      \"resource\": \"R2\",\n      \"kind\": \"returned_field\",\n      \"field\": \"booking.status\",\n      \"refs\": [\n        {\n          \"source\": \"S3\",\n          \"start\": 263,\n          \"end\": 263\n        }\n      ]\n    },\n    {\n      \"id\": \"F6\",\n      \"resource\": \"R2\",\n      \"kind\": \"returned_field\",\n      \"field\": \"payments[].status\",\n      \"refs\": [\n        {\n          \"source\": \"S3\",\n          \"start\": 262,\n          \"end\": 262\n        }\n      ]\n    },\n    {\n      \"id\": \"F7\",\n      \"resource\": \"R3\",\n      \"kind\": \"mapping\",\n      \"field\": \"displayStatus\",\n      \"inputs\": [\"middleDetail.status\"],\n      \"output\": \"PROCESSING (when status is not SUCCESS or FAILED)\",\n      \"refs\": [\n        {\n          \"source\": \"S1\",\n          \"start\": 198,\n          \"end\": 203\n        }\n      ]\n    },\n    {\n      \"id\": \"F8\",\n      \"resource\": \"R4\",\n      \"kind\": \"behavior\",\n      \"statement\": \"当外部支付成功但入账失败时，中台订单状态保持为 EXTERNAL_SUCCESS_BOOKING_PENDING，且 booking.status 变为 RETRY_NEEDED。\",\n      \"refs\": [\n        {\n          \"source\": \"S3\",\n          \"start\": 199,\n          \"end\": 201\n        },\n        {\n          \"source\": \"S3\",\n          \"start\": 236,\n          \"end\": 236\n        }\n      ]\n    },\n    {\n      \"id\": \"F9\",\n      \"resource\": \"R4\",\n      \"kind\": \"behavior\",\n      \"statement\": \"当外部结果未确认时，中台订单的 payment.status 会被设置为 RESULT_UNCONFIRMED。\",\n      \"refs\": [\n        {\n          \"source\": \"S3\",\n          \"start\": 250,\n          \"end\": 251\n        }\n      ]\n    }\n  ],\n  \"answers\": [\n    {\n      \"resource\": \"R1\",\n      \"kind\": \"data_fields\",\n      \"required_fields\": [\n        \"detail.status\",\n        \"detail.booking.status\",\n        \"detail.payments[].status\"\n      ],\n      \"facts\": [\n        \"F1\",\n        \"F2\",\n        \"F3\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"当前渠道接口在 drawdownDetail 中透传了中台的 detail 对象，其中包含了区分'外部还没结果'和'中台入账失败'所需的字段：status（主状态）、booking.status（入账状态）以及 payments[].status（支付状态）。\"\n    },\n    {\n      \"resource\": \"R3\",\n      \"kind\": \"display\",\n      \"required_fields\": [],\n      \"facts\": [\n        \"F7\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"页面显示的'处理中'是由 displayOf 方法将非 SUCCESS/FAILED 的中台状态统一映射为 PROCESSING 导致的，掩盖了底层的具体差异。\"\n    },\n    {\n      \"resource\": \"R4\",\n      \"kind\": \"behavior\",\n      \"required_fields\": [],\n      \"facts\": [\n        \"F8\",\n        \"F9\"\n      ],\n      \"verdict\": \"supported\",\n      \"summary\": \"中台通过不同的状态组合来区分场景：'外部还没结果'通常对应 payment.status 为 RESULT_UNCONFIRMED 或 PROCESSING；'中台入账失败'对应 status 为 EXTERNAL_SUCCESS_BOOKING_PENDING 且 booking.status 为 RETRY_NEEDED。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"resource\": \"R1\",\n      \"change\": \"修改 ChannelService.drawdownDetail 方法，不再仅返回统一的 displayStatus，而是根据 middleDetail 中的 booking.status 和 payments[].status 细化返回给前端的展示状态或增加一个 subStatus 字段。\",\n      \"benefit\": \"运营可以直接在页面上看到更细粒度的状态（如'等待外部结果' vs '入账重试中'），无需查询后台日志或数据库。\",\n      \"facts\": [\n        \"F1\",\n        \"F2\",\n        \"F3\",\n        \"F7\",\n        \"F8\"\n      ],\n      \"adds_fields\": [\n        \"subDisplayStatus\"\n      ],\n      \"unverified_impacts\": [\n        \"前端页面是否已适配新的子状态字段显示逻辑。\"\n      ]\n    }\n  ],\n  \"gaps\": []\n}\n```",
+  "usage": {
+    "input_tokens": 5904,
+    "output_tokens": 1639,
+    "total_tokens": 7543,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "reportedModel": "qwen3.8-27b",
+  "finishReason": "stop",
+  "verification": {
+    "status": "checked",
+    "issues": [
+      {
+        "code": "field_quote",
+        "fact": "F2"
+      },
+      {
+        "code": "field_quote",
+        "fact": "F3"
+      },
+      {
+        "code": "field_quote",
+        "fact": "F6"
+      },
+      {
+        "code": "source_quote",
+        "fact": "F7"
+      },
+      {
+        "code": "availability_conflict",
+        "resource": "R1",
+        "proposed": "supported",
+        "derived": "unknown"
+      },
+      {
+        "code": "insufficient_scope_evidence",
+        "resource": "R3"
+      }
+    ],
+    "acceptedFacts": [
+      {
+        "id": "F1",
+        "resource": "R1",
+        "kind": "returned_field",
+        "field": "detail.status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S1",
+            "start": 135,
+            "end": 136,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F4",
+        "resource": "R2",
+        "kind": "returned_field",
+        "field": "status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S3",
+            "start": 259,
+            "end": 259,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F5",
+        "resource": "R2",
+        "kind": "returned_field",
+        "field": "booking.status",
+        "inputs": [],
+        "output": "",
+        "statement": "",
+        "refs": [
+          {
+            "source": "S3",
+            "start": 263,
+            "end": 263,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F8",
+        "resource": "R4",
+        "kind": "behavior",
+        "field": "",
+        "inputs": [],
+        "output": "",
+        "statement": "当外部支付成功但入账失败时，中台订单状态保持为 EXTERNAL_SUCCESS_BOOKING_PENDING，且 booking.status 变为 RETRY_NEEDED。",
+        "refs": [
+          {
+            "source": "S3",
+            "start": 199,
+            "end": 201,
+            "quote": ""
+          },
+          {
+            "source": "S3",
+            "start": 236,
+            "end": 236,
+            "quote": ""
+          }
+        ]
+      },
+      {
+        "id": "F9",
+        "resource": "R4",
+        "kind": "behavior",
+        "field": "",
+        "inputs": [],
+        "output": "",
+        "statement": "当外部结果未确认时，中台订单的 payment.status 会被设置为 RESULT_UNCONFIRMED。",
+        "refs": [
+          {
+            "source": "S3",
+            "start": 250,
+            "end": 251,
+            "quote": ""
+          }
+        ]
+      }
+    ],
+    "decisions": [
+      {
+        "resource": "R1",
+        "kind": "data_fields",
+        "verdict": "unknown",
+        "present": [
+          "detail.status"
+        ],
+        "unconfirmed": [
+          "detail.booking.status",
+          "detail.payments[].status"
+        ]
+      },
+      {
+        "resource": "R3",
+        "kind": "display",
+        "verdict": "unknown"
+      },
+      {
+        "resource": "R4",
+        "kind": "behavior",
+        "verdict": "supported"
+      }
+    ],
+    "semanticProof": false,
+    "sourceCount": 3,
+    "packet": {
+      "resources": [
+        {
+          "id": "R1",
+          "label": "渠道接口返回数据",
+          "scope": "api_data"
+        },
+        {
+          "id": "R2",
+          "label": "中台提款详情返回数据",
+          "scope": "api_data"
+        },
+        {
+          "id": "R3",
+          "label": "展示状态映射逻辑",
+          "scope": "display"
+        },
+        {
+          "id": "R4",
+          "label": "中台业务行为与状态流转",
+          "scope": "business"
+        }
+      ],
+      "facts": [
+        {
+          "id": "F1",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "detail.status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S1",
+              "start": 135,
+              "end": 136,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F2",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "detail.booking.status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S1",
+              "start": 135,
+              "end": 136,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F3",
+          "resource": "R1",
+          "kind": "returned_field",
+          "field": "detail.payments[].status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S1",
+              "start": 135,
+              "end": 136,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F4",
+          "resource": "R2",
+          "kind": "returned_field",
+          "field": "status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S3",
+              "start": 259,
+              "end": 259,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F5",
+          "resource": "R2",
+          "kind": "returned_field",
+          "field": "booking.status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S3",
+              "start": 263,
+              "end": 263,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F6",
+          "resource": "R2",
+          "kind": "returned_field",
+          "field": "payments[].status",
+          "inputs": [],
+          "output": "",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S3",
+              "start": 262,
+              "end": 262,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F7",
+          "resource": "R3",
+          "kind": "mapping",
+          "field": "displayStatus",
+          "inputs": [
+            "middleDetail.status"
+          ],
+          "output": "PROCESSING (when status is not SUCCESS or FAILED)",
+          "statement": "",
+          "refs": [
+            {
+              "source": "S1",
+              "start": 198,
+              "end": 203,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F8",
+          "resource": "R4",
+          "kind": "behavior",
+          "field": "",
+          "inputs": [],
+          "output": "",
+          "statement": "当外部支付成功但入账失败时，中台订单状态保持为 EXTERNAL_SUCCESS_BOOKING_PENDING，且 booking.status 变为 RETRY_NEEDED。",
+          "refs": [
+            {
+              "source": "S3",
+              "start": 199,
+              "end": 201,
+              "quote": ""
+            },
+            {
+              "source": "S3",
+              "start": 236,
+              "end": 236,
+              "quote": ""
+            }
+          ]
+        },
+        {
+          "id": "F9",
+          "resource": "R4",
+          "kind": "behavior",
+          "field": "",
+          "inputs": [],
+          "output": "",
+          "statement": "当外部结果未确认时，中台订单的 payment.status 会被设置为 RESULT_UNCONFIRMED。",
+          "refs": [
+            {
+              "source": "S3",
+              "start": 250,
+              "end": 251,
+              "quote": ""
+            }
+          ]
+        }
+      ],
+      "answers": [
+        {
+          "resource": "R1",
+          "kind": "data_fields",
+          "required_fields": [
+            "detail.status",
+            "detail.booking.status",
+            "detail.payments[].status"
+          ],
+          "facts": [
+            "F1",
+            "F2",
+            "F3"
+          ],
+          "verdict": "supported",
+          "summary": "当前渠道接口在 drawdownDetail 中透传了中台的 detail 对象，其中包含了区分'外部还没结果'和'中台入账失败'所需的字段：status（主状态）、booking.status（入账状态）以及 payments[].status（支付状态）。"
+        },
+        {
+          "resource": "R3",
+          "kind": "display",
+          "required_fields": [],
+          "facts": [
+            "F7"
+          ],
+          "verdict": "supported",
+          "summary": "页面显示的'处理中'是由 displayOf 方法将非 SUCCESS/FAILED 的中台状态统一映射为 PROCESSING 导致的，掩盖了底层的具体差异。"
+        },
+        {
+          "resource": "R4",
+          "kind": "behavior",
+          "required_fields": [],
+          "facts": [
+            "F8",
+            "F9"
+          ],
+          "verdict": "supported",
+          "summary": "中台通过不同的状态组合来区分场景：'外部还没结果'通常对应 payment.status 为 RESULT_UNCONFIRMED 或 PROCESSING；'中台入账失败'对应 status 为 EXTERNAL_SUCCESS_BOOKING_PENDING 且 booking.status 为 RETRY_NEEDED。"
+        }
+      ],
+      "recommendations": [
+        {
+          "resource": "R1",
+          "change": "修改 ChannelService.drawdownDetail 方法，不再仅返回统一的 displayStatus，而是根据 middleDetail 中的 booking.status 和 payments[].status 细化返回给前端的展示状态或增加一个 subStatus 字段。",
+          "benefit": "运营可以直接在页面上看到更细粒度的状态（如'等待外部结果' vs '入账重试中'），无需查询后台日志或数据库。",
+          "facts": [
+            "F1",
+            "F2",
+            "F3",
+            "F7",
+            "F8"
+          ],
+          "adds_fields": [
+            "subDisplayStatus"
+          ],
+          "unverified_impacts": [
+            "前端页面是否已适配新的子状态字段显示逻辑。"
+          ]
+        }
+      ],
+      "gaps": []
+    }
+  },
+  "frozenPack": "docs/records/2026-10/answer-facts-files-input-20261031.json"
+}

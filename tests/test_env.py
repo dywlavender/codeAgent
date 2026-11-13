@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from business_code_agent.env import EnvFileError, load_env_file
+from business_code_agent.platform.env import EnvFileError, load_env_file
 
 
 class EnvFileTest(unittest.TestCase):

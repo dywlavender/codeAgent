@@ -10,9 +10,9 @@ from pathlib import Path
 from business_code_agent.evaluation.ast_service import AstService
 from business_code_agent.evaluation.case_import import import_upload
 from business_code_agent.evaluation.runner import freeze_batch, summarize_pairs
-from business_code_agent.query_agent.runtime import RuntimeResult
-from business_code_agent.query_agent.service import QueryService
-from business_code_agent.schema import connect
+from business_code_agent.query.runtime import RuntimeResult
+from business_code_agent.query.service import QueryService
+from business_code_agent.storage.schema import connect
 from tests.test_evaluation_service import make_project, suite_payload, wait_for
 
 

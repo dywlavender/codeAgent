@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..util import dumps, stable_id
+from business_code_agent.shared.util import dumps, stable_id
 from .chunker import RequirementChunker
 from .diff import diff_rules
 from .extractor import RequirementDigestExtractor

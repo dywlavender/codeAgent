@@ -1,6 +1,6 @@
 """Paired knowledge-backbone evaluation shared by the CLI and the workbench.
 
-The command line (``scripts/evaluate_backbone.py``) and the effect-verification
+The command line (``scripts/evaluation/evaluate_backbone.py``) and the effect-verification
 page call the same orchestration, so both produce the same run records, review
 files and summaries.
 """

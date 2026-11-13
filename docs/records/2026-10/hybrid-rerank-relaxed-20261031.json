@@ -1,0 +1,1068 @@
+{
+  "summary": {
+    "projectId": "complex-loan-validation",
+    "snapshotId": "retrieval-20261030-requirements-restored",
+    "indexVersion": "20261031T044651971523",
+    "split": "development",
+    "questions": 3,
+    "candidateLimit": 50,
+    "rerankBudgetMs": 2000,
+    "contextChars": 12000,
+    "contextLines": 300,
+    "candidateCoverage": 0.5277777777777778,
+    "contextCoverage": 0.2777777777777778,
+    "rerankApplied": 3,
+    "medianRerankMs": 1073.41,
+    "improved": 0,
+    "regressed": 1
+  },
+  "cases": [
+    {
+      "caseId": "v2-callback-twice",
+      "candidateCount": 50,
+      "candidateMetrics": {
+        "covered": 3,
+        "required": 4,
+        "coverage": 0.75,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 1.0,
+        "groups": [
+          {
+            "id": "payment-guard",
+            "role": "condition",
+            "covered": true
+          },
+          {
+            "id": "booking-result",
+            "role": "outcome",
+            "covered": true
+          },
+          {
+            "id": "retry-route",
+            "role": "relation",
+            "covered": true
+          },
+          {
+            "id": "ledger-write",
+            "role": "implementation",
+            "covered": false
+          }
+        ]
+      },
+      "contextMetrics": {
+        "covered": 0,
+        "required": 4,
+        "coverage": 0.0,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 0.0,
+        "groups": [
+          {
+            "id": "payment-guard",
+            "role": "condition",
+            "covered": false
+          },
+          {
+            "id": "booking-result",
+            "role": "outcome",
+            "covered": false
+          },
+          {
+            "id": "retry-route",
+            "role": "relation",
+            "covered": false
+          },
+          {
+            "id": "ledger-write",
+            "role": "implementation",
+            "covered": false
+          }
+        ]
+      },
+      "baselineContextMetrics": {
+        "covered": 2,
+        "required": 4,
+        "coverage": 0.5,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 0.0,
+        "groups": [
+          {
+            "id": "payment-guard",
+            "role": "condition",
+            "covered": true
+          },
+          {
+            "id": "booking-result",
+            "role": "outcome",
+            "covered": true
+          },
+          {
+            "id": "retry-route",
+            "role": "relation",
+            "covered": false
+          },
+          {
+            "id": "ledger-write",
+            "role": "implementation",
+            "covered": false
+          }
+        ]
+      },
+      "retrieval": {
+        "timings": {
+          "retrievalSeconds": 0.2016,
+          "rerankMs": 1073.41
+        },
+        "rerankApplied": true,
+        "rerankReason": null,
+        "rerankBudgetMs": 2000,
+        "rerankCount": 50,
+        "weights": {
+          "bm25": 0.6,
+          "vector": 0.4
+        },
+        "indexVersion": "20261031T044651971523"
+      },
+      "context": "[source] loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java:22-39\n22: /**\n23:  * 外部结果回调接收（模拟服务 → 中台）：付款、扣款、授信审批。\n24:  * 幂等由各业务服务保证：终态业务单收到重复回调直接确认（DUPLICATE_CALLBACK 不改变状态）。\n25:  * 回调成功只代表外部环节完成；提款是否成功以中台入账状态为准，授信是否生效以中台账本为准。\n26:  */\n27: @RestController\n28: @RequestMapping(\"/middle/api/v1/callbacks\")\n29: public class ExternalResultController {\n30: \n31:     private static final Logger log = LoggerFactory.getLogger(ExternalResultController.class);\n32: \n33:     private final DrawdownOrderRepository drawdownRepo;\n34:     private final RepaymentOrderRepository repayRepo;\n35:     private final CreditApplicationRepository creditRepo;\n36:     private final DrawdownService drawdownService;\n37:     private final RepaymentService repaymentService;\n38:     private final CreditService creditService;\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java:21-41\n21: /**\n22:  * 查单与补偿任务（不引入消息中间件，用定时任务收敛异步结果，见边界设计原则 6）：\n23:  * 1. 提交失败 → 重新提交（模拟服务按 bizOrderNo 幂等）；\n24:  * 2. 受理中超时未收到回调 → 主动查单（\"回调未送达，通过查单取得结果\"场景）；\n25:  * 3. 提款入账未完成（TO_BOOK / RETRY_NEEDED）→ 重试入账，先查借据是否已 ACTIVE 防重复放款；\n26:  * 4. 授信审批受理超时 → 查审批结论。\n27:  */\n28: @Component\n29: public class CompensationTask {\n30: \n31:     private static final Logger log = LoggerFactory.getLogger(CompensationTask.class);\n32: \n33:     private final DrawdownOrderRepository drawdownRepo;\n34:     private final RepaymentOrderRepository repayRepo;\n35:     private final CreditApplicationRepository creditRepo;\n36:     private final DrawdownService drawdownService;\n37:     private final RepaymentService repaymentService;\n38:     private final CreditService creditService;\n39:     private final long paymentQueryTimeoutSeconds;\n40:     private final int bookingRetryMax;\n\n[requirement] requirements/产品规则.md:43-49\n43: ### 6. 支付与状态规则\n44: \n45: - 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n46: - \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n47: - 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n48: - 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java:142-151\n142:     /** 查单收敛（补偿任务用）。 */\n143:     @Transactional\n144:     public void queryAndSettle(RepaymentOrder order) {\n145:         SimulatorClient.ExternalStatus status = simulator.query(\"DEDUCTION\", order.getExtSerialNo());\n146:         if (\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status())) {\n147:             onDeductionResult(order, status.status());\n148:         } else if (\"RESULT_UNCONFIRMED\".equals(status.status())) {\n149:             order.setDeductionStatus(RepaymentOrder.DeductionStatus.RESULT_UNCONFIRMED);\n150:         }\n151:     }\n\n[source] external-simulator-repo/src/main/java/com/rsd/simulator/ExtTransaction.java:9-42\n9: /**\n10:  * 外部交易流水：付款（PAYMENT）与扣款（DEDUCTION）。\n11:  * 状态：PROCESSING → SUCCESS | FAILED。回调未送达时中台查单也能取到真实终态（query 永远返回真实状态）。\n12:  * 场景配置挂在 bizOrderNo 上，不混入正式业务字段（边界设计 §7）。\n13:  */\n14: @Entity\n15: @Table(name = \"ext_transaction\")\n16: public class ExtTransaction {\n17: \n18:     public enum Kind { PAYMENT, DEDUCTION, APPROVAL }\n19: \n20:     public enum Scenario {\n21:         SYNC_SUCCESS, SYNC_REJECT, ASYNC_SUCCESS_DELAY, ASYNC_FAIL, NO_CALLBACK_NEED_QUERY\n22:     }\n23: \n24:     @Id\n25:     private String extSerialNo;\n26:     private Kind kind;\n27:     private String bizOrderNo;\n28:     private BigDecimal amount;\n29:     private String accountName;     // 收款人/付款人\n30:     private String accountNo;\n31:     private String status;          // PROCESSING / SUCCESS / FAILED\n32:     private Scenario scenario;\n33:     private int delaySeconds;\n34:     private LocalDateTime processDueAt;      // 异步结果的产生时间\n35:     private boolean resultResolved;          // 终态是否已产生\n36:     private boolean callbackSuppressed;      // NO_CALLBACK 场景：终态已产生但回调不投递\n37:     private LocalDateTime finishedAt;\n38:     private LocalDateTime createdAt;\n39:     // 审批类交易（APPROVAL）专用：结论与批准额度\n40:     private String resultDetail;    // APPROVED / REJECTED\n41:     private BigDecimal resultAmount; // 批准额度（可能低于申请额度）\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:165-181\n165:     /** 提交付款；同步终态就地结算，受理中等待回调或查单。 */\n166:     public void submitPayment(DrawdownOrder order) {\n167:         try {\n168:             SimulatorClient.PaymentSubmission sub = simulator.submitPayment(\n169:                     order.getBizOrderNo(), order.getPayeeName(), order.getPayeeAccount(), order.getAmount());\n170:             order.setExtSerialNo(sub.extSerialNo());\n171:             order.setUpdatedAt(Ids.now());\n172:             switch (sub.status()) {\n173:                 case \"SUCCESS\" -> onPaymentResult(order, \"SUCCESS\");\n174:                 case \"REJECTED\" -> onPaymentResult(order, \"FAILED\");\n175:                 default -> order.setPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n176:             }\n177:         } catch (Exception e) {\n178:             // 提交失败保留 TO_SUBMIT，由补偿任务重试（模拟服务按 bizOrderNo 幂等）\n179:             log.warn(\"付款提交失败，等待补偿重试: {} {}\", order.getBizOrderNo(), e.getMessage());\n180:         }\n181:     }\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/external/SimulatorClient.java:41-50\n41:     /** 查单：模拟服务返回外部交易真实终态（回调未送达时也查得到）。 */\n42:     @SuppressWarnings(\"unchecked\")\n43:     public ExternalStatus query(String kind, String extSerialNo) {\n44:         String path = \"PAYMENT\".equals(kind) ? \"/sim/api/v1/payments/\" : \"DEDUCTION\".equals(kind) ? \"/sim/api/v1/deductions/\" : \"/sim/api/v1/approvals/\";\n45:         try {\n46:             return http.get().uri(path + extSerialNo).retrieve().body(ExternalStatus.class);\n47:         } catch (Exception e) {\n48:             throw new BizException(BizException.Code.SIMULATOR_ERROR);\n49:         }\n50:     }\n\n[business_context] business-context/cross-system.md:3-6\n3: ## 付款结果的收敛\n4: \n5: 外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。\n\n[source] external-simulator-repo/src/main/java/com/rsd/simulator/CallbackLog.java:8-20\n8: /** 回调投递记录：每次投递的成败都落库，支撑\"回调未送达，通过查单取得结果\"场景的调查。 */\n9: @Entity\n10: @Table(name = \"callback_log\")\n11: public class CallbackLog {\n12: \n13:     @Id\n14:     private String logId;\n15:     private String extSerialNo;\n16:     private int attempt;\n17:     private boolean success;\n18:     private String response;\n19:     private LocalDateTime deliveredAt;\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java:57-102\n57:     @Scheduled(fixedDelayString = \"${compensation.poll-interval-ms:15000}\")\n58:     public void compensate() {\n59:         // 提款：提交失败重试\n60:         drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.TO_SUBMIT)\n61:                 .forEach(drawdownService::submitPayment);\n62:         // 提款：受理超时主动查单\n63:         LocalDateTime deadline = LocalDateTime.now().minus(Duration.ofSeconds(paymentQueryTimeoutSeconds));\n64:         List<DrawdownOrder> pendingPayments = drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n65:         for (DrawdownOrder order : pendingPayments) {\n66:             if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n67:                 log.info(\"提款付款超时，主动查单: {}\", order.getBizOrderNo());\n68:                 drawdownService.queryAndSettle(order);\n69:             }\n70:         }\n71:         // 提款：入账未完成 → 重试（含\"外部已成功、中台未入账\"的可恢复状态）\n72:         for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\n73:             drawdownService.book(order);\n74:         }\n75:         for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\n76:             if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\n77:                 drawdownService.book(order);\n78:             }\n79:         }\n80:         // 还款：同样的三条补偿线\n81:         repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.TO_SUBMIT)\n82:                 .forEach(repaymentService::submitDeduction);\n83:         for (RepaymentOrder order : repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.PROCESSING)) {\n84:             if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n85:                 log.info(\"还款扣款超时，主动查单: {}\", order.getBizOrderNo());\n86:                 repaymentService.queryAndSettle(order);\n87:             }\n88:         }\n89:         // 扣款成功但入账未完成的还款订单（PROCESSING 且扣款已 SUCCESS）\n90:         repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.SUCCESS).stream()\n91:                 .filter(order -> order.getStatus() == RepaymentOrder.Status.PROCESSING)\n92:                 .forEach(repaymentService::book);\n93:         // 授信审批：未拿到流水号的重试提交；受理超时的查审批结论\n94:         creditRepo.findByStatus(CreditApplicationOrder.Status.PROCESSING).forEach(order -> {\n95:             if (order.getApprovalExtSerialNo() == null) {\n96:                 creditService.submitApproval(order);\n97:             } else if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n98:                 log.info(\"授信审批超时，主动查单: {}\", order.getBizOrderNo());\n99:                 creditService.queryAndSettle(order);\n100:             }\n101:         });\n102:     }\n\n[requirement] requirements/接口与状态约定.md:5-10\n5: ## 一、标识链与通用约定\n6: \n7: - 标识链：`channelRefNo`（CHN-，渠道生成）→ `bizOrderNo`（DD-提款 / RP-还款 / CR-授信，中台生成）→ `extSerialNo`（EXT-P/EXT-D，模拟服务生成）。\n8: - 金额单位元、两位小数；期限单位月；日期 ISO-8601。\n9: - 幂等键：中台→外部提交按 `bizOrderNo`；外部→中台回调用 `extSerialNo`+`bizOrderNo`；重复请求返回首次结果，不产生新记录。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java:19-35\n19: /**\n20:  * 还款编排：订单 → 模拟扣款 → 确认到账 → Fineract 还款入账 → 读取分配明细 → 按本金逐层恢复占用。\n21:  * 规则（docs/三系统边界设计.md §6）：归还利息、费用不恢复本金授信额度；\n22:  * 分配顺序由 Fineract 产品策略决定，中台只保存分配结果，不在多个系统重复判断分配。\n23:  */\n24: @Service\n25: public class RepaymentService {\n26: \n27:     private static final Logger log = LoggerFactory.getLogger(RepaymentService.class);\n28: \n29:     private final RepaymentOrderRepository orderRepo;\n30:     private final DrawdownOrderRepository drawdownRepo;\n31:     private final LimitService limitService;\n32:     private final ProductConfigRepository productRepo;\n33:     private final FineractClient fineract;\n34:     private final SimulatorClient simulator;\n\n[source] external-simulator-repo/src/main/resources/application.yml:1-19\n1: server:\n2:   port: 8093\n3: \n4: spring:\n5:   application:\n6:     name: loan-external-simulator\n7:   datasource:\n8:     url: jdbc:h2:file:./data/simulator;MODE=LEGACY\n9:     username: sa\n10:     password: \"\"\n11:   jpa:\n12:     hibernate:\n13:       ddl-auto: update\n14:     open-in-view: false\n15: \n16: simulator:\n17:   default-scenario: SYNC_SUCCESS      # 未配置场景的 bizOrderNo 默认同步成功\n18:   callback-max-attempts: 3            # 回调投递失败重试次数，超过后等待中台查单\n19:   middle-callback-url: http://localhost:8092/middle/api/v1/callbacks/external-result\n\n[source] external-simulator-repo/src/main/java/com/rsd/simulator/CallbackClient.java:9-15\n9: /** 中台回调投递客户端。 */\n10: @Component\n11: public class CallbackClient {\n12: \n13:     private final SimulatorProps props;\n14:     private final RestClient http;\n\n[requirement] requirements/接口与状态约定.md:27-36\n27: ### 中台 ↔ 外部模拟服务（simulator，端口 8093）\n28: \n29: | 操作 | 端点 | 说明 |\n30: | --- | --- | --- |\n31: | 提交付款 | `POST /sim/api/v1/payments` | 幂等按 bizOrderNo |\n32: | 提交扣款 | `POST /sim/api/v1/deductions` | |\n33: | 查结果 | `GET /sim/api/v1/payments/{extSerialNo}`、`GET /sim/api/v1/deductions/{extSerialNo}` | 返回真实终态 |\n34: | 回调 | `POST {middle}/middle/api/v1/callbacks/external-result` | type: PAYMENT/DEDUCTION，result: SUCCESS/FAILED |\n35: | 场景配置 | `PUT /sim/api/v1/scenarios/{bizOrderNo}` | SYNC_SUCCESS / SYNC_REJECT / ASYNC_SUCCESS_DELAY / ASYNC_FAIL / NO_CALLBACK_NEED_QUERY |\n\n[source] external-simulator-repo/src/main/java/com/rsd/simulator/CallbackDispatcher.java:12-27 [已截断，下一行 14，请 Read 续读]\n12: /**\n13:  * 回调投递任务：对异步场景的交易，到期后产生终态并回调中台。",
+      "selected": [
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/external/ExternalResultController.java:22-39",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/external/ExternalResultController.java",
+          "lineStart": 22,
+          "lineEnd": 38,
+          "unitType": "class",
+          "symbolName": "ExternalResultController",
+          "deprecated": false,
+          "content": "/**\n * 外部结果回调接收（模拟服务 → 中台）：付款、扣款、授信审批。\n * 幂等由各业务服务保证：终态业务单收到重复回调直接确认（DUPLICATE_CALLBACK 不改变状态）。\n * 回调成功只代表外部环节完成；提款是否成功以中台入账状态为准，授信是否生效以中台账本为准。\n */\n@RestController\n@RequestMapping(\"/middle/api/v1/callbacks\")\npublic class ExternalResultController {\n\n    private static final Logger log = LoggerFactory.getLogger(ExternalResultController.class);\n\n    private final DrawdownOrderRepository drawdownRepo;\n    private final RepaymentOrderRepository repayRepo;\n    private final CreditApplicationRepository creditRepo;\n    private final DrawdownService drawdownService;\n    private final RepaymentService repaymentService;\n    private final CreditService creditService;",
+          "score": 0.00967741935483871,
+          "rerankScore": 5.598179817199707,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/compensation/CompensationTask.java:21-41",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+          "lineStart": 21,
+          "lineEnd": 40,
+          "unitType": "class",
+          "symbolName": "CompensationTask",
+          "deprecated": false,
+          "content": "/**\n * 查单与补偿任务（不引入消息中间件，用定时任务收敛异步结果，见边界设计原则 6）：\n * 1. 提交失败 → 重新提交（模拟服务按 bizOrderNo 幂等）；\n * 2. 受理中超时未收到回调 → 主动查单（\"回调未送达，通过查单取得结果\"场景）；\n * 3. 提款入账未完成（TO_BOOK / RETRY_NEEDED）→ 重试入账，先查借据是否已 ACTIVE 防重复放款；\n * 4. 授信审批受理超时 → 查审批结论。\n */\n@Component\npublic class CompensationTask {\n\n    private static final Logger log = LoggerFactory.getLogger(CompensationTask.class);\n\n    private final DrawdownOrderRepository drawdownRepo;\n    private final RepaymentOrderRepository repayRepo;\n    private final CreditApplicationRepository creditRepo;\n    private final DrawdownService drawdownService;\n    private final RepaymentService repaymentService;\n    private final CreditService creditService;\n    private final long paymentQueryTimeoutSeconds;\n    private final int bookingRetryMax;",
+          "score": 0.00909090909090909,
+          "rerankScore": 3.0041773319244385,
+          "truncated": false
+        },
+        {
+          "id": "requirements:产品规则.md:43-49",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "产品规则.md",
+          "lineStart": 43,
+          "lineEnd": 48,
+          "unitType": "section",
+          "symbolName": "### 6. 支付与状态规则",
+          "deprecated": false,
+          "content": "### 6. 支付与状态规则\n\n- 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n- \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n- 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n- 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。",
+          "score": 0.016287678476996297,
+          "rerankScore": 2.6220762729644775,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/repay/RepaymentService.java:142-151",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+          "lineStart": 142,
+          "lineEnd": 151,
+          "unitType": "function",
+          "symbolName": "RepaymentService.queryAndSettle",
+          "deprecated": false,
+          "content": "    /** 查单收敛（补偿任务用）。 */\n    @Transactional\n    public void queryAndSettle(RepaymentOrder order) {\n        SimulatorClient.ExternalStatus status = simulator.query(\"DEDUCTION\", order.getExtSerialNo());\n        if (\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status())) {\n            onDeductionResult(order, status.status());\n        } else if (\"RESULT_UNCONFIRMED\".equals(status.status())) {\n            order.setDeductionStatus(RepaymentOrder.DeductionStatus.RESULT_UNCONFIRMED);\n        }\n    }",
+          "score": 0.006060606060606061,
+          "rerankScore": 2.5269649028778076,
+          "truncated": false
+        },
+        {
+          "id": "external-simulator-repo:src/main/java/com/rsd/simulator/ExtTransaction.java:9-42",
+          "sourceId": "external-simulator-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/simulator/ExtTransaction.java",
+          "lineStart": 9,
+          "lineEnd": 41,
+          "unitType": "class",
+          "symbolName": "ExtTransaction",
+          "deprecated": false,
+          "content": "/**\n * 外部交易流水：付款（PAYMENT）与扣款（DEDUCTION）。\n * 状态：PROCESSING → SUCCESS | FAILED。回调未送达时中台查单也能取到真实终态（query 永远返回真实状态）。\n * 场景配置挂在 bizOrderNo 上，不混入正式业务字段（边界设计 §7）。\n */\n@Entity\n@Table(name = \"ext_transaction\")\npublic class ExtTransaction {\n\n    public enum Kind { PAYMENT, DEDUCTION, APPROVAL }\n\n    public enum Scenario {\n        SYNC_SUCCESS, SYNC_REJECT, ASYNC_SUCCESS_DELAY, ASYNC_FAIL, NO_CALLBACK_NEED_QUERY\n    }\n\n    @Id\n    private String extSerialNo;\n    private Kind kind;\n    private String bizOrderNo;\n    private BigDecimal amount;\n    private String accountName;     // 收款人/付款人\n    private String accountNo;\n    private String status;          // PROCESSING / SUCCESS / FAILED\n    private Scenario scenario;\n    private int delaySeconds;\n    private LocalDateTime processDueAt;      // 异步结果的产生时间\n    private boolean resultResolved;          // 终态是否已产生\n    private boolean callbackSuppressed;      // NO_CALLBACK 场景：终态已产生但回调不投递\n    private LocalDateTime finishedAt;\n    private LocalDateTime createdAt;\n    // 审批类交易（APPROVAL）专用：结论与批准额度\n    private String resultDetail;    // APPROVED / REJECTED\n    private BigDecimal resultAmount; // 批准额度（可能低于申请额度）",
+          "score": 0.006818181818181818,
+          "rerankScore": 2.474518299102783,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/drawdown/DrawdownService.java:165-181",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 165,
+          "lineEnd": 181,
+          "unitType": "function",
+          "symbolName": "DrawdownService.submitPayment",
+          "deprecated": false,
+          "content": "    /** 提交付款；同步终态就地结算，受理中等待回调或查单。 */\n    public void submitPayment(DrawdownOrder order) {\n        try {\n            SimulatorClient.PaymentSubmission sub = simulator.submitPayment(\n                    order.getBizOrderNo(), order.getPayeeName(), order.getPayeeAccount(), order.getAmount());\n            order.setExtSerialNo(sub.extSerialNo());\n            order.setUpdatedAt(Ids.now());\n            switch (sub.status()) {\n                case \"SUCCESS\" -> onPaymentResult(order, \"SUCCESS\");\n                case \"REJECTED\" -> onPaymentResult(order, \"FAILED\");\n                default -> order.setPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n            }\n        } catch (Exception e) {\n            // 提交失败保留 TO_SUBMIT，由补偿任务重试（模拟服务按 bizOrderNo 幂等）\n            log.warn(\"付款提交失败，等待补偿重试: {} {}\", order.getBizOrderNo(), e.getMessage());\n        }\n    }",
+          "score": 0.008108108108108109,
+          "rerankScore": 2.4295685291290283,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/external/SimulatorClient.java:41-50",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/external/SimulatorClient.java",
+          "lineStart": 41,
+          "lineEnd": 50,
+          "unitType": "function",
+          "symbolName": "SimulatorClient.query",
+          "deprecated": false,
+          "content": "    /** 查单：模拟服务返回外部交易真实终态（回调未送达时也查得到）。 */\n    @SuppressWarnings(\"unchecked\")\n    public ExternalStatus query(String kind, String extSerialNo) {\n        String path = \"PAYMENT\".equals(kind) ? \"/sim/api/v1/payments/\" : \"DEDUCTION\".equals(kind) ? \"/sim/api/v1/deductions/\" : \"/sim/api/v1/approvals/\";\n        try {\n            return http.get().uri(path + extSerialNo).retrieve().body(ExternalStatus.class);\n        } catch (Exception e) {\n            throw new BizException(BizException.Code.SIMULATOR_ERROR);\n        }\n    }",
+          "score": 0.007894736842105263,
+          "rerankScore": 2.280407667160034,
+          "truncated": false
+        },
+        {
+          "id": "business-context:cross-system.md:3-6",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "cross-system.md",
+          "lineStart": 3,
+          "lineEnd": 5,
+          "unitType": "section",
+          "symbolName": "## 付款结果的收敛",
+          "deprecated": false,
+          "content": "## 付款结果的收敛\n\n外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。",
+          "score": 0.01608118657298985,
+          "rerankScore": 2.274495840072632,
+          "truncated": false
+        },
+        {
+          "id": "external-simulator-repo:src/main/java/com/rsd/simulator/CallbackLog.java:8-20",
+          "sourceId": "external-simulator-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/simulator/CallbackLog.java",
+          "lineStart": 8,
+          "lineEnd": 19,
+          "unitType": "class",
+          "symbolName": "CallbackLog",
+          "deprecated": false,
+          "content": "/** 回调投递记录：每次投递的成败都落库，支撑\"回调未送达，通过查单取得结果\"场景的调查。 */\n@Entity\n@Table(name = \"callback_log\")\npublic class CallbackLog {\n\n    @Id\n    private String logId;\n    private String extSerialNo;\n    private int attempt;\n    private boolean success;\n    private String response;\n    private LocalDateTime deliveredAt;",
+          "score": 0.007142857142857143,
+          "rerankScore": 1.754328727722168,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/compensation/CompensationTask.java:57-102",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+          "lineStart": 57,
+          "lineEnd": 102,
+          "unitType": "function",
+          "symbolName": "CompensationTask.compensate",
+          "deprecated": false,
+          "content": "    @Scheduled(fixedDelayString = \"${compensation.poll-interval-ms:15000}\")\n    public void compensate() {\n        // 提款：提交失败重试\n        drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.TO_SUBMIT)\n                .forEach(drawdownService::submitPayment);\n        // 提款：受理超时主动查单\n        LocalDateTime deadline = LocalDateTime.now().minus(Duration.ofSeconds(paymentQueryTimeoutSeconds));\n        List<DrawdownOrder> pendingPayments = drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n        for (DrawdownOrder order : pendingPayments) {\n            if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"提款付款超时，主动查单: {}\", order.getBizOrderNo());\n                drawdownService.queryAndSettle(order);\n            }\n        }\n        // 提款：入账未完成 → 重试（含\"外部已成功、中台未入账\"的可恢复状态）\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\n            drawdownService.book(order);\n        }\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\n            if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\n                drawdownService.book(order);\n            }\n        }\n        // 还款：同样的三条补偿线\n        repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.TO_SUBMIT)\n                .forEach(repaymentService::submitDeduction);\n        for (RepaymentOrder order : repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.PROCESSING)) {\n            if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"还款扣款超时，主动查单: {}\", order.getBizOrderNo());\n                repaymentService.queryAndSettle(order);\n            }\n        }\n        // 扣款成功但入账未完成的还款订单（PROCESSING 且扣款已 SUCCESS）\n        repayRepo.findByDeductionStatus(RepaymentOrder.DeductionStatus.SUCCESS).stream()\n                .filter(order -> order.getStatus() == RepaymentOrder.Status.PROCESSING)\n                .forEach(repaymentService::book);\n        // 授信审批：未拿到流水号的重试提交；受理超时的查审批结论\n        creditRepo.findByStatus(CreditApplicationOrder.Status.PROCESSING).forEach(order -> {\n            if (order.getApprovalExtSerialNo() == null) {\n                creditService.submitApproval(order);\n            } else if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"授信审批超时，主动查单: {}\", order.getBizOrderNo());\n                creditService.queryAndSettle(order);\n            }\n        });\n    }",
+          "score": 0.01054287962234461,
+          "rerankScore": 1.7140001058578491,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:5-10",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 5,
+          "lineEnd": 9,
+          "unitType": "section",
+          "symbolName": "## 一、标识链与通用约定",
+          "deprecated": false,
+          "content": "## 一、标识链与通用约定\n\n- 标识链：`channelRefNo`（CHN-，渠道生成）→ `bizOrderNo`（DD-提款 / RP-还款 / CR-授信，中台生成）→ `extSerialNo`（EXT-P/EXT-D，模拟服务生成）。\n- 金额单位元、两位小数；期限单位月；日期 ISO-8601。\n- 幂等键：中台→外部提交按 `bizOrderNo`；外部→中台回调用 `extSerialNo`+`bizOrderNo`；重复请求返回首次结果，不产生新记录。",
+          "score": 0.008450704225352112,
+          "rerankScore": 1.5505045652389526,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/repay/RepaymentService.java:19-35",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+          "lineStart": 19,
+          "lineEnd": 34,
+          "unitType": "class",
+          "symbolName": "RepaymentService",
+          "deprecated": false,
+          "content": "/**\n * 还款编排：订单 → 模拟扣款 → 确认到账 → Fineract 还款入账 → 读取分配明细 → 按本金逐层恢复占用。\n * 规则（docs/三系统边界设计.md §6）：归还利息、费用不恢复本金授信额度；\n * 分配顺序由 Fineract 产品策略决定，中台只保存分配结果，不在多个系统重复判断分配。\n */\n@Service\npublic class RepaymentService {\n\n    private static final Logger log = LoggerFactory.getLogger(RepaymentService.class);\n\n    private final RepaymentOrderRepository orderRepo;\n    private final DrawdownOrderRepository drawdownRepo;\n    private final LimitService limitService;\n    private final ProductConfigRepository productRepo;\n    private final FineractClient fineract;\n    private final SimulatorClient simulator;",
+          "score": 0.006060606060606061,
+          "rerankScore": 1.4926265478134155,
+          "truncated": false
+        },
+        {
+          "id": "external-simulator-repo:src/main/resources/application.yml:1-19",
+          "sourceId": "external-simulator-repo",
+          "kind": "source",
+          "path": "src/main/resources/application.yml",
+          "lineStart": 1,
+          "lineEnd": 19,
+          "unitType": "file_region",
+          "symbolName": "",
+          "deprecated": false,
+          "content": "server:\n  port: 8093\n\nspring:\n  application:\n    name: loan-external-simulator\n  datasource:\n    url: jdbc:h2:file:./data/simulator;MODE=LEGACY\n    username: sa\n    password: \"\"\n  jpa:\n    hibernate:\n      ddl-auto: update\n    open-in-view: false\n\nsimulator:\n  default-scenario: SYNC_SUCCESS      # 未配置场景的 bizOrderNo 默认同步成功\n  callback-max-attempts: 3            # 回调投递失败重试次数，超过后等待中台查单\n  middle-callback-url: http://localhost:8092/middle/api/v1/callbacks/external-result",
+          "score": 0.006521739130434782,
+          "rerankScore": 1.357839822769165,
+          "truncated": false
+        },
+        {
+          "id": "external-simulator-repo:src/main/java/com/rsd/simulator/CallbackClient.java:9-15",
+          "sourceId": "external-simulator-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/simulator/CallbackClient.java",
+          "lineStart": 9,
+          "lineEnd": 14,
+          "unitType": "class",
+          "symbolName": "CallbackClient",
+          "deprecated": false,
+          "content": "/** 中台回调投递客户端。 */\n@Component\npublic class CallbackClient {\n\n    private final SimulatorProps props;\n    private final RestClient http;",
+          "score": 0.006122448979591836,
+          "rerankScore": 1.2718021869659424,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:27-36",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 27,
+          "lineEnd": 35,
+          "unitType": "section",
+          "symbolName": "### 中台 ↔ 外部模拟服务（simulator，端口 8093）",
+          "deprecated": false,
+          "content": "### 中台 ↔ 外部模拟服务（simulator，端口 8093）\n\n| 操作 | 端点 | 说明 |\n| --- | --- | --- |\n| 提交付款 | `POST /sim/api/v1/payments` | 幂等按 bizOrderNo |\n| 提交扣款 | `POST /sim/api/v1/deductions` | |\n| 查结果 | `GET /sim/api/v1/payments/{extSerialNo}`、`GET /sim/api/v1/deductions/{extSerialNo}` | 返回真实终态 |\n| 回调 | `POST {middle}/middle/api/v1/callbacks/external-result` | type: PAYMENT/DEDUCTION，result: SUCCESS/FAILED |\n| 场景配置 | `PUT /sim/api/v1/scenarios/{bizOrderNo}` | SYNC_SUCCESS / SYNC_REJECT / ASYNC_SUCCESS_DELAY / ASYNC_FAIL / NO_CALLBACK_NEED_QUERY |",
+          "score": 0.007594936708860759,
+          "rerankScore": 1.1032031774520874,
+          "truncated": false
+        },
+        {
+          "id": "external-simulator-repo:src/main/java/com/rsd/simulator/CallbackDispatcher.java:12-27",
+          "sourceId": "external-simulator-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/simulator/CallbackDispatcher.java",
+          "lineStart": 12,
+          "lineEnd": 13,
+          "unitType": "class",
+          "symbolName": "CallbackDispatcher",
+          "deprecated": false,
+          "content": "/**\n * 回调投递任务：对异步场景的交易，到期后产生终态并回调中台。",
+          "score": 0.0069767441860465115,
+          "rerankScore": 1.0631667375564575,
+          "truncated": true
+        }
+      ]
+    },
+    {
+      "caseId": "v2-channel-display",
+      "candidateCount": 50,
+      "candidateMetrics": {
+        "covered": 1,
+        "required": 3,
+        "coverage": 0.3333333333333333,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": null,
+        "groups": [
+          {
+            "id": "channel-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "middle-booking-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "success-boundary",
+            "role": "business_semantics",
+            "covered": true
+          }
+        ]
+      },
+      "contextMetrics": {
+        "covered": 1,
+        "required": 3,
+        "coverage": 0.3333333333333333,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": null,
+        "groups": [
+          {
+            "id": "channel-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "middle-booking-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "success-boundary",
+            "role": "business_semantics",
+            "covered": true
+          }
+        ]
+      },
+      "baselineContextMetrics": {
+        "covered": 1,
+        "required": 3,
+        "coverage": 0.3333333333333333,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": null,
+        "groups": [
+          {
+            "id": "channel-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "middle-booking-fields",
+            "role": "implementation",
+            "covered": false
+          },
+          {
+            "id": "success-boundary",
+            "role": "business_semantics",
+            "covered": true
+          }
+        ]
+      },
+      "retrieval": {
+        "timings": {
+          "retrievalSeconds": 0.0615,
+          "rerankMs": 1066.94
+        },
+        "rerankApplied": true,
+        "rerankReason": null,
+        "rerankBudgetMs": 2000,
+        "rerankCount": 50,
+        "weights": {
+          "bm25": 0.6,
+          "vector": 0.4
+        },
+        "indexVersion": "20261031T044651971523"
+      },
+      "context": "[business_context] business-context/terminology.md:15-19\n15: ## 处理中\n16: \n17: 渠道展示的“处理中”可能对应中台多个尚未完成的内部状态。看到页面仍显示处理中，不能直接推断外部付款失败或业务单已经终止；应先确认中台状态和是否已完成后续入账。\n18: \n19: 依据：`requirements/接口与状态约定.md`、`docs/三系统边界设计.md` §3。\n\n[requirement] requirements/接口与状态约定.md:37-41\n37: ### 中台状态\n38: \n39: - 提款业务单：`PROCESSING → EXTERNAL_SUCCESS_BOOKING_PENDING → SUCCESS | FAILED`（提交前可 `CANCELLED`）；付款指令状态 `TO_SUBMIT/PROCESSING/SUCCESS/FAILED/RESULT_UNCONFIRMED`；入账状态 `TO_BOOK/BOOKED/RETRY_NEEDED`。\n40: - 还款订单：`PROCESSING → SUCCESS | FAILED`；分配明细含 principalPortion / interestPortion / feePortion。\n\n[requirement] requirements/产品规则.md:43-49\n43: ### 6. 支付与状态规则\n44: \n45: - 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n46: - \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n47: - 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n48: - 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:9-46\n9: /**\n10:  * 提款业务单（阶段 2：单收款人，支付信息直接挂在本单上；阶段 4 多收款人引入 PaymentInstruction 子表，\n11:  * 一个业务单对应多条支付指令、多个成功批次形成多笔借据）。\n12:  * 状态机见 docs/接口契约-阶段2.md §2；\"外部已付款成功、中台入账未完成\"是显式可恢复状态。\n13:  */\n14: @Entity\n15: @Table(name = \"drawdown_order\")\n16: public class DrawdownOrder {\n17: \n18:     public enum Status { PROCESSING, EXTERNAL_SUCCESS_BOOKING_PENDING, SUCCESS, FAILED, CANCELLED }\n19: \n20:     /** 外部付款指令状态（本单一条指令）。 */\n21:     public enum PaymentStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n22: \n23:     /** 中台入账（Fineract 放款登记）状态。 */\n24:     public enum BookingStatus { NONE, TO_BOOK, BOOKED, RETRY_NEEDED }\n25: \n26:     @Id\n27:     private String bizOrderNo;\n28:     private String creditId;\n29:     private String quoteNo;\n30:     private String productId;\n31:     private BigDecimal amount;\n32:     private String payeeName;\n33:     private String payeeAccount;\n34:     private String purpose;\n35: \n36:     private Status status;\n37:     private PaymentStatus paymentStatus;\n38:     private String extSerialNo;\n39:     private BookingStatus bookingStatus;\n40:     private Integer bookingRetryCount;\n41:     private String bookingLastError;\n42:     private String loanAccountNo;       // Fineract 借据 id，创建成功即写入（放款前即存在）\n43:     private BigDecimal bookedAmount;    // 实际入账金额\n44:     private LocalDateTime createdAt;\n45:     private LocalDateTime updatedAt;\n\n[source] channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:194-203\n194:     /**\n195:      * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态\n196:      * 对外统一展示\"PROCESSING\"；成功与失败直传。映射关系保留在 record.middleRawStatus。\n197:      */\n198:     private String displayOf(String middleStatus) {\n199:         return switch (middleStatus) {\n200:             case \"SUCCESS\", \"FAILED\" -> middleStatus;\n201:             default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n202:         };\n203:     }\n\n[requirement] requirements/系统职责.md:26-32\n26: ## 各应用职责边界\n27: \n28: - **渠道后端**：渠道产品开放规则（金额上限、期限、开关）、字段转换、申请入口、`channelRefNo` 生成与映射、展示状态聚合（中台多个内部状态对外可合并为\"处理中\"，但保留原始状态）。渠道不做业务规则校验，只做渠道规则。\n29: - **贷款中台**：产品条件与报价、额度预占/实占/释放、提款编排（含\"外部已付款成功、中台入账未完成\"可恢复状态）、还款编排与分配结果保存、补偿查单。\n30: - **Fineract**：贷款账户生命周期、还款计划生成与重算、还款金额在费用/罚息/利息/本金上的分配、结清状态判定。中台不重复实现分配算法。\n31: - **外部模拟服务**：按场景配置模拟付款/扣款执行结果（同步成功/同步拒绝/延迟回调/回调不送达），只回放结果，不做业务判断。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java:22-39\n22: /**\n23:  * 外部结果回调接收（模拟服务 → 中台）：付款、扣款、授信审批。\n24:  * 幂等由各业务服务保证：终态业务单收到重复回调直接确认（DUPLICATE_CALLBACK 不改变状态）。\n25:  * 回调成功只代表外部环节完成；提款是否成功以中台入账状态为准，授信是否生效以中台账本为准。\n26:  */\n27: @RestController\n28: @RequestMapping(\"/middle/api/v1/callbacks\")\n29: public class ExternalResultController {\n30: \n31:     private static final Logger log = LoggerFactory.getLogger(ExternalResultController.class);\n32: \n33:     private final DrawdownOrderRepository drawdownRepo;\n34:     private final RepaymentOrderRepository repayRepo;\n35:     private final CreditApplicationRepository creditRepo;\n36:     private final DrawdownService drawdownService;\n37:     private final RepaymentService repaymentService;\n38:     private final CreditService creditService;\n\n[business_context] business-context/cross-system.md:3-6\n3: ## 付款结果的收敛\n4: \n5: 外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。\n\n[source] mifos-web-repo/src/app/organization/tellers/common-resolvers/teller-transaction-template.resolver.ts:18-26\n18:   /**\n19:    * Returns the cashier transaction data.\n20:    * @returns {Observable<any>}\n21:    */\n22:   resolve(route: ActivatedRouteSnapshot): Observable<any> {\n23:     const cashierId = route.parent.paramMap.get('id');\n24:     const tellerId = route.parent.parent.paramMap.get('id');\n25:     return this.organizationService.getCashierTransactionTemplate(tellerId, cashierId);\n26:   }\n\n[source] mifos-web-repo/src/app/organization/tellers/teller-transaction-template.resolver.ts:22-30\n22:   /**\n23:    * Returns the cashier transaction data.\n24:    * @returns {Observable<any>}\n25:    */\n26:   resolve(route: ActivatedRouteSnapshot): Observable<any> {\n27:     const cashierId = route.parent.paramMap.get('id');\n28:     const tellerId = route.parent.parent.paramMap.get('id');\n29:     return this.organizationService.getCashierTransactionTemplate(tellerId, cashierId);\n30:   }\n\n[requirement] requirements/系统职责.md:33-37\n33: ## 调查注意\n34: \n35: - 已实现（阶段 2/3）：三系统提款还款链路、多层额度台账（总授信/产品子额度/集团限额/担保覆盖）、授信申请与提额降额审批、冻结/解冻、产品版本快照。\n36: - 优惠券、担保责任生命周期（担保申请/确认/代偿/解除）、多收款人多批次属于阶段 4 计划，**当前代码中不存在**；客户业务前端（Vue）尚未建库。调查结论不得把它们当成已实现。\n37: - 阶段 2 主链路：报价 → 提款申请（逐层预占＋建借据＋受托支付单收款人）→ 外部付款 → 中台入账（Fineract 放款）→ 逐层实占；还款：订单 → 扣款 → Fineract 入账 → 按本金部分逐层恢复额度。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java:21-41\n21: /**\n22:  * 查单与补偿任务（不引入消息中间件，用定时任务收敛异步结果，见边界设计原则 6）：\n23:  * 1. 提交失败 → 重新提交（模拟服务按 bizOrderNo 幂等）；\n24:  * 2. 受理中超时未收到回调 → 主动查单（\"回调未送达，通过查单取得结果\"场景）；\n25:  * 3. 提款入账未完成（TO_BOOK / RETRY_NEEDED）→ 重试入账，先查借据是否已 ACTIVE 防重复放款；\n26:  * 4. 授信审批受理超时 → 查审批结论。\n27:  */\n28: @Component\n29: public class CompensationTask {\n30: \n31:     private static final Logger log = LoggerFactory.getLogger(CompensationTask.class);\n32: \n33:     private final DrawdownOrderRepository drawdownRepo;\n34:     private final RepaymentOrderRepository repayRepo;\n35:     private final CreditApplicationRepository creditRepo;\n36:     private final DrawdownService drawdownService;\n37:     private final RepaymentService repaymentService;\n38:     private final CreditService creditService;\n39:     private final long paymentQueryTimeoutSeconds;\n40:     private final int bookingRetryMax;\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java:15-33\n15: /**\n16:  * 授信申请与调整编排：申请单 → 模拟审批（回调/查单）→ 中台生效。\n17:  * 审批结果只是数据；额度生效、降额后保留占用、冻结状态全部由中台账本决定（边界设计 §6 判例）。\n18:  * 冻结/解冻是运营操作，不走审批。\n19:  */\n20: @Service\n21: public class CreditService {\n22: \n23:     private static final Logger log = LoggerFactory.getLogger(CreditService.class);\n24: \n25:     private final CreditApplicationRepository applicationRepo;\n26:     private final CreditLimitRepository limitRepo;\n27:     private final LimitService limitService;\n28:     private final ProductSubLimitRepository subLimitRepo;\n29:     private final GroupMemberRepository groupMemberRepo;\n30:     private final GuaranteeCoverageRepository coverageRepo;\n31:     private final SimulatorClient simulator;\n32:     private final ObjectMapper objectMapper;\n\n[requirement] requirements/接口与状态约定.md:5-10\n5: ## 一、标识链与通用约定\n6: \n7: - 标识链：`channelRefNo`（CHN-，渠道生成）→ `bizOrderNo`（DD-提款 / RP-还款 / CR-授信，中台生成）→ `extSerialNo`（EXT-P/EXT-D，模拟服务生成）。\n8: - 金额单位元、两位小数；期限单位月；日期 ISO-8601。\n9: - 幂等键：中台→外部提交按 `bizOrderNo`；外部→中台回调用 `extSerialNo`+`bizOrderNo`；重复请求返回首次结果，不产生新记录。\n\n[requirement] requirements/接口与状态约定.md:42-45\n42: ## 三、客户前端 ↔ 渠道后端（channel-service，端口 8091）\n43: \n44: `GET /api/drawdown/options?channelId=&creditId=`、`POST /api/drawdowns?channelId=`、`GET /api/drawdowns/{channelRefNo}`、`POST /api/repayments?channelId=`、`GET /api/repayments/{channelRefNo}`。渠道错误码：`CHANNEL_AMOUNT_LIMIT`、`CHANNEL_TERM_LIMIT`、`PRODUCT_NOT_OPEN`。展示状态映射：中台 `PROCESSING/EXTERNAL_SUCCESS_BOOKING_PENDING` 等处理中状态对外统一为 `PROCESSING`，原始状态保留在渠道申请单。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java:11-27\n11:     public enum Code {\n12:         QUOTE_EXPIRED(\"报价已过期，请重新试算\"),\n13:         AMOUNT_CHANGED_NEED_REQUOTE(\"报价条件已变化，需重新确认报价\"),\n14:         LIMIT_INSUFFICIENT(\"可用额度不足\"),\n15:         TERM_NOT_SUPPORTED(\"该产品不支持所选期限\"),\n16:         PRODUCT_NOT_OPEN(\"产品未开放\"),\n17:         DUPLICATE_CALLBACK(\"重复回调已幂等确认\"),\n18:         BOOKING_RETRY_EXHAUSTED(\"入账重试次数已用尽，需人工处理\"),\n19:         LOAN_NOT_FOUND(\"借据不存在\"),\n20:         SIMULATOR_ERROR(\"外部服务不可用\");\n21: \n22:         public final String message;\n23: \n24:         Code(String message) {\n25:             this.message = message;\n26:         }\n27:     }\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java:9-37\n9: /** 还款订单：扣款执行与入账状态。分配明细来自 Fineract 还款交易（本金/利息/费用），中台保存分配结果用于额度恢复与核对。 */\n10: @Entity\n11: @Table(name = \"repayment_order\")\n12: public class RepaymentOrder {\n13: \n14:     public enum Status { PROCESSING, SUCCESS, FAILED }\n15: \n16:     public enum Type { DUE, EARLY_PRINCIPAL, EARLY_SETTLE }\n17: \n18:     public enum DeductionStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n19: \n20:     @Id\n21:     private String bizOrderNo;\n22:     private String loanAccountNo;\n23:     private String creditId;            // 借据所属授信（来自提款业务单关联）\n24:     private String payerAccount;\n25:     private Type type;\n26:     private BigDecimal amount;\n27: \n28:     private Status status;\n29:     private DeductionStatus deductionStatus;\n30:     private String extSerialNo;\n31:     private String fineractTransactionId;\n32:     private BigDecimal principalPortion;   // 分配明细：本金部分（恢复额度依据）\n33:     private BigDecimal interestPortion;\n34:     private BigDecimal feePortion;\n35:     private LocalDateTime createdAt;\n36:     private LocalDateTime updatedAt;\n\n[business_context] business-context/terminology.md:3-8\n3: ## 提款与放款\n4: \n5: 业务上的“提款”指客户在已有授信内形成新的借款，代码和接口通常使用 `drawdown`。Fineract 侧的 `disburse` 表示借据放款，不应把它和渠道侧的“提款申请”当成同一层动作。\n6: \n7: 依据：`requirements/产品规则.md`、`docs/三系统边界设计.md`。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:185-211\n185:     /**\n186:      * 付款结果落业务单。幂等：业务单已终态、或该结果已生效时，直接确认不产生任何新记录。\n187:      */\n188:     @Transactional\n189:     public void onPaymentResult(DrawdownOrder order, String result) {\n190:         if (order.terminal()) {\n191:             return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n192:         }\n193:         order.setUpdatedAt(Ids.now());\n194:         if (\"SUCCESS\".equals(result)) {\n195:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n196:                 return; // 幂等：成功已受理过\n197:             }\n198:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n199:             order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n200:             order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n201:             book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n202:         } else {\n203:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n204:                 return;\n205:             }\n206:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n207:             order.setStatus(DrawdownOrder.Status.FAILED);\n208:             limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n209:                     requiresGuarantee(order.getProductId()), order.getAmount());\n210:         }\n211:     }\n\n[business_context] business-context/boundaries.md:11-15\n11: ## Fineract 与中台的职责\n12: \n13: Fineract 持有借据生命周期、还款计划和还款金额分配结果；中台负责业务编排、业务状态和额度台账。中台不应根据还款总额自行推导本金分配，也不应把外部执行结果直接当成业务终态。\n14: \n15: 依据：`requirements/系统职责.md`、`docs/三系统边界设计.md` §1、§6。\n\n[requirement] requirements/接口与状态约定.md:13-26 [已截断，下一行 14，请 Read 续读]\n13: ### 渠道后端 → 中台（middle，端口 8092）",
+      "selected": [
+        {
+          "id": "business-context:terminology.md:15-19",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "terminology.md",
+          "lineStart": 15,
+          "lineEnd": 19,
+          "unitType": "section",
+          "symbolName": "## 处理中",
+          "deprecated": false,
+          "content": "## 处理中\n\n渠道展示的“处理中”可能对应中台多个尚未完成的内部状态。看到页面仍显示处理中，不能直接推断外部付款失败或业务单已经终止；应先确认中台状态和是否已完成后续入账。\n\n依据：`requirements/接口与状态约定.md`、`docs/三系统边界设计.md` §3。",
+          "score": 0.016393442622950817,
+          "rerankScore": 1.774439811706543,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:37-41",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 37,
+          "lineEnd": 40,
+          "unitType": "section",
+          "symbolName": "### 中台状态",
+          "deprecated": false,
+          "content": "### 中台状态\n\n- 提款业务单：`PROCESSING → EXTERNAL_SUCCESS_BOOKING_PENDING → SUCCESS | FAILED`（提交前可 `CANCELLED`）；付款指令状态 `TO_SUBMIT/PROCESSING/SUCCESS/FAILED/RESULT_UNCONFIRMED`；入账状态 `TO_BOOK/BOOKED/RETRY_NEEDED`。\n- 还款订单：`PROCESSING → SUCCESS | FAILED`；分配明细含 principalPortion / interestPortion / feePortion。",
+          "score": 0.010778577857785777,
+          "rerankScore": -1.2672231197357178,
+          "truncated": false
+        },
+        {
+          "id": "requirements:产品规则.md:43-49",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "产品规则.md",
+          "lineStart": 43,
+          "lineEnd": 48,
+          "unitType": "section",
+          "symbolName": "### 6. 支付与状态规则",
+          "deprecated": false,
+          "content": "### 6. 支付与状态规则\n\n- 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n- \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n- 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n- 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。",
+          "score": 0.009523809523809523,
+          "rerankScore": -2.1551907062530518,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:9-46",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
+          "lineStart": 9,
+          "lineEnd": 45,
+          "unitType": "class",
+          "symbolName": "DrawdownOrder",
+          "deprecated": false,
+          "content": "/**\n * 提款业务单（阶段 2：单收款人，支付信息直接挂在本单上；阶段 4 多收款人引入 PaymentInstruction 子表，\n * 一个业务单对应多条支付指令、多个成功批次形成多笔借据）。\n * 状态机见 docs/接口契约-阶段2.md §2；\"外部已付款成功、中台入账未完成\"是显式可恢复状态。\n */\n@Entity\n@Table(name = \"drawdown_order\")\npublic class DrawdownOrder {\n\n    public enum Status { PROCESSING, EXTERNAL_SUCCESS_BOOKING_PENDING, SUCCESS, FAILED, CANCELLED }\n\n    /** 外部付款指令状态（本单一条指令）。 */\n    public enum PaymentStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n\n    /** 中台入账（Fineract 放款登记）状态。 */\n    public enum BookingStatus { NONE, TO_BOOK, BOOKED, RETRY_NEEDED }\n\n    @Id\n    private String bizOrderNo;\n    private String creditId;\n    private String quoteNo;\n    private String productId;\n    private BigDecimal amount;\n    private String payeeName;\n    private String payeeAccount;\n    private String purpose;\n\n    private Status status;\n    private PaymentStatus paymentStatus;\n    private String extSerialNo;\n    private BookingStatus bookingStatus;\n    private Integer bookingRetryCount;\n    private String bookingLastError;\n    private String loanAccountNo;       // Fineract 借据 id，创建成功即写入（放款前即存在）\n    private BigDecimal bookedAmount;    // 实际入账金额\n    private LocalDateTime createdAt;\n    private LocalDateTime updatedAt;",
+          "score": 0.008571428571428572,
+          "rerankScore": -2.6230151653289795,
+          "truncated": false
+        },
+        {
+          "id": "channel-service-repo:src/main/java/com/rsd/channel/ChannelService.java:194-203",
+          "sourceId": "channel-service-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/channel/ChannelService.java",
+          "lineStart": 194,
+          "lineEnd": 203,
+          "unitType": "function",
+          "symbolName": "ChannelService.displayOf",
+          "deprecated": false,
+          "content": "    /**\n     * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态\n     * 对外统一展示\"PROCESSING\"；成功与失败直传。映射关系保留在 record.middleRawStatus。\n     */\n    private String displayOf(String middleStatus) {\n        return switch (middleStatus) {\n            case \"SUCCESS\", \"FAILED\" -> middleStatus;\n            default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n        };\n    }",
+          "score": 0.007894736842105263,
+          "rerankScore": -2.8817524909973145,
+          "truncated": false
+        },
+        {
+          "id": "requirements:系统职责.md:26-32",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "系统职责.md",
+          "lineStart": 26,
+          "lineEnd": 31,
+          "unitType": "section",
+          "symbolName": "## 各应用职责边界",
+          "deprecated": false,
+          "content": "## 各应用职责边界\n\n- **渠道后端**：渠道产品开放规则（金额上限、期限、开关）、字段转换、申请入口、`channelRefNo` 生成与映射、展示状态聚合（中台多个内部状态对外可合并为\"处理中\"，但保留原始状态）。渠道不做业务规则校验，只做渠道规则。\n- **贷款中台**：产品条件与报价、额度预占/实占/释放、提款编排（含\"外部已付款成功、中台入账未完成\"可恢复状态）、还款编排与分配结果保存、补偿查单。\n- **Fineract**：贷款账户生命周期、还款计划生成与重算、还款金额在费用/罚息/利息/本金上的分配、结清状态判定。中台不重复实现分配算法。\n- **外部模拟服务**：按场景配置模拟付款/扣款执行结果（同步成功/同步拒绝/延迟回调/回调不送达），只回放结果，不做业务判断。",
+          "score": 0.00967741935483871,
+          "rerankScore": -3.0300214290618896,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/external/ExternalResultController.java:22-39",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/external/ExternalResultController.java",
+          "lineStart": 22,
+          "lineEnd": 38,
+          "unitType": "class",
+          "symbolName": "ExternalResultController",
+          "deprecated": false,
+          "content": "/**\n * 外部结果回调接收（模拟服务 → 中台）：付款、扣款、授信审批。\n * 幂等由各业务服务保证：终态业务单收到重复回调直接确认（DUPLICATE_CALLBACK 不改变状态）。\n * 回调成功只代表外部环节完成；提款是否成功以中台入账状态为准，授信是否生效以中台账本为准。\n */\n@RestController\n@RequestMapping(\"/middle/api/v1/callbacks\")\npublic class ExternalResultController {\n\n    private static final Logger log = LoggerFactory.getLogger(ExternalResultController.class);\n\n    private final DrawdownOrderRepository drawdownRepo;\n    private final RepaymentOrderRepository repayRepo;\n    private final CreditApplicationRepository creditRepo;\n    private final DrawdownService drawdownService;\n    private final RepaymentService repaymentService;\n    private final CreditService creditService;",
+          "score": 0.008955223880597015,
+          "rerankScore": -3.6449172496795654,
+          "truncated": false
+        },
+        {
+          "id": "business-context:cross-system.md:3-6",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "cross-system.md",
+          "lineStart": 3,
+          "lineEnd": 5,
+          "unitType": "section",
+          "symbolName": "## 付款结果的收敛",
+          "deprecated": false,
+          "content": "## 付款结果的收敛\n\n外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。",
+          "score": 0.011478431854491827,
+          "rerankScore": -3.9137356281280518,
+          "truncated": false
+        },
+        {
+          "id": "mifos-web-repo:src/app/organization/tellers/common-resolvers/teller-transaction-template.resolver.ts:18-26",
+          "sourceId": "mifos-web-repo",
+          "kind": "source",
+          "path": "src/app/organization/tellers/common-resolvers/teller-transaction-template.resolver.ts",
+          "lineStart": 18,
+          "lineEnd": 26,
+          "unitType": "function",
+          "symbolName": "CashierTransactionTemplateResolver.resolve",
+          "deprecated": false,
+          "content": "  /**\n   * Returns the cashier transaction data.\n   * @returns {Observable<any>}\n   */\n  resolve(route: ActivatedRouteSnapshot): Observable<any> {\n    const cashierId = route.parent.paramMap.get('id');\n    const tellerId = route.parent.parent.paramMap.get('id');\n    return this.organizationService.getCashierTransactionTemplate(tellerId, cashierId);\n  }",
+          "score": 0.006060606060606061,
+          "rerankScore": -4.084300518035889,
+          "truncated": false
+        },
+        {
+          "id": "mifos-web-repo:src/app/organization/tellers/teller-transaction-template.resolver.ts:22-30",
+          "sourceId": "mifos-web-repo",
+          "kind": "source",
+          "path": "src/app/organization/tellers/teller-transaction-template.resolver.ts",
+          "lineStart": 22,
+          "lineEnd": 30,
+          "unitType": "function",
+          "symbolName": "CashierTransactionTemplateResolver.resolve",
+          "deprecated": false,
+          "content": "  /**\n   * Returns the cashier transaction data.\n   * @returns {Observable<any>}\n   */\n  resolve(route: ActivatedRouteSnapshot): Observable<any> {\n    const cashierId = route.parent.paramMap.get('id');\n    const tellerId = route.parent.parent.paramMap.get('id');\n    return this.organizationService.getCashierTransactionTemplate(tellerId, cashierId);\n  }",
+          "score": 0.0058823529411764705,
+          "rerankScore": -4.210277080535889,
+          "truncated": false
+        },
+        {
+          "id": "requirements:系统职责.md:33-37",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "系统职责.md",
+          "lineStart": 33,
+          "lineEnd": 37,
+          "unitType": "section",
+          "symbolName": "## 调查注意",
+          "deprecated": false,
+          "content": "## 调查注意\n\n- 已实现（阶段 2/3）：三系统提款还款链路、多层额度台账（总授信/产品子额度/集团限额/担保覆盖）、授信申请与提额降额审批、冻结/解冻、产品版本快照。\n- 优惠券、担保责任生命周期（担保申请/确认/代偿/解除）、多收款人多批次属于阶段 4 计划，**当前代码中不存在**；客户业务前端（Vue）尚未建库。调查结论不得把它们当成已实现。\n- 阶段 2 主链路：报价 → 提款申请（逐层预占＋建借据＋受托支付单收款人）→ 外部付款 → 中台入账（Fineract 放款）→ 逐层实占；还款：订单 → 扣款 → Fineract 入账 → 按本金部分逐层恢复额度。",
+          "score": 0.00909090909090909,
+          "rerankScore": -4.33684778213501,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/compensation/CompensationTask.java:21-41",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+          "lineStart": 21,
+          "lineEnd": 40,
+          "unitType": "class",
+          "symbolName": "CompensationTask",
+          "deprecated": false,
+          "content": "/**\n * 查单与补偿任务（不引入消息中间件，用定时任务收敛异步结果，见边界设计原则 6）：\n * 1. 提交失败 → 重新提交（模拟服务按 bizOrderNo 幂等）；\n * 2. 受理中超时未收到回调 → 主动查单（\"回调未送达，通过查单取得结果\"场景）；\n * 3. 提款入账未完成（TO_BOOK / RETRY_NEEDED）→ 重试入账，先查借据是否已 ACTIVE 防重复放款；\n * 4. 授信审批受理超时 → 查审批结论。\n */\n@Component\npublic class CompensationTask {\n\n    private static final Logger log = LoggerFactory.getLogger(CompensationTask.class);\n\n    private final DrawdownOrderRepository drawdownRepo;\n    private final RepaymentOrderRepository repayRepo;\n    private final CreditApplicationRepository creditRepo;\n    private final DrawdownService drawdownService;\n    private final RepaymentService repaymentService;\n    private final CreditService creditService;\n    private final long paymentQueryTimeoutSeconds;\n    private final int bookingRetryMax;",
+          "score": 0.007228915662650602,
+          "rerankScore": -4.552484512329102,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/credit/CreditService.java:15-33",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+          "lineStart": 15,
+          "lineEnd": 32,
+          "unitType": "class",
+          "symbolName": "CreditService",
+          "deprecated": false,
+          "content": "/**\n * 授信申请与调整编排：申请单 → 模拟审批（回调/查单）→ 中台生效。\n * 审批结果只是数据；额度生效、降额后保留占用、冻结状态全部由中台账本决定（边界设计 §6 判例）。\n * 冻结/解冻是运营操作，不走审批。\n */\n@Service\npublic class CreditService {\n\n    private static final Logger log = LoggerFactory.getLogger(CreditService.class);\n\n    private final CreditApplicationRepository applicationRepo;\n    private final CreditLimitRepository limitRepo;\n    private final LimitService limitService;\n    private final ProductSubLimitRepository subLimitRepo;\n    private final GroupMemberRepository groupMemberRepo;\n    private final GuaranteeCoverageRepository coverageRepo;\n    private final SimulatorClient simulator;\n    private final ObjectMapper objectMapper;",
+          "score": 0.006666666666666666,
+          "rerankScore": -4.577176570892334,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:5-10",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 5,
+          "lineEnd": 9,
+          "unitType": "section",
+          "symbolName": "## 一、标识链与通用约定",
+          "deprecated": false,
+          "content": "## 一、标识链与通用约定\n\n- 标识链：`channelRefNo`（CHN-，渠道生成）→ `bizOrderNo`（DD-提款 / RP-还款 / CR-授信，中台生成）→ `extSerialNo`（EXT-P/EXT-D，模拟服务生成）。\n- 金额单位元、两位小数；期限单位月；日期 ISO-8601。\n- 幂等键：中台→外部提交按 `bizOrderNo`；外部→中台回调用 `extSerialNo`+`bizOrderNo`；重复请求返回首次结果，不产生新记录。",
+          "score": 0.008823529411764706,
+          "rerankScore": -4.610257625579834,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:42-45",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 42,
+          "lineEnd": 44,
+          "unitType": "section",
+          "symbolName": "## 三、客户前端 ↔ 渠道后端（channel-service，端口 8091）",
+          "deprecated": false,
+          "content": "## 三、客户前端 ↔ 渠道后端（channel-service，端口 8091）\n\n`GET /api/drawdown/options?channelId=&creditId=`、`POST /api/drawdowns?channelId=`、`GET /api/drawdowns/{channelRefNo}`、`POST /api/repayments?channelId=`、`GET /api/repayments/{channelRefNo}`。渠道错误码：`CHANNEL_AMOUNT_LIMIT`、`CHANNEL_TERM_LIMIT`、`PRODUCT_NOT_OPEN`。展示状态映射：中台 `PROCESSING/EXTERNAL_SUCCESS_BOOKING_PENDING` 等处理中状态对外统一为 `PROCESSING`，原始状态保留在渠道申请单。",
+          "score": 0.014682539682539682,
+          "rerankScore": -5.1188836097717285,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/common/BizException.java:11-27",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/common/BizException.java",
+          "lineStart": 11,
+          "lineEnd": 27,
+          "unitType": "class",
+          "symbolName": "BizException.Code",
+          "deprecated": false,
+          "content": "    public enum Code {\n        QUOTE_EXPIRED(\"报价已过期，请重新试算\"),\n        AMOUNT_CHANGED_NEED_REQUOTE(\"报价条件已变化，需重新确认报价\"),\n        LIMIT_INSUFFICIENT(\"可用额度不足\"),\n        TERM_NOT_SUPPORTED(\"该产品不支持所选期限\"),\n        PRODUCT_NOT_OPEN(\"产品未开放\"),\n        DUPLICATE_CALLBACK(\"重复回调已幂等确认\"),\n        BOOKING_RETRY_EXHAUSTED(\"入账重试次数已用尽，需人工处理\"),\n        LOAN_NOT_FOUND(\"借据不存在\"),\n        SIMULATOR_ERROR(\"外部服务不可用\");\n\n        public final String message;\n\n        Code(String message) {\n            this.message = message;\n        }\n    }",
+          "score": 0.006593406593406593,
+          "rerankScore": -5.135368824005127,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/repay/RepaymentOrder.java:9-37",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/repay/RepaymentOrder.java",
+          "lineStart": 9,
+          "lineEnd": 36,
+          "unitType": "class",
+          "symbolName": "RepaymentOrder",
+          "deprecated": false,
+          "content": "/** 还款订单：扣款执行与入账状态。分配明细来自 Fineract 还款交易（本金/利息/费用），中台保存分配结果用于额度恢复与核对。 */\n@Entity\n@Table(name = \"repayment_order\")\npublic class RepaymentOrder {\n\n    public enum Status { PROCESSING, SUCCESS, FAILED }\n\n    public enum Type { DUE, EARLY_PRINCIPAL, EARLY_SETTLE }\n\n    public enum DeductionStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n\n    @Id\n    private String bizOrderNo;\n    private String loanAccountNo;\n    private String creditId;            // 借据所属授信（来自提款业务单关联）\n    private String payerAccount;\n    private Type type;\n    private BigDecimal amount;\n\n    private Status status;\n    private DeductionStatus deductionStatus;\n    private String extSerialNo;\n    private String fineractTransactionId;\n    private BigDecimal principalPortion;   // 分配明细：本金部分（恢复额度依据）\n    private BigDecimal interestPortion;\n    private BigDecimal feePortion;\n    private LocalDateTime createdAt;\n    private LocalDateTime updatedAt;",
+          "score": 0.006382978723404255,
+          "rerankScore": -5.190504550933838,
+          "truncated": false
+        },
+        {
+          "id": "business-context:terminology.md:3-8",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "terminology.md",
+          "lineStart": 3,
+          "lineEnd": 7,
+          "unitType": "section",
+          "symbolName": "## 提款与放款",
+          "deprecated": false,
+          "content": "## 提款与放款\n\n业务上的“提款”指客户在已有授信内形成新的借款，代码和接口通常使用 `drawdown`。Fineract 侧的 `disburse` 表示借据放款，不应把它和渠道侧的“提款申请”当成同一层动作。\n\n依据：`requirements/产品规则.md`、`docs/三系统边界设计.md`。",
+          "score": 0.008695652173913044,
+          "rerankScore": -5.195828437805176,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/drawdown/DrawdownService.java:185-211",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "lineStart": 185,
+          "lineEnd": 211,
+          "unitType": "function",
+          "symbolName": "DrawdownService.onPaymentResult",
+          "deprecated": false,
+          "content": "    /**\n     * 付款结果落业务单。幂等：业务单已终态、或该结果已生效时，直接确认不产生任何新记录。\n     */\n    @Transactional\n    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        }\n    }",
+          "score": 0.007792207792207792,
+          "rerankScore": -5.203661918640137,
+          "truncated": false
+        },
+        {
+          "id": "business-context:boundaries.md:11-15",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "boundaries.md",
+          "lineStart": 11,
+          "lineEnd": 15,
+          "unitType": "section",
+          "symbolName": "## Fineract 与中台的职责",
+          "deprecated": false,
+          "content": "## Fineract 与中台的职责\n\nFineract 持有借据生命周期、还款计划和还款金额分配结果；中台负责业务编排、业务状态和额度台账。中台不应根据还款总额自行推导本金分配，也不应把外部执行结果直接当成业务终态。\n\n依据：`requirements/系统职责.md`、`docs/三系统边界设计.md` §1、§6。",
+          "score": 0.008450704225352112,
+          "rerankScore": -5.216881275177002,
+          "truncated": false
+        },
+        {
+          "id": "requirements:接口与状态约定.md:13-26",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "接口与状态约定.md",
+          "lineStart": 13,
+          "lineEnd": 13,
+          "unitType": "section",
+          "symbolName": "### 渠道后端 → 中台（middle，端口 8092）",
+          "deprecated": false,
+          "content": "### 渠道后端 → 中台（middle，端口 8092）",
+          "score": 0.0075,
+          "rerankScore": -5.388530254364014,
+          "truncated": true
+        }
+      ]
+    },
+    {
+      "caseId": "biz-repaid-limit",
+      "candidateCount": 50,
+      "candidateMetrics": {
+        "covered": 1,
+        "required": 2,
+        "coverage": 0.5,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 0.0,
+        "groups": [
+          {
+            "id": "allocation-meaning",
+            "role": "business_semantics",
+            "covered": true
+          },
+          {
+            "id": "fineract-to-ledger",
+            "role": "relation",
+            "covered": false
+          }
+        ]
+      },
+      "contextMetrics": {
+        "covered": 1,
+        "required": 2,
+        "coverage": 0.5,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 0.0,
+        "groups": [
+          {
+            "id": "allocation-meaning",
+            "role": "business_semantics",
+            "covered": true
+          },
+          {
+            "id": "fineract-to-ledger",
+            "role": "relation",
+            "covered": false
+          }
+        ]
+      },
+      "baselineContextMetrics": {
+        "covered": 1,
+        "required": 2,
+        "coverage": 0.5,
+        "annotatedEvidenceComplete": false,
+        "relationCoverage": 0.0,
+        "groups": [
+          {
+            "id": "allocation-meaning",
+            "role": "business_semantics",
+            "covered": true
+          },
+          {
+            "id": "fineract-to-ledger",
+            "role": "relation",
+            "covered": false
+          }
+        ]
+      },
+      "retrieval": {
+        "timings": {
+          "retrievalSeconds": 0.0436,
+          "rerankMs": 1160.72
+        },
+        "rerankApplied": true,
+        "rerankReason": null,
+        "rerankBudgetMs": 2000,
+        "rerankCount": 50,
+        "weights": {
+          "bm25": 0.6,
+          "vector": 0.4
+        },
+        "indexVersion": "20261031T044651971523"
+      },
+      "context": "[requirement] requirements/产品规则.md:43-49\n43: ### 6. 支付与状态规则\n44: \n45: - 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n46: - \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n47: - 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n48: - 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。\n\n[requirement] requirements/系统职责.md:33-37\n33: ## 调查注意\n34: \n35: - 已实现（阶段 2/3）：三系统提款还款链路、多层额度台账（总授信/产品子额度/集团限额/担保覆盖）、授信申请与提额降额审批、冻结/解冻、产品版本快照。\n36: - 优惠券、担保责任生命周期（担保申请/确认/代偿/解除）、多收款人多批次属于阶段 4 计划，**当前代码中不存在**；客户业务前端（Vue）尚未建库。调查结论不得把它们当成已实现。\n37: - 阶段 2 主链路：报价 → 提款申请（逐层预占＋建借据＋受托支付单收款人）→ 外部付款 → 中台入账（Fineract 放款）→ 逐层实占；还款：订单 → 扣款 → Fineract 入账 → 按本金部分逐层恢复额度。\n\n[business_context] business-context/cross-system.md:7-10\n7: ## 还款金额的归属\n8: \n9: 还款进入 Fineract 后，费用、罚息、利息和本金的拆分由 Fineract 的产品分配规则决定。中台根据返回的分配结果恢复本金占用；“还款总额”不能直接等同于“可恢复额度”。\n\n[business_context] business-context/exceptions.md:3-6\n3: ## 冻结与降额不是同一件事\n4: \n5: 冻结是资格开关：冻结期间不允许新增提款，但已有借据还款仍可恢复占用。降额受限是新的额度上限低于已有占用：不回收已有借据，只限制新的提款，待占用回落到新上限内后再恢复可用。\n\n[business_context] business-context/boundaries.md:11-15\n11: ## Fineract 与中台的职责\n12: \n13: Fineract 持有借据生命周期、还款计划和还款金额分配结果；中台负责业务编排、业务状态和额度台账。中台不应根据还款总额自行推导本金分配，也不应把外部执行结果直接当成业务终态。\n14: \n15: 依据：`requirements/系统职责.md`、`docs/三系统边界设计.md` §1、§6。\n\n[business_context] business-context/cross-system.md:3-6\n3: ## 付款结果的收敛\n4: \n5: 外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java:9-37\n9: /** 还款订单：扣款执行与入账状态。分配明细来自 Fineract 还款交易（本金/利息/费用），中台保存分配结果用于额度恢复与核对。 */\n10: @Entity\n11: @Table(name = \"repayment_order\")\n12: public class RepaymentOrder {\n13: \n14:     public enum Status { PROCESSING, SUCCESS, FAILED }\n15: \n16:     public enum Type { DUE, EARLY_PRINCIPAL, EARLY_SETTLE }\n17: \n18:     public enum DeductionStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n19: \n20:     @Id\n21:     private String bizOrderNo;\n22:     private String loanAccountNo;\n23:     private String creditId;            // 借据所属授信（来自提款业务单关联）\n24:     private String payerAccount;\n25:     private Type type;\n26:     private BigDecimal amount;\n27: \n28:     private Status status;\n29:     private DeductionStatus deductionStatus;\n30:     private String extSerialNo;\n31:     private String fineractTransactionId;\n32:     private BigDecimal principalPortion;   // 分配明细：本金部分（恢复额度依据）\n33:     private BigDecimal interestPortion;\n34:     private BigDecimal feePortion;\n35:     private LocalDateTime createdAt;\n36:     private LocalDateTime updatedAt;\n\n[source] fineract-repo/integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java:1901-1994\n1901:     /**\n1902:      * Test for the successful merchant issued refund and payout refund reversal transaction. A '200' status code is\n1903:      * expected on successful responses.\n1904:      *\n1905:      * @see AdjustLoanTransactionCommandStrategy\n1906:      */\n1907:     @Test\n1908:     public void shouldReturnOkStatusOnSuccessfulTransactionMerchantIssuedAndPayoutRefundReversal() {\n1909:         final String loanProductJSON = new LoanProductTestBuilder() //\n1910:                 .withPrincipal(\"10000000.00\") //\n1911:                 .withNumberOfRepayments(\"24\") //\n1912:                 .withRepaymentAfterEvery(\"1\") //\n1913:                 .withRepaymentTypeAsMonth() //\n1914:                 .withinterestRatePerPeriod(\"2\") //\n1915:                 .withInterestRateFrequencyTypeAsMonths() //\n1916:                 .withAmortizationTypeAsEqualPrincipalPayment() //\n1917:                 .withInterestTypeAsDecliningBalance() //\n1918:                 .currencyDetails(\"0\", \"100\").build(null);\n1919: \n1920:         final LocalDate date = LocalDate.now(Utils.getZoneIdOfTenant());\n1921:         final Long applyLoanRequestId = 5730L;\n1922:         final Long approveLoanRequestId = 5731L;\n1923:         final Long disburseLoanRequestId = 5732L;\n1924:         final Long merchantIssuedRefundRequestId = 5733L;\n1925:         final Long payoutRefundRequestId = 5734L;\n1926:         final Long merchantIssuedRefundReversalRequestId = 5735L;\n1927:         final Long payoutRefundReversalRequestId = 5736L;\n1928:         final Long getLoanRequestId = 5737L;\n1929: \n1930:         // Create product\n1931:         final Integer productId = new LoanTransactionHelper(this.requestSpec, this.responseSpec).getLoanProductId(loanProductJSON);\n1932: \n1933:         // Create client\n1934:         final Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);\n1935:         ClientHelper.verifyClientCreatedOnServer(this.requestSpec, this.responseSpec, clientId);\n1936: \n1937:         // Create an apply loan request\n1938:         final BatchRequest applyLoanRequest = BatchHelper.applyLoanRequestWithClientId(applyLoanRequestId, clientId, productId);\n1939: \n1940:         // Create an approve loan request\n1941:         final BatchRequest approveLoanRequest = BatchHelper.approveLoanRequest(approveLoanRequestId, applyLoanRequestId);\n1942: \n1943:         // Create a disburse loan request\n1944:         final BatchRequest disburseLoanRequest = BatchHelper.disburseLoanRequest(disburseLoanRequestId, approveLoanRequestId,\n1945:                 date.minusDays(1));\n1946: \n1947:         // Create a merchant issued refund request\n1948:         final BatchRequest merchantIssuedRefundRequest = BatchHelper.merchantIssuedRefundRequest(merchantIssuedRefundRequestId,\n1949:                 applyLoanRequestId, \"10\");\n1950: \n1951:         // Create a payout refund request\n1952:         final BatchRequest payoutRefundRequest = BatchHelper.payoutRefundRequest(payoutRefundRequestId, applyLoanRequestId, \"10\");\n1953: \n1954:         // Create a merchant issued refund reversal request\n1955:         final BatchRequest merchantIssuedRefundReversalRequest = BatchHelper\n1956:                 .createAdjustTransactionRequest(merchantIssuedRefundReversalRequestId, merchantIssuedRefundRequestId, \"0\", date);\n1957: \n1958:         // Create a payout refund reversal request\n1959:         final BatchRequest payoutRefundReversalRequest = BatchHelper.createAdjustTransactionRequest(payoutRefundReversalRequestId,\n1960:                 payoutRefundRequestId, \"0\", date);\n1961: \n1962:         // Get loan transactions request\n1963:         final BatchRequest getLoanTransactionsRequest = BatchHelper.getLoanByIdRequest(getLoanRequestId, applyLoanRequestId,\n1964:                 \"associations=transactions\");\n1965: \n1966:         final List<BatchRequest> batchRequests = Arrays.asList(applyLoanRequest, approveLoanRequest, disburseLoanRequest,\n1967:                 merchantIssuedRefundRequest, payoutRefundRequest, merchantIssuedRefundReversalRequest, payoutRefundReversalRequest,\n1968:                 getLoanTransactionsRequest);\n1969: \n1970:         final List<BatchResponse> responses = BatchHelper.postBatchRequestsWithEnclosingTransaction(this.requestSpec, this.responseSpec,\n1971:                 BatchHelper.toJsonString(batchRequests));\n1972: \n1973:         final FromJsonHelper jsonHelper = new FromJsonHelper();\n1974:         final JsonObject merchantIssuedRefund = jsonHelper.parse(responses.get(7).getBody()).getAsJsonObject().get(\"transactions\")\n1975:                 .getAsJsonArray().get(2).getAsJsonObject();\n1976:         final JsonObject payoutRefund = jsonHelper.parse(responses.get(7).getBody()).getAsJsonObject().get(\"transactions\").getAsJsonArray()\n1977:                 .get(3).getAsJsonObject();\n1978:         final JsonArray merchantIssuedDateArray = merchantIssuedRefund.get(\"reversedOnDate\").getAsJsonArray();\n1979:         final LocalDate merchantIssuedDate = LocalDate.of(merchantIssuedDateArray.get(0).getAsInt(),\n1980:                 merchantIssuedDateArray.get(1).getAsInt(), merchantIssuedDateArray.get(2).getAsInt());\n1981:         final JsonArray payoutRefundDateArray = payoutRefund.getAsJsonObject().get(\"reversedOnDate\").getAsJsonArray();\n1982:         final LocalDate payoutRefundDate = LocalDate.of(payoutRefundDateArray.get(0).getAsInt(), payoutRefundDateArray.get(1).getAsInt(),\n1983:                 payoutRefundDateArray.get(2).getAsInt());\n1984: \n1985:         Assertions.assertEquals(HttpStatus.SC_OK, responses.get(5).getStatusCode(),\n1986:                 \"Verify Status Code 200 for merchant issued refund reversal\");\n1987:         Assertions.assertEquals(HttpStatus.SC_OK, responses.get(6).getStatusCode(), \"Verify Status Code 200 for payout refund reversal\");\n1988:         Assertions.assertEquals(\"Merchant Issued Refund\", merchantIssuedRefund.get(\"type\").getAsJsonObject().get(\"value\").getAsString());\n1989:         Assertions.assertEquals(\"Payout Refund\", payoutRefund.get(\"type\").getAsJsonObject().get(\"value\").getAsString());\n1990:         Assertions.assertTrue(merchantIssuedRefund.get(\"manuallyReversed\").getAsBoolean());\n1991:         Assertions.assertTrue(payoutRefund.get(\"manuallyReversed\").getAsBoolean());\n1992:         Assertions.assertEquals(date, merchantIssuedDate);\n1993:         Assertions.assertEquals(date, payoutRefundDate);\n1994:     }\n\n[business_context] business-context/boundaries.md:3-6\n3: ## 外部成功不等于业务成功\n4: \n5: 外部付款返回成功只表示执行侧完成，不代表贷款业务已经完成。业务最终状态还要以中台完成借据登记和内部台账收敛为准。\n\n[business_context] business-context/terminology.md:3-8\n3: ## 提款与放款\n4: \n5: 业务上的“提款”指客户在已有授信内形成新的借款，代码和接口通常使用 `drawdown`。Fineract 侧的 `disburse` 表示借据放款，不应把它和渠道侧的“提款申请”当成同一层动作。\n6: \n7: 依据：`requirements/产品规则.md`、`docs/三系统边界设计.md`。\n\n[source] loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java:19-35\n19: /**\n20:  * 还款编排：订单 → 模拟扣款 → 确认到账 → Fineract 还款入账 → 读取分配明细 → 按本金逐层恢复占用。\n21:  * 规则（docs/三系统边界设计.md §6）：归还利息、费用不恢复本金授信额度；\n22:  * 分配顺序由 Fineract 产品策略决定，中台只保存分配结果，不在多个系统重复判断分配。\n23:  */\n24: @Service\n25: public class RepaymentService {\n26: \n27:     private static final Logger log = LoggerFactory.getLogger(RepaymentService.class);\n28: \n29:     private final RepaymentOrderRepository orderRepo;\n30:     private final DrawdownOrderRepository drawdownRepo;\n31:     private final LimitService limitService;\n32:     private final ProductConfigRepository productRepo;\n33:     private final FineractClient fineract;\n34:     private final SimulatorClient simulator;\n\n[requirement] requirements/系统职责.md:26-32\n26: ## 各应用职责边界\n27: \n28: - **渠道后端**：渠道产品开放规则（金额上限、期限、开关）、字段转换、申请入口、`channelRefNo` 生成与映射、展示状态聚合（中台多个内部状态对外可合并为\"处理中\"，但保留原始状态）。渠道不做业务规则校验，只做渠道规则。\n29: - **贷款中台**：产品条件与报价、额度预占/实占/释放、提款编排（含\"外部已付款成功、中台入账未完成\"可恢复状态）、还款编排与分配结果保存、补偿查单。\n30: - **Fineract**：贷款账户生命周期、还款计划生成与重算、还款金额在费用/罚息/利息/本金上的分配、结清状态判定。中台不重复实现分配算法。\n31: - **外部模拟服务**：按场景配置模拟付款/扣款执行结果（同步成功/同步拒绝/延迟回调/回调不送达），只回放结果，不做业务判断。\n\n[requirement] requirements/产品规则.md:13-25\n13: ### 2. 多层授信与额度规则\n14: \n15: 额度分四层，同一笔提款同时受多层约束，可用额度取各层余量最小值，不能相加替代：\n16: \n17: - 企业总授信层：上限 − 已占用 − 预占。\n18: - 产品子额度层：该产品子额度 − 占用 − 预占（未配置的产品层不参与约束）。\n19: - 集团限额层：关联企业共享，任一成员的占用都减少集团余量。\n20: - 担保覆盖层：仅对\"担保要求=开\"的产品生效；可支持借款金额＝剩余担保覆盖 ÷ 覆盖比例；担保要求开但无有效覆盖时不可借。\n21: \n22: - 提款受理逐层预占；入账成功逐层转实占；付款终态失败逐层释放；每一层每一笔都落台账流水（可核对）。\n23: - 归还利息、费用不恢复任何层的占用；还款本金部分逐层恢复，担保覆盖层按覆盖比例折算减少占用。\n24: - 冻结状态下新增提款可用为 0，但占用可因还款减少（冻结只挡新增）；降额后占用高于新上限时保留实际占用与债务、限制新增提款（restricted）。\n\n[source] fineract-repo/integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java:708-783 [已截断，下一行 723，请 Read 续读]\n708:     /**\n709:      * Tests that batch credit balance refund for loans is happening properly. Collected properly 200(OK) status was\n710:      * returned for successful responses. It first creates a new loan and then makes an overpayment, before creating a\n711:      * credit balance refund to refund a portion of the over-payment.\n712:      *\n713:      * @see CreateTransactionLoanCommandStrategy\n714:      */\n715:     @Test\n716:     public void shouldReturnOkStatusForBatchCreditBalanceRefund() {\n717: \n718:         final String loanProductJSON = new LoanProductTestBuilder() //\n719:                 .withPrincipal(\"1000.00\") //\n720:                 .withNumberOfRepayments(\"24\") //\n721:                 .withRepaymentAfterEvery(\"1\") //\n722:                 .withRepaymentTypeAsMonth() //",
+      "selected": [
+        {
+          "id": "requirements:产品规则.md:43-49",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "产品规则.md",
+          "lineStart": 43,
+          "lineEnd": 48,
+          "unitType": "section",
+          "symbolName": "### 6. 支付与状态规则",
+          "deprecated": false,
+          "content": "### 6. 支付与状态规则\n\n- 当前为受托支付单收款人：付款成功由外部确认，但**外部付款成功不等于放款完成**；中台完成借据放款登记与逐层实占后提款才成功。\n- \"外部已付款成功、中台入账未完成\"是显式状态：不重新付款、不判失败，由补偿任务继续入账。\n- 重复回调、重复查单、重复提交不产生重复业务记录（幂等）。\n- 还款：订单 → 外部扣款 → Fineract 入账 → 保存本金/利息/费用分配明细；扣款失败则还款失败，不产生任何额度变化。",
+          "score": 0.016393442622950817,
+          "rerankScore": -2.5698509216308594,
+          "truncated": false
+        },
+        {
+          "id": "requirements:系统职责.md:33-37",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "系统职责.md",
+          "lineStart": 33,
+          "lineEnd": 37,
+          "unitType": "section",
+          "symbolName": "## 调查注意",
+          "deprecated": false,
+          "content": "## 调查注意\n\n- 已实现（阶段 2/3）：三系统提款还款链路、多层额度台账（总授信/产品子额度/集团限额/担保覆盖）、授信申请与提额降额审批、冻结/解冻、产品版本快照。\n- 优惠券、担保责任生命周期（担保申请/确认/代偿/解除）、多收款人多批次属于阶段 4 计划，**当前代码中不存在**；客户业务前端（Vue）尚未建库。调查结论不得把它们当成已实现。\n- 阶段 2 主链路：报价 → 提款申请（逐层预占＋建借据＋受托支付单收款人）→ 外部付款 → 中台入账（Fineract 放款）→ 逐层实占；还款：订单 → 扣款 → Fineract 入账 → 按本金部分逐层恢复额度。",
+          "score": 0.013509700176366844,
+          "rerankScore": -2.7758476734161377,
+          "truncated": false
+        },
+        {
+          "id": "business-context:cross-system.md:7-10",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "cross-system.md",
+          "lineStart": 7,
+          "lineEnd": 9,
+          "unitType": "section",
+          "symbolName": "## 还款金额的归属",
+          "deprecated": false,
+          "content": "## 还款金额的归属\n\n还款进入 Fineract 后，费用、罚息、利息和本金的拆分由 Fineract 的产品分配规则决定。中台根据返回的分配结果恢复本金占用；“还款总额”不能直接等同于“可恢复额度”。",
+          "score": 0.013890457368718238,
+          "rerankScore": -2.9567224979400635,
+          "truncated": false
+        },
+        {
+          "id": "business-context:exceptions.md:3-6",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "exceptions.md",
+          "lineStart": 3,
+          "lineEnd": 5,
+          "unitType": "section",
+          "symbolName": "## 冻结与降额不是同一件事",
+          "deprecated": false,
+          "content": "## 冻结与降额不是同一件事\n\n冻结是资格开关：冻结期间不允许新增提款，但已有借据还款仍可恢复占用。降额受限是新的额度上限低于已有占用：不回收已有借据，只限制新的提款，待占用回落到新上限内后再恢复可用。",
+          "score": 0.008452380952380953,
+          "rerankScore": -3.5620920658111572,
+          "truncated": false
+        },
+        {
+          "id": "business-context:boundaries.md:11-15",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "boundaries.md",
+          "lineStart": 11,
+          "lineEnd": 15,
+          "unitType": "section",
+          "symbolName": "## Fineract 与中台的职责",
+          "deprecated": false,
+          "content": "## Fineract 与中台的职责\n\nFineract 持有借据生命周期、还款计划和还款金额分配结果；中台负责业务编排、业务状态和额度台账。中台不应根据还款总额自行推导本金分配，也不应把外部执行结果直接当成业务终态。\n\n依据：`requirements/系统职责.md`、`docs/三系统边界设计.md` §1、§6。",
+          "score": 0.008450704225352112,
+          "rerankScore": -3.6194379329681396,
+          "truncated": false
+        },
+        {
+          "id": "business-context:cross-system.md:3-6",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "cross-system.md",
+          "lineStart": 3,
+          "lineEnd": 5,
+          "unitType": "section",
+          "symbolName": "## 付款结果的收敛",
+          "deprecated": false,
+          "content": "## 付款结果的收敛\n\n外部付款成功后，中台仍需要完成借据放款登记和自己的业务台账收敛，之后才是业务成功。回调和主动查单只是取得外部结果的两条入口，不能把“收到回调”理解成“中台已经完成入账”。",
+          "score": 0.015682382133995035,
+          "rerankScore": -3.7677600383758545,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/repay/RepaymentOrder.java:9-37",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/repay/RepaymentOrder.java",
+          "lineStart": 9,
+          "lineEnd": 36,
+          "unitType": "class",
+          "symbolName": "RepaymentOrder",
+          "deprecated": false,
+          "content": "/** 还款订单：扣款执行与入账状态。分配明细来自 Fineract 还款交易（本金/利息/费用），中台保存分配结果用于额度恢复与核对。 */\n@Entity\n@Table(name = \"repayment_order\")\npublic class RepaymentOrder {\n\n    public enum Status { PROCESSING, SUCCESS, FAILED }\n\n    public enum Type { DUE, EARLY_PRINCIPAL, EARLY_SETTLE }\n\n    public enum DeductionStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\n\n    @Id\n    private String bizOrderNo;\n    private String loanAccountNo;\n    private String creditId;            // 借据所属授信（来自提款业务单关联）\n    private String payerAccount;\n    private Type type;\n    private BigDecimal amount;\n\n    private Status status;\n    private DeductionStatus deductionStatus;\n    private String extSerialNo;\n    private String fineractTransactionId;\n    private BigDecimal principalPortion;   // 分配明细：本金部分（恢复额度依据）\n    private BigDecimal interestPortion;\n    private BigDecimal feePortion;\n    private LocalDateTime createdAt;\n    private LocalDateTime updatedAt;",
+          "score": 0.006818181818181818,
+          "rerankScore": -3.8184139728546143,
+          "truncated": false
+        },
+        {
+          "id": "fineract-repo:integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java:1901-1994",
+          "sourceId": "fineract-repo",
+          "kind": "source",
+          "path": "integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java",
+          "lineStart": 1901,
+          "lineEnd": 1994,
+          "unitType": "function",
+          "symbolName": "BatchApiTest.shouldReturnOkStatusOnSuccessfulTransactionMerchantIssuedAndPayoutRefundReversal",
+          "deprecated": false,
+          "content": "    /**\n     * Test for the successful merchant issued refund and payout refund reversal transaction. A '200' status code is\n     * expected on successful responses.\n     *\n     * @see AdjustLoanTransactionCommandStrategy\n     */\n    @Test\n    public void shouldReturnOkStatusOnSuccessfulTransactionMerchantIssuedAndPayoutRefundReversal() {\n        final String loanProductJSON = new LoanProductTestBuilder() //\n                .withPrincipal(\"10000000.00\") //\n                .withNumberOfRepayments(\"24\") //\n                .withRepaymentAfterEvery(\"1\") //\n                .withRepaymentTypeAsMonth() //\n                .withinterestRatePerPeriod(\"2\") //\n                .withInterestRateFrequencyTypeAsMonths() //\n                .withAmortizationTypeAsEqualPrincipalPayment() //\n                .withInterestTypeAsDecliningBalance() //\n                .currencyDetails(\"0\", \"100\").build(null);\n\n        final LocalDate date = LocalDate.now(Utils.getZoneIdOfTenant());\n        final Long applyLoanRequestId = 5730L;\n        final Long approveLoanRequestId = 5731L;\n        final Long disburseLoanRequestId = 5732L;\n        final Long merchantIssuedRefundRequestId = 5733L;\n        final Long payoutRefundRequestId = 5734L;\n        final Long merchantIssuedRefundReversalRequestId = 5735L;\n        final Long payoutRefundReversalRequestId = 5736L;\n        final Long getLoanRequestId = 5737L;\n\n        // Create product\n        final Integer productId = new LoanTransactionHelper(this.requestSpec, this.responseSpec).getLoanProductId(loanProductJSON);\n\n        // Create client\n        final Integer clientId = ClientHelper.createClient(this.requestSpec, this.responseSpec);\n        ClientHelper.verifyClientCreatedOnServer(this.requestSpec, this.responseSpec, clientId);\n\n        // Create an apply loan request\n        final BatchRequest applyLoanRequest = BatchHelper.applyLoanRequestWithClientId(applyLoanRequestId, clientId, productId);\n\n        // Create an approve loan request\n        final BatchRequest approveLoanRequest = BatchHelper.approveLoanRequest(approveLoanRequestId, applyLoanRequestId);\n\n        // Create a disburse loan request\n        final BatchRequest disburseLoanRequest = BatchHelper.disburseLoanRequest(disburseLoanRequestId, approveLoanRequestId,\n                date.minusDays(1));\n\n        // Create a merchant issued refund request\n        final BatchRequest merchantIssuedRefundRequest = BatchHelper.merchantIssuedRefundRequest(merchantIssuedRefundRequestId,\n                applyLoanRequestId, \"10\");\n\n        // Create a payout refund request\n        final BatchRequest payoutRefundRequest = BatchHelper.payoutRefundRequest(payoutRefundRequestId, applyLoanRequestId, \"10\");\n\n        // Create a merchant issued refund reversal request\n        final BatchRequest merchantIssuedRefundReversalRequest = BatchHelper\n                .createAdjustTransactionRequest(merchantIssuedRefundReversalRequestId, merchantIssuedRefundRequestId, \"0\", date);\n\n        // Create a payout refund reversal request\n        final BatchRequest payoutRefundReversalRequest = BatchHelper.createAdjustTransactionRequest(payoutRefundReversalRequestId,\n                payoutRefundRequestId, \"0\", date);\n\n        // Get loan transactions request\n        final BatchRequest getLoanTransactionsRequest = BatchHelper.getLoanByIdRequest(getLoanRequestId, applyLoanRequestId,\n                \"associations=transactions\");\n\n        final List<BatchRequest> batchRequests = Arrays.asList(applyLoanRequest, approveLoanRequest, disburseLoanRequest,\n                merchantIssuedRefundRequest, payoutRefundRequest, merchantIssuedRefundReversalRequest, payoutRefundReversalRequest,\n                getLoanTransactionsRequest);\n\n        final List<BatchResponse> responses = BatchHelper.postBatchRequestsWithEnclosingTransaction(this.requestSpec, this.responseSpec,\n                BatchHelper.toJsonString(batchRequests));\n\n        final FromJsonHelper jsonHelper = new FromJsonHelper();\n        final JsonObject merchantIssuedRefund = jsonHelper.parse(responses.get(7).getBody()).getAsJsonObject().get(\"transactions\")\n                .getAsJsonArray().get(2).getAsJsonObject();\n        final JsonObject payoutRefund = jsonHelper.parse(responses.get(7).getBody()).getAsJsonObject().get(\"transactions\").getAsJsonArray()\n                .get(3).getAsJsonObject();\n        final JsonArray merchantIssuedDateArray = merchantIssuedRefund.get(\"reversedOnDate\").getAsJsonArray();\n        final LocalDate merchantIssuedDate = LocalDate.of(merchantIssuedDateArray.get(0).getAsInt(),\n                merchantIssuedDateArray.get(1).getAsInt(), merchantIssuedDateArray.get(2).getAsInt());\n        final JsonArray payoutRefundDateArray = payoutRefund.getAsJsonObject().get(\"reversedOnDate\").getAsJsonArray();\n        final LocalDate payoutRefundDate = LocalDate.of(payoutRefundDateArray.get(0).getAsInt(), payoutRefundDateArray.get(1).getAsInt(),\n                payoutRefundDateArray.get(2).getAsInt());\n\n        Assertions.assertEquals(HttpStatus.SC_OK, responses.get(5).getStatusCode(),\n                \"Verify Status Code 200 for merchant issued refund reversal\");\n        Assertions.assertEquals(HttpStatus.SC_OK, responses.get(6).getStatusCode(), \"Verify Status Code 200 for payout refund reversal\");\n        Assertions.assertEquals(\"Merchant Issued Refund\", merchantIssuedRefund.get(\"type\").getAsJsonObject().get(\"value\").getAsString());\n        Assertions.assertEquals(\"Payout Refund\", payoutRefund.get(\"type\").getAsJsonObject().get(\"value\").getAsString());\n        Assertions.assertTrue(merchantIssuedRefund.get(\"manuallyReversed\").getAsBoolean());\n        Assertions.assertTrue(payoutRefund.get(\"manuallyReversed\").getAsBoolean());\n        Assertions.assertEquals(date, merchantIssuedDate);\n        Assertions.assertEquals(date, payoutRefundDate);\n    }",
+          "score": 0.005970149253731343,
+          "rerankScore": -3.8415939807891846,
+          "truncated": false
+        },
+        {
+          "id": "business-context:boundaries.md:3-6",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "boundaries.md",
+          "lineStart": 3,
+          "lineEnd": 5,
+          "unitType": "section",
+          "symbolName": "## 外部成功不等于业务成功",
+          "deprecated": false,
+          "content": "## 外部成功不等于业务成功\n\n外部付款返回成功只表示执行侧完成，不代表贷款业务已经完成。业务最终状态还要以中台完成借据登记和内部台账收敛为准。",
+          "score": 0.01446917808219178,
+          "rerankScore": -4.179370880126953,
+          "truncated": false
+        },
+        {
+          "id": "business-context:terminology.md:3-8",
+          "sourceId": "business-context",
+          "kind": "business_context",
+          "path": "terminology.md",
+          "lineStart": 3,
+          "lineEnd": 7,
+          "unitType": "section",
+          "symbolName": "## 提款与放款",
+          "deprecated": false,
+          "content": "## 提款与放款\n\n业务上的“提款”指客户在已有授信内形成新的借款，代码和接口通常使用 `drawdown`。Fineract 侧的 `disburse` 表示借据放款，不应把它和渠道侧的“提款申请”当成同一层动作。\n\n依据：`requirements/产品规则.md`、`docs/三系统边界设计.md`。",
+          "score": 0.006060606060606061,
+          "rerankScore": -4.219875335693359,
+          "truncated": false
+        },
+        {
+          "id": "loan-middle-repo:src/main/java/com/rsd/middle/repay/RepaymentService.java:19-35",
+          "sourceId": "loan-middle-repo",
+          "kind": "source",
+          "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+          "lineStart": 19,
+          "lineEnd": 34,
+          "unitType": "class",
+          "symbolName": "RepaymentService",
+          "deprecated": false,
+          "content": "/**\n * 还款编排：订单 → 模拟扣款 → 确认到账 → Fineract 还款入账 → 读取分配明细 → 按本金逐层恢复占用。\n * 规则（docs/三系统边界设计.md §6）：归还利息、费用不恢复本金授信额度；\n * 分配顺序由 Fineract 产品策略决定，中台只保存分配结果，不在多个系统重复判断分配。\n */\n@Service\npublic class RepaymentService {\n\n    private static final Logger log = LoggerFactory.getLogger(RepaymentService.class);\n\n    private final RepaymentOrderRepository orderRepo;\n    private final DrawdownOrderRepository drawdownRepo;\n    private final LimitService limitService;\n    private final ProductConfigRepository productRepo;\n    private final FineractClient fineract;\n    private final SimulatorClient simulator;",
+          "score": 0.006521739130434782,
+          "rerankScore": -4.234940528869629,
+          "truncated": false
+        },
+        {
+          "id": "requirements:系统职责.md:26-32",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "系统职责.md",
+          "lineStart": 26,
+          "lineEnd": 31,
+          "unitType": "section",
+          "symbolName": "## 各应用职责边界",
+          "deprecated": false,
+          "content": "## 各应用职责边界\n\n- **渠道后端**：渠道产品开放规则（金额上限、期限、开关）、字段转换、申请入口、`channelRefNo` 生成与映射、展示状态聚合（中台多个内部状态对外可合并为\"处理中\"，但保留原始状态）。渠道不做业务规则校验，只做渠道规则。\n- **贷款中台**：产品条件与报价、额度预占/实占/释放、提款编排（含\"外部已付款成功、中台入账未完成\"可恢复状态）、还款编排与分配结果保存、补偿查单。\n- **Fineract**：贷款账户生命周期、还款计划生成与重算、还款金额在费用/罚息/利息/本金上的分配、结清状态判定。中台不重复实现分配算法。\n- **外部模拟服务**：按场景配置模拟付款/扣款执行结果（同步成功/同步拒绝/延迟回调/回调不送达），只回放结果，不做业务判断。",
+          "score": 0.013824884792626727,
+          "rerankScore": -4.25324010848999,
+          "truncated": false
+        },
+        {
+          "id": "requirements:产品规则.md:13-25",
+          "sourceId": "requirements",
+          "kind": "requirement",
+          "path": "产品规则.md",
+          "lineStart": 13,
+          "lineEnd": 24,
+          "unitType": "section",
+          "symbolName": "### 2. 多层授信与额度规则",
+          "deprecated": false,
+          "content": "### 2. 多层授信与额度规则\n\n额度分四层，同一笔提款同时受多层约束，可用额度取各层余量最小值，不能相加替代：\n\n- 企业总授信层：上限 − 已占用 − 预占。\n- 产品子额度层：该产品子额度 − 占用 − 预占（未配置的产品层不参与约束）。\n- 集团限额层：关联企业共享，任一成员的占用都减少集团余量。\n- 担保覆盖层：仅对\"担保要求=开\"的产品生效；可支持借款金额＝剩余担保覆盖 ÷ 覆盖比例；担保要求开但无有效覆盖时不可借。\n\n- 提款受理逐层预占；入账成功逐层转实占；付款终态失败逐层释放；每一层每一笔都落台账流水（可核对）。\n- 归还利息、费用不恢复任何层的占用；还款本金部分逐层恢复，担保覆盖层按覆盖比例折算减少占用。\n- 冻结状态下新增提款可用为 0，但占用可因还款减少（冻结只挡新增）；降额后占用高于新上限时保留实际占用与债务、限制新增提款（restricted）。",
+          "score": 0.014940577249575551,
+          "rerankScore": -4.273375511169434,
+          "truncated": false
+        },
+        {
+          "id": "fineract-repo:integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java:708-783",
+          "sourceId": "fineract-repo",
+          "kind": "source",
+          "path": "integration-tests/src/test/java/org/apache/fineract/integrationtests/BatchApiTest.java",
+          "lineStart": 708,
+          "lineEnd": 722,
+          "unitType": "function",
+          "symbolName": "BatchApiTest.shouldReturnOkStatusForBatchCreditBalanceRefund",
+          "deprecated": false,
+          "content": "    /**\n     * Tests that batch credit balance refund for loans is happening properly. Collected properly 200(OK) status was\n     * returned for successful responses. It first creates a new loan and then makes an overpayment, before creating a\n     * credit balance refund to refund a portion of the over-payment.\n     *\n     * @see CreateTransactionLoanCommandStrategy\n     */\n    @Test\n    public void shouldReturnOkStatusForBatchCreditBalanceRefund() {\n\n        final String loanProductJSON = new LoanProductTestBuilder() //\n                .withPrincipal(\"1000.00\") //\n                .withNumberOfRepayments(\"24\") //\n                .withRepaymentAfterEvery(\"1\") //\n                .withRepaymentTypeAsMonth() //",
+          "score": 0.006153846153846154,
+          "rerankScore": -4.276159286499023,
+          "truncated": true
+        }
+      ]
+    }
+  ]
+}

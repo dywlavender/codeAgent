@@ -2,8 +2,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { ConfigProvider } from "antd";
 import App from "./App.jsx";
-import { palette } from "./theme.js";
-import "./styles.css";
+import { palette } from "./ui/tokens.js";
+import "./ui/tokens.css";
+import "./ui/styles.css";
 
 createRoot(document.getElementById("root")).render(
   <ConfigProvider

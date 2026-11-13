@@ -1,0 +1,443 @@
+{
+  "runId": "RUN-3ec9c525072440ac8d8b287f3692a2c3",
+  "conversationId": "CONV-1175df9c49124ca298fd25a591edd653",
+  "projectId": "complex-loan-validation",
+  "runtime": "LANGCHAIN",
+  "sessionId": "LC-ea538bf1e31b4419a5deb5b654447c65",
+  "workspaceId": "complex-loan-validation",
+  "mode": "backbone",
+  "modeLabel": "有主干",
+  "astVersionId": null,
+  "status": "completed",
+  "scope": null,
+  "answer": "`GET /api/drawdowns/{channelRefNo}`（融商贷渠道后端）\n\n当前已核对的正常返回字段包括：`channelRefNo`、`displayStatus`、`middleStatus`、`detail`、`detail.bizOrderNo`、`detail.status`、`detail.amount`、`detail.payments`、`detail.payments[].extSerialNo`、`detail.payments[].status`、`detail.payments[].amount`、`detail.booking`、`detail.booking.status`、`detail.booking.loanAccountNo`、`detail.booking.retryCount`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:35`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`。\n\n`displayStatus` 的映射输入是 `middleStatus`、`detail.status`：SUCCESS／FAILED → 保留输入值；其他值 → 返回 `PROCESSING`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:14`。\n\n单一展示字段的合并不等于完整响应缺少明细；以上已确认字段不需要再次新增。\n\n源码 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`：\n```text\n        return switch (middleStatus) {\n            case \"SUCCESS\", \"FAILED\" -> middleStatus;\n            default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n        };\n```\n\n源码 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`：\n```text\n        return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n                \"amount\", order.getAmount(),\n                \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n                        \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n                \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                        \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n                        \"retryCount\", order.getBookingRetryCount()));\n```\n\n当前没有核对页面消费端。是否已展示、是否只需改一处以及改动收益仍需读取实际页面；若页面仅使用合并后的展示值，应先核对它是否可以利用现有明细。\n\n业务规则和恢复路径以以上原文为据；本实验模式只自动确认受支持的契约结构，不据此保证业务解释完整。\n\n核对说明：丢弃未交付、过长或导航类业务引用。",
+  "events": [
+    {
+      "sequence": 1,
+      "eventType": "status",
+      "payload": {
+        "phase": "starting",
+        "label": "正在准备资料"
+      }
+    },
+    {
+      "sequence": 2,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 1 轮）"
+      }
+    },
+    {
+      "sequence": 3,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_412a985a65384260906c56b0",
+        "name": "FindCapability",
+        "input": {
+          "question": "渠道提款单详情接口返回字段，处理中状态如何区分外部未回和中台入账失败",
+          "limit": 8
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 4,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_412a985a65384260906c56b0",
+        "name": "FindCapability",
+        "status": "completed",
+        "output": "{\"candidates\": [{\"contractId\": \"C5\", \"score\": 12.2905, \"application\": \"融商贷渠道后端\", \"method\": \"GET\", \"route\": \"/api/drawdowns/{channelRefNo}\", \"symbol\": \"com.rsd.channel.ChannelController.drawdownDetail\", \"location\": {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 33, \"end\": 36}}, {\"contractId\": \"C7\", \"score\": 10.6004, \"application\": \"融商贷渠道后端\", \"method\": \"GET\", \"route\": \"/api/repayments/{channelRefNo}\", \"symbol\": \"com.rsd.channel.ChannelController.repaymentDetail\", \"location\": {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 43, \"end\": 46}}, {\"contractId\": \"C22\", \"score\": 7.9104, \"application\": \"融商贷贷款中台\", \"method\": \"POST\", \"route\": \"/middle/api/v1/drawdowns\", \"symbol\": \"com.rsd.middle.drawdown.DrawdownController.apply\", \"location\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 66, \"end\": 71}}, {\"contractId\": \"C26\", \"score\": 7.2118, \"application\": \"融商贷贷款中台\", \"method\": \"POST\", \"route\": \"/middle/api/v1/callbacks/external-result\", \"symbol\": \"com.rsd.middle.external.ExternalResultController.onExternalResult\", \"location\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java\", \"start\": 55, \"end\": 86}}, {\"contractId\": \"C23\", \"score\": 7.003, \"application\": \"融商贷贷款中台\", \"method\": \"GET\", \"route\": \"/middle/api/v1/drawdowns/{bizOrderNo}\", \"symbol\": \"com.rsd.middle.drawdown.DrawdownController.detail\", \"location\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 73, \"end\": 76}}, {\"contractId\": \"C2\", \"score\": 5.7988, \"application\": \"融商贷渠道后端\", \"method\": \"POST\", \"route\": \"/api/drawdowns\", \"symbol\": \"com.rsd.channel.ChannelController.applyDrawdown\", \"location\": {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 28, \"end\": 31}}, {\"contractId\": \"C19\", \"score\": 4.8485, \"application\": \"融商贷贷款中台\", \"method\": \"GET\", \"route\": \"/middle/api/v1/credit/{creditId}/limits\", \"symbol\": \"com.rsd.middle.credit.CreditController.limits\", \"location\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditController.java\", \"start\": 64, \"end\": 72}}, {\"contractId\": \"C13\", \"score\": 4.7718, \"application\": \"外部系统模拟服务\", \"method\": \"POST\", \"route\": \"/sim/api/v1/approvals\", \"symbol\": \"com.rsd.simulator.SimulatorController.submitApproval\", \"location\": {\"path\": \"repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorController.java\", \"start\": 50, \"end\": 55}}]}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 5,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 2 轮）"
+      }
+    },
+    {
+      "sequence": 6,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_ee0ca4657f8f40c6bb81ae2c",
+        "name": "TraceResponseFields",
+        "input": {
+          "contract_id": "C5"
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 7,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_ee0ca4657f8f40c6bb81ae2c",
+        "name": "TraceResponseFields",
+        "status": "completed",
+        "output": "{\"projectId\": \"complex-loan-validation\", \"indexVersion\": \"20261031T092244133530\", \"contractId\": \"C5\", \"entry\": {\"application\": \"融商贷渠道后端\", \"method\": \"GET\", \"route\": \"/api/drawdowns/{channelRefNo}\", \"symbol\": \"com.rsd.channel.ChannelController.drawdownDetail\", \"location\": {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 33, \"end\": 36}}, \"fields\": [{\"path\": \"channelRefNo\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"displayStatus\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"middleStatus\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.bizOrderNo\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.status\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.amount\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].extSerialNo\", \"conditional\": false, \"evidence\": [\"E21\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].status\", \"conditional\": false, \"evidence\": [\"E21\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].amount\", \"conditional\": false, \"evidence\": [\"E21\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.status\", \"conditional\": false, \"evidence\": [\"E22\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.loanAccountNo\", \"conditional\": false, \"evidence\": [\"E22\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.retryCount\", \"conditional\": false, \"evidence\": [\"E22\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E20\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}], \"mappings\": [{\"outputField\": \"displayStatus\", \"inputFields\": [\"middleStatus\", \"detail.status\"], \"rules\": [{\"inputs\": [\"SUCCESS\", \"FAILED\"], \"default\": false, \"output\": \"input\"}, {\"inputs\": [], \"default\": true, \"output\": \"PROCESSING\"}], \"evidence\": [\"E23\", \"E24\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E25\", \"E1\", \"E4\", \"E5\"]}], \"connections\": [{\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"to\": \"com.rsd.channel.ChannelService.displayOf/1\", \"evidence\": [\"E24\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getBizOrderNo/0\", \"evidence\": [\"E26\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getAmount/0\", \"evidence\": [\"E27\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getExtSerialNo/0\", \"evidence\": [\"E28\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getLoanAccountNo/0\", \"evidence\": [\"E29\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getBookingRetryCount/0\", \"evidence\": [\"E30\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownController.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"evidence\": [\"E7\", \"E8\"]}, {\"kind\": \"HTTP_RESPONSE\", \"from\": \"com.rsd.channel.MiddleClient.drawdownDetail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownController.detail/1\", \"evidence\": [\"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"to\": \"com.rsd.channel.MiddleClient.drawdownDetail/1\", \"evidence\": [\"E18\", \"E19\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelController.drawdownDetail/1\", \"to\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"evidence\": [\"E2\", \"E3\"]}], \"gaps\": [], \"evidence\": [{\"id\": \"E1\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 135, \"end\": 136, \"content\": \"135:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display,\\n136:                 \\\"middleStatus\\\", middleDetail.get(\\\"status\\\"), \\\"detail\\\", middleDetail);\"}, {\"id\": \"E2\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 35, \"end\": 35, \"content\": \"35:         return channelService.drawdownDetail(channelRefNo);\"}, {\"id\": \"E3\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 17, \"end\": 17, \"content\": \"17:     private final ChannelService channelService;\"}, {\"id\": \"E4\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 14, \"end\": 14, \"content\": \"14: @RequestMapping(\\\"/api\\\")\"}, {\"id\": \"E5\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 33, \"end\": 33, \"content\": \"33:     @GetMapping(\\\"/drawdowns/{channelRefNo}\\\")\"}, {\"id\": \"E6\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 259, \"end\": 265, \"content\": \"259:         return Map.of(\\\"bizOrderNo\\\", order.getBizOrderNo(), \\\"status\\\", order.getStatus().name(),\\n260:                 \\\"amount\\\", order.getAmount(),\\n261:                 \\\"payments\\\", List.of(Map.of(\\\"extSerialNo\\\", order.getExtSerialNo() == null ? \\\"\\\" : order.getExtSerialNo(),\\n262:                         \\\"status\\\", order.getPaymentStatus().name(), \\\"amount\\\", order.getAmount())),\\n263:                 \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\\n264:                         \\\"loanAccountNo\\\", order.getLoanAccountNo() == null ? \\\"\\\" : order.getLoanAccountNo(),\\n265:                         \\\"retryCount\\\", order.getBookingRetryCount()));\"}, {\"id\": \"E7\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 75, \"end\": 75, \"content\": \"75:         return drawdownService.detail(bizOrderNo);\"}, {\"id\": \"E8\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 23, \"end\": 23, \"content\": \"23:     private final DrawdownService drawdownService;\"}, {\"id\": \"E9\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 48, \"end\": 48, \"content\": \"48:         return http.get().uri(\\\"/middle/api/v1/drawdowns/{no}\\\", bizOrderNo).retrieve().body(Map.class);\"}, {\"id\": \"E10\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 21, \"end\": 22, \"content\": \"21:         this.http = RestClient.builder()\\n22:                 .baseUrl(props.baseUrl())\"}, {\"id\": \"E11\", \"path\": \"repos/channel-service-repo/src/main/resources/application.yml\", \"start\": 17, \"end\": 17, \"content\": \"17:   base-url: http://localhost:8092\"}, {\"id\": \"E12\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java\", \"start\": 5, \"end\": 5, \"content\": \"5: @ConfigurationProperties(prefix = \\\"middle\\\")\"}, {\"id\": \"E13\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 16, \"end\": 16, \"content\": \"16:     private final MiddleProperties props;\"}, {\"id\": \"E14\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 20, \"end\": 20, \"content\": \"20: @RequestMapping(\\\"/middle/api/v1/drawdowns\\\")\"}, {\"id\": \"E15\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 73, \"end\": 73, \"content\": \"73:     @GetMapping(\\\"/{bizOrderNo}\\\")\"}, {\"id\": \"E16\", \"path\": \"repos/loan-middle-repo/src/main/resources/application.yml\", \"start\": 2, \"end\": 2, \"content\": \"2:   port: 8092\"}, {\"id\": \"E17\", \"path\": \"repos/loan-middle-repo/src/main/resources/application.yml\", \"start\": 6, \"end\": 6, \"content\": \"6:     name: loan-middle\"}, {\"id\": \"E18\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 129, \"end\": 129, \"content\": \"129:         Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\"}, {\"id\": \"E19\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 28, \"end\": 28, \"content\": \"28:     private final MiddleClient middle;\"}, {\"id\": \"E20\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 136, \"end\": 136, \"content\": \"136:                 \\\"middleStatus\\\", middleDetail.get(\\\"status\\\"), \\\"detail\\\", middleDetail);\"}, {\"id\": \"E21\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 261, \"end\": 262, \"content\": \"261:                 \\\"payments\\\", List.of(Map.of(\\\"extSerialNo\\\", order.getExtSerialNo() == null ? \\\"\\\" : order.getExtSerialNo(),\\n262:                         \\\"status\\\", order.getPaymentStatus().name(), \\\"amount\\\", order.getAmount())),\"}, {\"id\": \"E22\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 263, \"end\": 265, \"content\": \"263:                 \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\\n264:                         \\\"loanAccountNo\\\", order.getLoanAccountNo() == null ? \\\"\\\" : order.getLoanAccountNo(),\\n265:                         \\\"retryCount\\\", order.getBookingRetryCount()));\"}, {\"id\": \"E23\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 199, \"end\": 202, \"content\": \"199:         return switch (middleStatus) {\\n200:             case \\\"SUCCESS\\\", \\\"FAILED\\\" -> middleStatus;\\n201:             default -> \\\"PROCESSING\\\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\\n202:         };\"}, {\"id\": \"E24\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 130, \"end\": 130, \"content\": \"130:         String display = displayOf(String.valueOf(middleDetail.get(\\\"status\\\")));\"}, {\"id\": \"E25\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 135, \"end\": 135, \"content\": \"135:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display,\"}, {\"id\": \"E26\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 259, \"end\": 259, \"content\": \"259:         return Map.of(\\\"bizOrderNo\\\", order.getBizOrderNo(), \\\"status\\\", order.getStatus().name(),\"}, {\"id\": \"E27\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 260, \"end\": 260, \"content\": \"260:                 \\\"amount\\\", order.getAmount(),\"}, {\"id\": \"E28\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 261, \"end\": 261, \"content\": \"261:                 \\\"payments\\\", List.of(Map.of(\\\"extSerialNo\\\", order.getExtSerialNo() == null ? \\\"\\\" : order.getExtSerialNo(),\"}, {\"id\": \"E29\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 264, \"end\": 264, \"content\": \"264:                         \\\"loanAccountNo\\\", order.getLoanAccountNo() == null ? \\\"\\\" : order.getLoanAccountNo(),\"}, {\"id\": \"E30\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 265, \"end\": 265, \"content\": \"265:                         \\\"retryCount\\\", order.getBookingRetryCount()));\"}], \"evidenceLines\": 44, \"consumer\": \"unconfirmed\", \"semanticProof\": false, \"coverage\": {\"repositories\": [\"channel-service-repo\", \"external-simulator-repo\", \"loan-middle-repo\"], \"parsers\": [\"spring-controller\", \"spring-restclient\", \"map-of\", \"record-constructor\", \"string-switch\"]}, \"view\": \"response\"}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 8,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 3 轮）"
+      }
+    },
+    {
+      "sequence": 9,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_a4578d46e16c4cee98109fa6",
+        "name": "Read",
+        "input": {
+          "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+          "offset": 120,
+          "limit": 90
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 10,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_a4578d46e16c4cee98109fa6",
+        "name": "Read",
+        "status": "completed",
+        "output": "{\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"lineStart\": 120, \"lineEnd\": 209, \"totalLines\": 226, \"sourceMtimeNs\": 1788686135144092996, \"truncated\": true, \"nextLine\": 210, \"deprecated\": false, \"content\": \"120:         saveRecord(channelRefNo, channelId, BizType.REPAYMENT, String.valueOf(applied.get(\\\"bizOrderNo\\\")),\\n121:                 displayOf(String.valueOf(applied.get(\\\"status\\\"))));\\n122:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", \\\"PROCESSING\\\");\\n123:     }\\n124: \\n125:     /** 结果查询：取中台原始状态，按映射合并为展示状态，同时保存原始状态供追踪。 */\\n126:     @SuppressWarnings(\\\"unchecked\\\")\\n127:     public Map<String, Object> drawdownDetail(String channelRefNo) {\\n128:         ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\\n129:         Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\\n130:         String display = displayOf(String.valueOf(middleDetail.get(\\\"status\\\")));\\n131:         record.setDisplayStatus(display);\\n132:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n133:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n134:         recordRepo.save(record);\\n135:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display,\\n136:                 \\\"middleStatus\\\", middleDetail.get(\\\"status\\\"), \\\"detail\\\", middleDetail);\\n137:     }\\n138: \\n139:     /**\\n140:      * 授信申请入口（阶段 3）：渠道做准入（允许发起授信申请的渠道），透传到中台走外部审批。\\n141:      * 申请单同时保存渠道侧快照，便于追溯当时从哪个渠道、以什么条件发起。\\n142:      */\\n143:     public Map<String, Object> applyCredit(String channelId, Map<String, Object> request) {\\n144:         if (!channelAllowsCredit(channelId)) {\\n145:             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \\\"CHANNEL_CREDIT_NOT_OPEN\\\");\\n146:         }\\n147:         Map<String, Object> applied = middle.applyCredit(request);\\n148:         String channelRefNo = nextRef();\\n149:         ChannelApplicationRecord record = new ChannelApplicationRecord();\\n150:         record.setChannelRefNo(channelRefNo);\\n151:         record.setChannelId(channelId);\\n152:         record.setBizType(BizType.CREDIT);\\n153:         record.setBizOrderNo(String.valueOf(applied.get(\\\"bizOrderNo\\\")));\\n154:         record.setDisplayStatus(\\\"PROCESSING\\\");\\n155:         record.setChannelRuleSnapshotJson(\\\"{\\\\\\\"channelId\\\\\\\":\\\\\\\"\\\" + channelId + \\\"\\\\\\\",\\\\\\\"entry\\\\\\\":\\\\\\\"credit-application\\\\\\\"}\\\");\\n156:         record.setCreatedAt(LocalDateTime.now().withNano(0));\\n157:         record.setUpdatedAt(record.getCreatedAt());\\n158:         recordRepo.save(record);\\n159:         return Map.of(\\\"channelRefNo\\\", channelRefNo,\\n160:                 \\\"bizOrderNo\\\", applied.get(\\\"bizOrderNo\\\"),\\n161:                 \\\"displayStatus\\\", \\\"PROCESSING\\\");\\n162:     }\\n163: \\n164:     public Map<String, Object> creditApplicationDetail(String channelRefNo) {\\n165:         ChannelApplicationRecord record = recordRepo.findById(channelRefNo)\\n166:                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, \\\"APPLICATION_NOT_FOUND\\\"));\\n167:         Map<String, Object> middleDetail = middle.creditApplicationDetail(record.getBizOrderNo());\\n168:         String display = \\\"APPROVED\\\".equals(String.valueOf(middleDetail.get(\\\"status\\\"))) ? \\\"SUCCESS\\\"\\n169:                 : \\\"REJECTED\\\".equals(String.valueOf(middleDetail.get(\\\"status\\\"))) ? \\\"FAILED\\\" : \\\"PROCESSING\\\";\\n170:         record.setDisplayStatus(display);\\n171:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n172:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n173:         recordRepo.save(record);\\n174:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display, \\\"detail\\\", middleDetail);\\n175:     }\\n176: \\n177:     /** 渠道准入：阶段 3 两个渠道均允许发起授信申请；规则集中在此便于后续按渠道差异调整。 */\\n178:     private boolean channelAllowsCredit(String channelId) {\\n179:         return \\\"SELF_SERVICE\\\".equals(channelId) || \\\"RM_ASSISTED\\\".equals(channelId);\\n180:     }\\n181: \\n182:     @SuppressWarnings(\\\"unchecked\\\")\\n183:     public Map<String, Object> repaymentDetail(String channelRefNo) {\\n184:         ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.REPAYMENT);\\n185:         Map<String, Object> middleDetail = middle.repaymentDetail(record.getBizOrderNo());\\n186:         String display = displayOf(String.valueOf(middleDetail.get(\\\"status\\\")));\\n187:         record.setDisplayStatus(display);\\n188:         record.setMiddleRawStatus(String.valueOf(middleDetail.get(\\\"status\\\")));\\n189:         record.setUpdatedAt(LocalDateTime.now().withNano(0));\\n190:         recordRepo.save(record);\\n191:         return Map.of(\\\"channelRefNo\\\", channelRefNo, \\\"displayStatus\\\", display, \\\"detail\\\", middleDetail);\\n192:     }\\n193: \\n194:     /**\\n195:      * 展示状态映射（契约 §2）：中台 PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING 等处理中状态\\n196:      * 对外统一展示\\\"PROCESSING\\\"；成功与失败直传。映射关系保留在 record.middleRawStatus。\\n197:      */\\n198:     private String displayOf(String middleStatus) {\\n199:         return switch (middleStatus) {\\n200:             case \\\"SUCCESS\\\", \\\"FAILED\\\" -> middleStatus;\\n201:             default -> \\\"PROCESSING\\\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\\n202:         };\\n203:     }\\n204: \\n205:     private void saveRecord(String channelRefNo, String channelId, BizType type, String bizOrderNo, String display) {\\n206:         ChannelApplicationRecord record = new ChannelApplicationRecord();\\n207:         record.setChannelRefNo(channelRefNo);\\n208:         record.setChannelId(channelId);\\n209:         record.setBizType(type);\"}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 11,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 4 轮）"
+      }
+    },
+    {
+      "sequence": 12,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_299f3f226ee2469d9adae38d",
+        "name": "Grep",
+        "input": {
+          "pattern": "EXTERNAL_SUCCESS_BOOKING_PENDING|BOOKING_PENDING|BookingStatus|PaymentStatus|enum.*Status",
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown",
+          "limit": 80
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 13,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_299f3f226ee2469d9adae38d",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [{\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 18, \"text\": \"    public enum Status { PROCESSING, EXTERNAL_SUCCESS_BOOKING_PENDING, SUCCESS, FAILED, CANCELLED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 21, \"text\": \"    public enum PaymentStatus { TO_SUBMIT, PROCESSING, SUCCESS, FAILED, RESULT_UNCONFIRMED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 24, \"text\": \"    public enum BookingStatus { NONE, TO_BOOK, BOOKED, RETRY_NEEDED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 37, \"text\": \"    private PaymentStatus paymentStatus;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 39, \"text\": \"    private BookingStatus bookingStatus;\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 69, \"text\": \"    public PaymentStatus getPaymentStatus() { return paymentStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 70, \"text\": \"    public void setPaymentStatus(PaymentStatus paymentStatus) { this.paymentStatus = paymentStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 73, \"text\": \"    public BookingStatus getBookingStatus() { return bookingStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"line\": 74, \"text\": \"    public void setBookingStatus(BookingStatus bookingStatus) { this.bookingStatus = bookingStatus; }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrderRepository.java\", \"line\": 9, \"text\": \"    List<DrawdownOrder> findByPaymentStatus(DrawdownOrder.PaymentStatus paymentStatus);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrderRepository.java\", \"line\": 10, \"text\": \"    List<DrawdownOrder> findByBookingStatus(DrawdownOrder.BookingStatus bookingStatus);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownQuote.java\", \"line\": 14, \"text\": \"    public enum Status { UNUSED, USED, EXPIRED }\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 146, \"text\": \"        order.setPaymentStatus(DrawdownOrder.PaymentStatus.TO_SUBMIT);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 147, \"text\": \"        order.setBookingStatus(DrawdownOrder.BookingStatus.NONE);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 175, \"text\": \"                default -> order.setPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 195, \"text\": \"            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 198, \"text\": \"            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 199, \"text\": \"            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 200, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 203, \"text\": \"            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 206, \"text\": \"            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 219, \"text\": \"        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 228, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 236, \"text\": \"            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 251, \"text\": \"            order.setPaymentStatus(DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED);\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 262, \"text\": \"                        \\\"status\\\", order.getPaymentStatus().name(), \\\"amount\\\", order.getAmount())),\"}, {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"line\": 263, \"text\": \"                \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\"}], \"truncated\": false}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 14,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 5 轮）"
+      }
+    },
+    {
+      "sequence": 15,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_a2a7124b83d54f03ad10b71e",
+        "name": "Read",
+        "input": {
+          "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+          "offset": 160,
+          "limit": 110
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 16,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_a2a7124b83d54f03ad10b71e",
+        "name": "Read",
+        "status": "completed",
+        "output": "{\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"lineStart\": 160, \"lineEnd\": 269, \"totalLines\": 295, \"sourceMtimeNs\": 1788685969302827907, \"truncated\": true, \"nextLine\": 270, \"deprecated\": false, \"content\": \"160:         order.setLoanAccountNo(loanAccountNo);\\n161:         submitPayment(order);\\n162:         return order;\\n163:     }\\n164: \\n165:     /** 提交付款；同步终态就地结算，受理中等待回调或查单。 */\\n166:     public void submitPayment(DrawdownOrder order) {\\n167:         try {\\n168:             SimulatorClient.PaymentSubmission sub = simulator.submitPayment(\\n169:                     order.getBizOrderNo(), order.getPayeeName(), order.getPayeeAccount(), order.getAmount());\\n170:             order.setExtSerialNo(sub.extSerialNo());\\n171:             order.setUpdatedAt(Ids.now());\\n172:             switch (sub.status()) {\\n173:                 case \\\"SUCCESS\\\" -> onPaymentResult(order, \\\"SUCCESS\\\");\\n174:                 case \\\"REJECTED\\\" -> onPaymentResult(order, \\\"FAILED\\\");\\n175:                 default -> order.setPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\\n176:             }\\n177:         } catch (Exception e) {\\n178:             // 提交失败保留 TO_SUBMIT，由补偿任务重试（模拟服务按 bizOrderNo 幂等）\\n179:             log.warn(\\\"付款提交失败，等待补偿重试: {} {}\\\", order.getBizOrderNo(), e.getMessage());\\n180:         }\\n181:     }\\n182: \\n183:     // -------------------------------------------------- 外部结果确认（回调与查单共用）\\n184: \\n185:     /**\\n186:      * 付款结果落业务单。幂等：业务单已终态、或该结果已生效时，直接确认不产生任何新记录。\\n187:      */\\n188:     @Transactional\\n189:     public void onPaymentResult(DrawdownOrder order, String result) {\\n190:         if (order.terminal()) {\\n191:             return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\\n192:         }\\n193:         order.setUpdatedAt(Ids.now());\\n194:         if (\\\"SUCCESS\\\".equals(result)) {\\n195:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\\n196:                 return; // 幂等：成功已受理过\\n197:             }\\n198:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\\n199:             order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\\n200:             order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\\n201:             book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\\n202:         } else {\\n203:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\\n204:                 return;\\n205:             }\\n206:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\\n207:             order.setStatus(DrawdownOrder.Status.FAILED);\\n208:             limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\\n209:                     requiresGuarantee(order.getProductId()), order.getAmount());\\n210:         }\\n211:     }\\n212: \\n213:     /**\\n214:      * 中台入账：调用 Fineract 放款登记 + 逐层预占转实占。\\n215:      * 幂等：入账前先查借据是否已 ACTIVE（重复回调/查单/重试不会重复放款）。\\n216:      */\\n217:     @Transactional\\n218:     public void book(DrawdownOrder order) {\\n219:         if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\\n220:             return;\\n221:         }\\n222:         try {\\n223:             if (fineract.isLoanActive(order.getLoanAccountNo())) {\\n224:                 log.info(\\\"借据已生效，跳过重复放款登记: {}\\\", order.getLoanAccountNo());\\n225:             } else {\\n226:                 fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\\n227:             }\\n228:             order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\\n229:             order.setBookedAmount(order.getAmount());\\n230:             order.setStatus(DrawdownOrder.Status.SUCCESS);\\n231:             order.setUpdatedAt(Ids.now());\\n232:             limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\\n233:                     order.getLoanAccountNo(), order.getProductId(),\\n234:                     requiresGuarantee(order.getProductId()), order.getAmount());\\n235:         } catch (Exception e) {\\n236:             order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\\n237:             order.setBookingRetryCount(order.getBookingRetryCount() + 1);\\n238:             order.setBookingLastError(e.getMessage());\\n239:             order.setUpdatedAt(Ids.now());\\n240:             log.warn(\\\"入账失败转补偿: {} retry={}\\\", order.getBizOrderNo(), order.getBookingRetryCount());\\n241:         }\\n242:     }\\n243: \\n244:     /** 查单收敛：补偿任务对 PROCESSING 超时的指令主动查单，结果走与回调相同的处理通道。 */\\n245:     @Transactional\\n246:     public void queryAndSettle(DrawdownOrder order) {\\n247:         SimulatorClient.ExternalStatus status = simulator.query(\\\"PAYMENT\\\", order.getExtSerialNo());\\n248:         if (\\\"SUCCESS\\\".equals(status.status()) || \\\"FAILED\\\".equals(status.status())) {\\n249:             onPaymentResult(order, status.status());\\n250:         } else if (\\\"RESULT_UNCONFIRMED\\\".equals(status.status())) {\\n251:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED);\\n252:         }\\n253:     }\\n254: \\n255:     // ------------------------------------------------------------------ 查询\\n256: \\n257:     public Map<String, Object> detail(String bizOrderNo) {\\n258:         DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\\n259:         return Map.of(\\\"bizOrderNo\\\", order.getBizOrderNo(), \\\"status\\\", order.getStatus().name(),\\n260:                 \\\"amount\\\", order.getAmount(),\\n261:                 \\\"payments\\\", List.of(Map.of(\\\"extSerialNo\\\", order.getExtSerialNo() == null ? \\\"\\\" : order.getExtSerialNo(),\\n262:                         \\\"status\\\", order.getPaymentStatus().name(), \\\"amount\\\", order.getAmount())),\\n263:                 \\\"booking\\\", Map.of(\\\"status\\\", order.getBookingStatus().name(),\\n264:                         \\\"loanAccountNo\\\", order.getLoanAccountNo() == null ? \\\"\\\" : order.getLoanAccountNo(),\\n265:                         \\\"retryCount\\\", order.getBookingRetryCount()));\\n266:     }\\n267: \\n268:     private boolean requiresGuarantee(String productId) {\\n269:         return productRepo.findById(productId).map(ProductConfig::isRequiresGuarantee).orElse(false);\"}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 17,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 6 轮）"
+      }
+    },
+    {
+      "sequence": 18,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_af6a338f874048409812d932",
+        "name": "Grep",
+        "input": {
+          "pattern": "displayStatus|middleStatus|detail\\.booking|booking\\.status|payments\\[0\\]|paymentStatus|处理中|PROCESSING",
+          "path": "repos/mifos-web-repo/src",
+          "limit": 80
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 19,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_af6a338f874048409812d932",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [{\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/loan-products.ts\", \"line\": 14, \"text\": \"  public static LOAN_SCHEDULE_PROCESSING_TYPE_HORIZONTAL = 'HORIZONTAL';\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/loan-products.ts\", \"line\": 15, \"text\": \"  public static LOAN_SCHEDULE_PROCESSING_TYPE_VERTICAL = 'VERTICAL';\"}, {\"path\": \"repos/mifos-web-repo/src/app/products/loan-products/loan-product-stepper/loan-product-settings-step/loan-product-settings-step.component.ts\", \"line\": 758, \"text\": \"            LoanProducts.LOAN_SCHEDULE_PROCESSING_TYPE_HORIZONTAL,\"}], \"truncated\": false}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 20,
+      "eventType": "status",
+      "payload": {
+        "phase": "thinking",
+        "label": "正在分析（第 7 轮）"
+      }
+    },
+    {
+      "sequence": 21,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_761e62864f864d35845b515b",
+        "name": "Grep",
+        "input": {
+          "pattern": "/api/drawdowns|channelRefNo|displayStatus|middleStatus|booking",
+          "path": "repos/mifos-web-repo/src",
+          "limit": 80
+        },
+        "status": "running",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 22,
+      "eventType": "tool",
+      "payload": {
+        "id": "call_761e62864f864d35845b515b",
+        "name": "Grep",
+        "status": "completed",
+        "output": "{\"matches\": [], \"truncated\": false}",
+        "origin": "model"
+      }
+    },
+    {
+      "sequence": 23,
+      "eventType": "status",
+      "payload": {
+        "phase": "composing",
+        "label": "正在依据已读原文整理答案"
+      }
+    },
+    {
+      "sequence": 24,
+      "eventType": "text",
+      "payload": {
+        "id": "answer",
+        "text": "`GET /api/drawdowns/{channelRefNo}`（融商贷渠道后端）\n\n当前已核对的正常返回字段包括：`channelRefNo`、`displayStatus`、`middleStatus`、`detail`、`detail.bizOrderNo`、`detail.status`、`detail.amount`、`detail.payments`、`detail.payments[].extSerialNo`、`detail.payments[].status`、`detail.payments[].amount`、`detail.booking`、`detail.booking.status`、`detail.booking.loanAccountNo`、`detail.booking.retryCount`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:135`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:35`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`。\n\n`displayStatus` 的映射输入是 `middleStatus`、`detail.status`：SUCCESS／FAILED → 保留输入值；其他值 → 返回 `PROCESSING`。\n\n依据：`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`、`repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:75`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:48`、`repos/channel-service-repo/src/main/resources/application.yml:17`、`repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5`、`repos/loan-middle-repo/src/main/resources/application.yml:2`、`repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:14`。\n\n单一展示字段的合并不等于完整响应缺少明细；以上已确认字段不需要再次新增。\n\n源码 `repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:199`：\n```text\n        return switch (middleStatus) {\n            case \"SUCCESS\", \"FAILED\" -> middleStatus;\n            default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n        };\n```\n\n源码 `repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:259`：\n```text\n        return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n                \"amount\", order.getAmount(),\n                \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n                        \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n                \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                        \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n                        \"retryCount\", order.getBookingRetryCount()));\n```\n\n当前没有核对页面消费端。是否已展示、是否只需改一处以及改动收益仍需读取实际页面；若页面仅使用合并后的展示值，应先核对它是否可以利用现有明细。\n\n业务规则和恢复路径以以上原文为据；本实验模式只自动确认受支持的契约结构，不据此保证业务解释完整。\n\n核对说明：丢弃未交付、过长或导航类业务引用。",
+        "mode": "replace"
+      }
+    },
+    {
+      "sequence": 25,
+      "eventType": "status",
+      "payload": {
+        "phase": "completed",
+        "label": "已完成"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 76018,
+    "output_tokens": 540,
+    "total_tokens": 76558,
+    "reportedModels": [
+      "qwen3.8-27b"
+    ],
+    "requestedModel": "qwen3.8-27b",
+    "modelCalls": 8,
+    "agentVersion": 5,
+    "answerMode": "contracts",
+    "workflowMode": "basic",
+    "verification": {
+      "mode": "contracts",
+      "accepted": [
+        {
+          "contractId": "C5",
+          "fields": [
+            "channelRefNo",
+            "displayStatus",
+            "middleStatus",
+            "detail",
+            "detail.bizOrderNo",
+            "detail.status",
+            "detail.amount",
+            "detail.payments",
+            "detail.payments[].extSerialNo",
+            "detail.payments[].status",
+            "detail.payments[].amount",
+            "detail.booking",
+            "detail.booking.status",
+            "detail.booking.loanAccountNo",
+            "detail.booking.retryCount"
+          ],
+          "mappings": [
+            {
+              "outputField": "displayStatus",
+              "inputFields": [
+                "middleStatus",
+                "detail.status"
+              ],
+              "rules": [
+                {
+                  "inputs": [
+                    "SUCCESS",
+                    "FAILED"
+                  ],
+                  "default": false,
+                  "output": "input"
+                },
+                {
+                  "inputs": [],
+                  "default": true,
+                  "output": "PROCESSING"
+                }
+              ],
+              "evidence": [
+                "E23",
+                "E24",
+                "E6",
+                "E7",
+                "E8",
+                "E9",
+                "E10",
+                "E11",
+                "E12",
+                "E13",
+                "E14",
+                "E15",
+                "E16",
+                "E17",
+                "E18",
+                "E19",
+                "E25",
+                "E1",
+                "E4",
+                "E5"
+              ]
+            }
+          ]
+        }
+      ],
+      "issues": [
+        "丢弃未交付、过长或导航类业务引用"
+      ],
+      "businessEvidenceCount": 3,
+      "semanticProof": false,
+      "omittedBlocks": 0,
+      "projectId": "complex-loan-validation",
+      "omittedContracts": [],
+      "rawModelResponse": "```json\n{\"contracts\":[\"C5\"],\"business_evidence\":[{\"source\":\"S23\",\"start\":199,\"end\":202},{\"source\":\"S6\",\"start\":259,\"end\":265},{\"source\":\"S32\",\"start\":188,\"end\":242}]}\n```"
+    },
+    "discardedUnverifiedDraft": false,
+    "separateFinalization": true,
+    "retrieval": "files",
+    "investigation": {
+      "tasks": [],
+      "recentObservations": [
+        {
+          "tool": "Read",
+          "input": {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "offset": 120,
+            "limit": 90
+          },
+          "outcome": "truncated"
+        },
+        {
+          "tool": "Read",
+          "input": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "offset": 160,
+            "limit": 110
+          },
+          "outcome": "truncated"
+        },
+        {
+          "tool": "Grep",
+          "input": {
+            "pattern": "/api/drawdowns|channelRefNo|displayStatus|middleStatus|booking",
+            "path": "repos/mifos-web-repo/src",
+            "limit": 80
+          },
+          "outcome": "no_matches"
+        }
+      ],
+      "issues": [],
+      "reopenedDrafts": 0,
+      "semanticProof": false,
+      "unresolvedCritical": []
+    },
+    "contracts": {
+      "indexVersion": "20261031T092244133530",
+      "selected": [
+        {
+          "contractId": "C5",
+          "responseTraced": true,
+          "fields": 15,
+          "gaps": []
+        }
+      ],
+      "followups": [],
+      "semanticProof": false
+    },
+    "tracePath": "docs/records/2026-10/langchain-v5-contract-structured-channel-20261031.trace.json",
+    "stopReason": null,
+    "durationSeconds": 34.778
+  },
+  "experiment": {
+    "caseId": "v2-channel-display",
+    "retrieval": "files",
+    "answerMode": "contracts",
+    "workflowMode": "basic",
+    "contractIndex": "validation-projects/complex-loan/.data/contract-index",
+    "thinking": false,
+    "maxCalls": 8,
+    "maxOutputTokensPerCall": 2048,
+    "requestedModel": "qwen3.8-27b"
+  }
+}

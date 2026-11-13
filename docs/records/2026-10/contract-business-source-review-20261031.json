@@ -1,0 +1,423 @@
+{
+  "type": "local_source_and_workflow_review",
+  "projectId": "complex-loan-validation",
+  "indexVersion": "20261031T121301626257",
+  "question": "运营想区分页面上显示\"处理中\"的提款单，到底是\"外部还没结果\"还是\"中台入账失败\"。当前渠道接口能直接支持吗？依据哪些字段？如果只能改一处代码，改哪里收益最大？",
+  "scheduledTool": "TraceBusinessRules",
+  "modelCalls": 0,
+  "annotation": "assistant-authored development review; source and protocol only, not model QA",
+  "responseFields": 15,
+  "businessRules": [
+    {
+      "id": "B13",
+      "fields": [
+        "detail.booking.status"
+      ],
+      "phase": "catch",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.BookingStatus.RETRY_NEEDED"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.booking.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.book/1",
+      "evidence": [
+        "U1",
+        "U2"
+      ]
+    },
+    {
+      "id": "B6",
+      "fields": [
+        "detail.payments[].status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(result))",
+          "truth": true,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 194,
+            "end": 194
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.PaymentStatus.SUCCESS"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.payments[].status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2",
+      "evidence": [
+        "U3",
+        "U4"
+      ]
+    },
+    {
+      "id": "B7",
+      "fields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(result))",
+          "truth": true,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 194,
+            "end": 194
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2",
+      "evidence": [
+        "U3",
+        "U5"
+      ]
+    },
+    {
+      "id": "B8",
+      "fields": [
+        "detail.booking.status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(result))",
+          "truth": true,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 194,
+            "end": 194
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.BookingStatus.TO_BOOK"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.booking.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2",
+      "evidence": [
+        "U3",
+        "U2"
+      ]
+    },
+    {
+      "id": "B9",
+      "fields": [
+        "detail.payments[].status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(result))",
+          "truth": false,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 194,
+            "end": 194
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.PaymentStatus.FAILED"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.payments[].status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2",
+      "evidence": [
+        "U3",
+        "U4"
+      ]
+    },
+    {
+      "id": "B10",
+      "fields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(result))",
+          "truth": false,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 194,
+            "end": 194
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.Status.FAILED"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2",
+      "evidence": [
+        "U3",
+        "U5"
+      ]
+    },
+    {
+      "id": "B14",
+      "fields": [
+        "detail.payments[].status"
+      ],
+      "phase": "body",
+      "conditions": [
+        {
+          "expression": "(\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status()))",
+          "truth": false,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 248,
+            "end": 248
+          }
+        },
+        {
+          "expression": "(\"RESULT_UNCONFIRMED\".equals(status.status()))",
+          "truth": true,
+          "ref": {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "start": 250,
+            "end": 250
+          }
+        }
+      ],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.payments[].status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.queryAndSettle/1",
+      "evidence": [
+        "U6",
+        "U4"
+      ]
+    },
+    {
+      "id": "B1",
+      "fields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "phase": "body",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.Status.PROCESSING"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "middleStatus",
+        "detail.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.apply/4",
+      "evidence": [
+        "U7",
+        "U5"
+      ]
+    },
+    {
+      "id": "B2",
+      "fields": [
+        "detail.payments[].status"
+      ],
+      "phase": "body",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.PaymentStatus.TO_SUBMIT"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.payments[].status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.apply/4",
+      "evidence": [
+        "U7",
+        "U4"
+      ]
+    },
+    {
+      "id": "B3",
+      "fields": [
+        "detail.booking.status"
+      ],
+      "phase": "body",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.BookingStatus.NONE"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.booking.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.apply/4",
+      "evidence": [
+        "U7",
+        "U2"
+      ]
+    },
+    {
+      "id": "B4",
+      "fields": [
+        "detail.booking.retryCount"
+      ],
+      "phase": "body",
+      "conditions": [],
+      "assigned": {
+        "kind": "literal",
+        "expression": "0",
+        "value": 0
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.booking.retryCount"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.apply/4",
+      "evidence": [
+        "U7",
+        "U8"
+      ]
+    },
+    {
+      "id": "B5",
+      "fields": [
+        "detail.payments[].status"
+      ],
+      "phase": "try",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.PaymentStatus.PROCESSING"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.payments[].status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.submitPayment/1",
+      "evidence": [
+        "U9",
+        "U4"
+      ]
+    },
+    {
+      "id": "B11",
+      "fields": [
+        "detail.booking.status"
+      ],
+      "phase": "try",
+      "conditions": [],
+      "assigned": {
+        "kind": "symbol",
+        "expression": "DrawdownOrder.BookingStatus.BOOKED"
+      },
+      "conditionsComplete": false,
+      "executionProven": false,
+      "requiresResponseFields": [
+        "detail.booking.status"
+      ],
+      "method": "com.rsd.middle.drawdown.DrawdownService.book/1",
+      "evidence": [
+        "U1",
+        "U2"
+      ]
+    }
+  ],
+  "businessGaps": [
+    {
+      "reason": "evidence_context_budget"
+    }
+  ],
+  "sourceBlocksBeforeMerge": 30,
+  "sourceBlocksAfterMerge": 9,
+  "beforeMergeChars": 11844,
+  "afterMergeChars": 9846,
+  "requestChars": 27404,
+  "workflow": {
+    "indexVersion": "20261031T121301626257",
+    "needsBusinessConditions": true,
+    "selected": [
+      {
+        "contractId": "C5",
+        "responseTraced": true,
+        "fields": 15,
+        "gaps": []
+      }
+    ],
+    "businessTraced": [
+      "C5"
+    ],
+    "obligations": [
+      {
+        "contractId": "C5",
+        "response": "read",
+        "businessConditions": "source_sites_read",
+        "consumer": {
+          "status": "not_registered_in_scope",
+          "candidates": []
+        },
+        "changePreconditions": "需核对判别输入与实际消费端；无消费证据时不得给出单点收益保证或排序"
+      }
+    ],
+    "followups": [],
+    "semanticProof": false
+  },
+  "frozenLocalRequest": [
+    {
+      "role": "system",
+      "content": "本阶段没有工具，只输出 JSON：\n{\"contracts\":[\"已核对的契约编号\"],\"cases\":[{\"contract\":\"契约编号\",\"rules\":[\"已交付分支编号\"],\"meaning\":\"结合分支原文解释业务区别\"}],\"changes\":[{\"contract\":\"契约编号\",\"action\":\"reuse_fields\",\"fields\":[\"本题已有字段\"]}],\"business_evidence\":[{\"source\":\"S1\",\"start\":1,\"end\":4}]}。\n选择能回答本题的最直接接口编号；每个接口的字段、透传关系和展示映射由程序从当前源码生成，不要重复撰写结论。\nbusiness_evidence 选择本轮已读原文中足以说明业务状态、失败与等待区别、异步恢复步骤的连续片段，优先每段12行以内，共最多6段、72行；需保留分支上下文时可用较长片段。\n源码说明当前实现；业务补充知识说明约定；需求原文说明提出的目标，不能相互替代。\ncases 引用本题 businessRules 的编号，不是映射规则编号。说明问题要求区分的情形，不能只重复字段；写入点的局部条件不等于全部路径，更不代表查询接口执行这些写入。异常 catch 中的写入与进入异常前的写入要分开，不能把异常前的准备状态都叫失败，也不能忽略后续覆盖。\ncases.meaning 仅解释所选分支的业务含义，不撰写整个接口缺字段／页面已实现的总断言。程序检查来源绑定，不证明你的业务解释正确。\nchanges.action 仅支持 reuse_fields、adjust_projection、add_fields、inspect_consumer；fields 必须是真实响应路径，adjust_projection 选择展示输出字段。不得自由撰写收益排名。已返回字段先复用，未核对消费端时建议有条件；只改一个字段的映射，无法保证区分其他输入字段的状态。\n回答所问的区分和改动前提，避免把答案缩减成源码摘录。需求与业务资料可用 business_evidence 补充；它们不替代当前实现。\n"
+    },
+    {
+      "role": "human",
+      "content": "当前问题：运营想区分页面上显示\"处理中\"的提款单，到底是\"外部还没结果\"还是\"中台入账失败\"。当前渠道接口能直接支持吗？依据哪些字段？如果只能改一处代码，改哪里收益最大？\n\n已核对契约及原文：\n[{\"projectId\": \"complex-loan-validation\", \"indexVersion\": \"20261031T121301626257\", \"contractId\": \"C5\", \"entry\": {\"application\": \"融商贷渠道后端\", \"method\": \"GET\", \"route\": \"/api/drawdowns/{channelRefNo}\", \"symbol\": \"com.rsd.channel.ChannelController.drawdownDetail\", \"location\": {\"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 33, \"end\": 36}}, \"fields\": [{\"path\": \"channelRefNo\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"displayStatus\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"middleStatus\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail\", \"conditional\": false, \"evidence\": [\"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.bizOrderNo\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.status\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.amount\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].extSerialNo\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].status\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.payments[].amount\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.status\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.loanAccountNo\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}, {\"path\": \"detail.booking.retryCount\", \"conditional\": false, \"evidence\": [\"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E2\", \"E3\", \"E4\", \"E5\"]}], \"mappings\": [{\"outputField\": \"displayStatus\", \"inputFields\": [\"middleStatus\", \"detail.status\"], \"rules\": [{\"inputs\": [\"SUCCESS\", \"FAILED\"], \"default\": false, \"output\": \"input\"}, {\"inputs\": [], \"default\": true, \"output\": \"PROCESSING\"}], \"evidence\": [\"E20\", \"E21\", \"E6\", \"E7\", \"E8\", \"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\", \"E18\", \"E19\", \"E1\", \"E4\", \"E5\"]}], \"connections\": [{\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"to\": \"com.rsd.channel.ChannelService.displayOf/1\", \"evidence\": [\"E21\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getBizOrderNo/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getStatus/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getAmount/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getExtSerialNo/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getPaymentStatus/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getBookingStatus/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getLoanAccountNo/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownOrder.getBookingRetryCount/0\", \"evidence\": [\"E6\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.middle.drawdown.DrawdownController.detail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownService.detail/1\", \"evidence\": [\"E7\", \"E8\"]}, {\"kind\": \"HTTP_RESPONSE\", \"from\": \"com.rsd.channel.MiddleClient.drawdownDetail/1\", \"to\": \"com.rsd.middle.drawdown.DrawdownController.detail/1\", \"evidence\": [\"E9\", \"E10\", \"E11\", \"E12\", \"E13\", \"E14\", \"E15\", \"E16\", \"E17\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"to\": \"com.rsd.channel.MiddleClient.drawdownDetail/1\", \"evidence\": [\"E18\", \"E19\"]}, {\"kind\": \"RETURN_CALL\", \"from\": \"com.rsd.channel.ChannelController.drawdownDetail/1\", \"to\": \"com.rsd.channel.ChannelService.drawdownDetail/1\", \"evidence\": [\"E2\", \"E3\"]}], \"gaps\": [{\"reason\": \"evidence_context_budget\"}], \"evidence\": [{\"id\": \"E1\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 135, \"end\": 136}, {\"id\": \"E2\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 35, \"end\": 35}, {\"id\": \"E3\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 17, \"end\": 17}, {\"id\": \"E4\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 14, \"end\": 14}, {\"id\": \"E5\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java\", \"start\": 33, \"end\": 33}, {\"id\": \"E6\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 259, \"end\": 265}, {\"id\": \"E7\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 75, \"end\": 75}, {\"id\": \"E8\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 23, \"end\": 23}, {\"id\": \"E9\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 48, \"end\": 48}, {\"id\": \"E10\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 21, \"end\": 22}, {\"id\": \"E11\", \"path\": \"repos/channel-service-repo/src/main/resources/application.yml\", \"start\": 17, \"end\": 17}, {\"id\": \"E12\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java\", \"start\": 5, \"end\": 5}, {\"id\": \"E13\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java\", \"start\": 16, \"end\": 16}, {\"id\": \"E14\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 20, \"end\": 20}, {\"id\": \"E15\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java\", \"start\": 73, \"end\": 73}, {\"id\": \"E16\", \"path\": \"repos/loan-middle-repo/src/main/resources/application.yml\", \"start\": 2, \"end\": 2}, {\"id\": \"E17\", \"path\": \"repos/loan-middle-repo/src/main/resources/application.yml\", \"start\": 6, \"end\": 6}, {\"id\": \"E18\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 129, \"end\": 129}, {\"id\": \"E19\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 28, \"end\": 28}, {\"id\": \"E20\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 199, \"end\": 202}, {\"id\": \"E21\", \"path\": \"repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java\", \"start\": 130, \"end\": 130}, {\"id\": \"U1\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 217, \"end\": 242}, {\"id\": \"U2\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"start\": 74, \"end\": 74}, {\"id\": \"U3\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 188, \"end\": 211}, {\"id\": \"U4\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"start\": 70, \"end\": 70}, {\"id\": \"U5\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"start\": 68, \"end\": 68}, {\"id\": \"U6\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 245, \"end\": 253}, {\"id\": \"U7\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 122, \"end\": 163}, {\"id\": \"U8\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java\", \"start\": 76, \"end\": 76}, {\"id\": \"U9\", \"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 166, \"end\": 181}], \"evidenceLines\": 153, \"businessRules\": [{\"id\": \"B13\", \"fields\": [\"detail.booking.status\"], \"phase\": \"catch\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.BookingStatus.RETRY_NEEDED\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.booking.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.book/1\", \"evidence\": [\"U1\", \"U2\"]}, {\"id\": \"B6\", \"fields\": [\"detail.payments[].status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(result))\", \"truth\": true, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 194, \"end\": 194}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.PaymentStatus.SUCCESS\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.payments[].status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2\", \"evidence\": [\"U3\", \"U4\"]}, {\"id\": \"B7\", \"fields\": [\"middleStatus\", \"detail.status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(result))\", \"truth\": true, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 194, \"end\": 194}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"middleStatus\", \"detail.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2\", \"evidence\": [\"U3\", \"U5\"]}, {\"id\": \"B8\", \"fields\": [\"detail.booking.status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(result))\", \"truth\": true, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 194, \"end\": 194}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.BookingStatus.TO_BOOK\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.booking.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2\", \"evidence\": [\"U3\", \"U2\"]}, {\"id\": \"B9\", \"fields\": [\"detail.payments[].status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(result))\", \"truth\": false, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 194, \"end\": 194}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.PaymentStatus.FAILED\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.payments[].status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2\", \"evidence\": [\"U3\", \"U4\"]}, {\"id\": \"B10\", \"fields\": [\"middleStatus\", \"detail.status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(result))\", \"truth\": false, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 194, \"end\": 194}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.Status.FAILED\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"middleStatus\", \"detail.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.onPaymentResult/2\", \"evidence\": [\"U3\", \"U5\"]}, {\"id\": \"B14\", \"fields\": [\"detail.payments[].status\"], \"phase\": \"body\", \"conditions\": [{\"expression\": \"(\\\"SUCCESS\\\".equals(status.status()) || \\\"FAILED\\\".equals(status.status()))\", \"truth\": false, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 248, \"end\": 248}}, {\"expression\": \"(\\\"RESULT_UNCONFIRMED\\\".equals(status.status()))\", \"truth\": true, \"ref\": {\"path\": \"repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java\", \"start\": 250, \"end\": 250}}], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.payments[].status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.queryAndSettle/1\", \"evidence\": [\"U6\", \"U4\"]}, {\"id\": \"B1\", \"fields\": [\"middleStatus\", \"detail.status\"], \"phase\": \"body\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.Status.PROCESSING\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"middleStatus\", \"detail.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.apply/4\", \"evidence\": [\"U7\", \"U5\"]}, {\"id\": \"B2\", \"fields\": [\"detail.payments[].status\"], \"phase\": \"body\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.PaymentStatus.TO_SUBMIT\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.payments[].status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.apply/4\", \"evidence\": [\"U7\", \"U4\"]}, {\"id\": \"B3\", \"fields\": [\"detail.booking.status\"], \"phase\": \"body\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.BookingStatus.NONE\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.booking.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.apply/4\", \"evidence\": [\"U7\", \"U2\"]}, {\"id\": \"B4\", \"fields\": [\"detail.booking.retryCount\"], \"phase\": \"body\", \"conditions\": [], \"assigned\": {\"kind\": \"literal\", \"expression\": \"0\", \"value\": 0}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.booking.retryCount\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.apply/4\", \"evidence\": [\"U7\", \"U8\"]}, {\"id\": \"B5\", \"fields\": [\"detail.payments[].status\"], \"phase\": \"try\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.PaymentStatus.PROCESSING\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.payments[].status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.submitPayment/1\", \"evidence\": [\"U9\", \"U4\"]}, {\"id\": \"B11\", \"fields\": [\"detail.booking.status\"], \"phase\": \"try\", \"conditions\": [], \"assigned\": {\"kind\": \"symbol\", \"expression\": \"DrawdownOrder.BookingStatus.BOOKED\"}, \"conditionsComplete\": false, \"executionProven\": false, \"requiresResponseFields\": [\"detail.booking.status\"], \"method\": \"com.rsd.middle.drawdown.DrawdownService.book/1\", \"evidence\": [\"U1\", \"U2\"]}], \"consumer\": \"unconfirmed\", \"semanticProof\": false, \"coverage\": {\"repositories\": [\"channel-service-repo\", \"external-simulator-repo\", \"loan-middle-repo\"], \"parsers\": [\"spring-controller\", \"spring-restclient\", \"map-of\", \"record-constructor\", \"string-switch\"]}}]\n\n契约调查状态（程序维护；source_read 只表示补读，不会把未解析边改成已证明）：\n{\"indexVersion\": \"20261031T121301626257\", \"needsBusinessConditions\": true, \"selected\": [{\"contractId\": \"C5\", \"responseTraced\": true, \"fields\": 15, \"gaps\": []}], \"businessTraced\": [\"C5\"], \"obligations\": [{\"contractId\": \"C5\", \"response\": \"read\", \"businessConditions\": \"source_sites_read\", \"consumer\": {\"status\": \"not_registered_in_scope\", \"candidates\": []}, \"changePreconditions\": \"需核对判别输入与实际消费端；无消费证据时不得给出单点收益保证或排序\"}], \"followups\": [], \"semanticProof\": false}\n\n已读取的补充原文：\n[S1][code] repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java:28-202 [非连续原文；空缺行未交付]\n28:     private final MiddleClient middle;\n129:         Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\n130:         String display = displayOf(String.valueOf(middleDetail.get(\"status\")));\n135:         return Map.of(\"channelRefNo\", channelRefNo, \"displayStatus\", display,\n136:                 \"middleStatus\", middleDetail.get(\"status\"), \"detail\", middleDetail);\n199:         return switch (middleStatus) {\n200:             case \"SUCCESS\", \"FAILED\" -> middleStatus;\n201:             default -> \"PROCESSING\"; // PROCESSING / EXTERNAL_SUCCESS_BOOKING_PENDING / 其他处理中状态\n202:         };\n\n[S2][code] repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:14-35 [非连续原文；空缺行未交付]\n14: @RequestMapping(\"/api\")\n17:     private final ChannelService channelService;\n33:     @GetMapping(\"/drawdowns/{channelRefNo}\")\n35:         return channelService.drawdownDetail(channelRefNo);\n\n[S3][code] repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java:122-265 [非连续原文；空缺行未交付]\n122:     @Transactional\n123:     public DrawdownOrder apply(String quoteNo, String payeeName, String payeeAccount, String purpose) {\n124:         DrawdownQuote quote = quoteRepo.findById(quoteNo).orElseThrow();\n125:         if (!quote.usable(Ids.now())) {\n126:             throw new BizException(BizException.Code.QUOTE_EXPIRED);\n127:         }\n128:         ProductConfigVersion version = versionRepo.findById(quote.getProductVersionId()).orElseThrow();\n129:         validateAmountAndTerm(version, quote.getAmount(), quote.getTermMonths(), quote.getRepaymentMode());\n130:         // 报价到提交期间条件变化必须重新校验：按多层口径、以申请时点为准\n131:         if (limitService.availableForDrawdown(quote.getCreditId(), version.getProductId(),\n132:                 version.isRequiresGuarantee()).compareTo(quote.getAmount()) < 0) {\n133:             throw new BizException(BizException.Code.LIMIT_INSUFFICIENT);\n134:         }\n135: \n136:         DrawdownOrder order = new DrawdownOrder();\n137:         order.setBizOrderNo(Ids.next(\"DD-\"));\n138:         order.setCreditId(quote.getCreditId());\n139:         order.setQuoteNo(quoteNo);\n140:         order.setProductId(quote.getProductId());\n141:         order.setAmount(quote.getAmount());\n142:         order.setPayeeName(payeeName);\n143:         order.setPayeeAccount(payeeAccount);\n144:         order.setPurpose(purpose);\n145:         order.setStatus(DrawdownOrder.Status.PROCESSING);\n146:         order.setPaymentStatus(DrawdownOrder.PaymentStatus.TO_SUBMIT);\n147:         order.setBookingStatus(DrawdownOrder.BookingStatus.NONE);\n148:         order.setBookingRetryCount(0);\n149:         order.setCreatedAt(Ids.now());\n150:         order.setUpdatedAt(Ids.now());\n151:         orderRepo.save(order);\n152: \n153:         quote.setStatus(DrawdownQuote.Status.USED);\n154: \n155:         // 逐层预占额度 → 创建借据（Fineract 贷款账户）→ 提交付款\n156:         limitService.preOccupy(quote.getCreditId(), order.getBizOrderNo(), version.getProductId(),\n157:                 version.isRequiresGuarantee(), quote.getAmount());\n158:         String loanAccountNo = fineract.createLoan(version.getFineractProductId(), quote.getAmount(),\n159:                 quote.getTermMonths(), quote.getRepaymentMode(), quote.getFirstRepaymentDate());\n160:         order.setLoanAccountNo(loanAccountNo);\n161:         submitPayment(order);\n162:         return order;\n163:     }\n166:     public void submitPayment(DrawdownOrder order) {\n167:         try {\n168:             SimulatorClient.PaymentSubmission sub = simulator.submitPayment(\n169:                     order.getBizOrderNo(), order.getPayeeName(), order.getPayeeAccount(), order.getAmount());\n170:             order.setExtSerialNo(sub.extSerialNo());\n171:             order.setUpdatedAt(Ids.now());\n172:             switch (sub.status()) {\n173:                 case \"SUCCESS\" -> onPaymentResult(order, \"SUCCESS\");\n174:                 case \"REJECTED\" -> onPaymentResult(order, \"FAILED\");\n175:                 default -> order.setPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n176:             }\n177:         } catch (Exception e) {\n178:             // 提交失败保留 TO_SUBMIT，由补偿任务重试（模拟服务按 bizOrderNo 幂等）\n179:             log.warn(\"付款提交失败，等待补偿重试: {} {}\", order.getBizOrderNo(), e.getMessage());\n180:         }\n181:     }\n188:     @Transactional\n189:     public void onPaymentResult(DrawdownOrder order, String result) {\n190:         if (order.terminal()) {\n191:             return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n192:         }\n193:         order.setUpdatedAt(Ids.now());\n194:         if (\"SUCCESS\".equals(result)) {\n195:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n196:                 return; // 幂等：成功已受理过\n197:             }\n198:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n199:             order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n200:             order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n201:             book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n202:         } else {\n203:             if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n204:                 return;\n205:             }\n206:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n207:             order.setStatus(DrawdownOrder.Status.FAILED);\n208:             limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n209:                     requiresGuarantee(order.getProductId()), order.getAmount());\n210:         }\n211:     }\n217:     @Transactional\n218:     public void book(DrawdownOrder order) {\n219:         if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n220:             return;\n221:         }\n222:         try {\n223:             if (fineract.isLoanActive(order.getLoanAccountNo())) {\n224:                 log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n225:             } else {\n226:                 fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n227:             }\n228:             order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n229:             order.setBookedAmount(order.getAmount());\n230:             order.setStatus(DrawdownOrder.Status.SUCCESS);\n231:             order.setUpdatedAt(Ids.now());\n232:             limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n233:                     order.getLoanAccountNo(), order.getProductId(),\n234:                     requiresGuarantee(order.getProductId()), order.getAmount());\n235:         } catch (Exception e) {\n236:             order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n237:             order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n238:             order.setBookingLastError(e.getMessage());\n239:             order.setUpdatedAt(Ids.now());\n240:             log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());\n241:         }\n242:     }\n245:     @Transactional\n246:     public void queryAndSettle(DrawdownOrder order) {\n247:         SimulatorClient.ExternalStatus status = simulator.query(\"PAYMENT\", order.getExtSerialNo());\n248:         if (\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status())) {\n249:             onPaymentResult(order, status.status());\n250:         } else if (\"RESULT_UNCONFIRMED\".equals(status.status())) {\n251:             order.setPaymentStatus(DrawdownOrder.PaymentStatus.RESULT_UNCONFIRMED);\n252:         }\n253:     }\n259:         return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n260:                 \"amount\", order.getAmount(),\n261:                 \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n262:                         \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n263:                 \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n264:                         \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n265:                         \"retryCount\", order.getBookingRetryCount()));\n\n[S4][code] repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java:20-75 [非连续原文；空缺行未交付]\n20: @RequestMapping(\"/middle/api/v1/drawdowns\")\n23:     private final DrawdownService drawdownService;\n73:     @GetMapping(\"/{bizOrderNo}\")\n75:         return drawdownService.detail(bizOrderNo);\n\n[S5][code] repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleClient.java:16-48 [非连续原文；空缺行未交付]\n16:     private final MiddleProperties props;\n21:         this.http = RestClient.builder()\n22:                 .baseUrl(props.baseUrl())\n48:         return http.get().uri(\"/middle/api/v1/drawdowns/{no}\", bizOrderNo).retrieve().body(Map.class);\n\n[S6][code] repos/channel-service-repo/src/main/resources/application.yml:17-17 \n17:   base-url: http://localhost:8092\n\n[S7][code] repos/channel-service-repo/src/main/java/com/rsd/channel/MiddleProperties.java:5-5 \n5: @ConfigurationProperties(prefix = \"middle\")\n\n[S8][code] repos/loan-middle-repo/src/main/resources/application.yml:2-6 [非连续原文；空缺行未交付]\n2:   port: 8092\n6:     name: loan-middle\n\n[S9][code] repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java:68-76 [非连续原文；空缺行未交付]\n68:     public void setStatus(Status status) { this.status = status; }\n70:     public void setPaymentStatus(PaymentStatus paymentStatus) { this.paymentStatus = paymentStatus; }\n74:     public void setBookingStatus(BookingStatus bookingStatus) { this.bookingStatus = bookingStatus; }\n76:     public void setBookingRetryCount(Integer bookingRetryCount) { this.bookingRetryCount = bookingRetryCount; }"
+    }
+  ]
+}

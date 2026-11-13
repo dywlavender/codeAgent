@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from business_code_agent.query_agent.claude_runtime import ClaudeCodeRuntime, ClaudeRuntimeError
+from business_code_agent.query.claude_runtime import ClaudeCodeRuntime, ClaudeRuntimeError
 
 
 class _FakeProcess:
@@ -38,6 +38,20 @@ class _FakeProcess:
 
 
 class ClaudeRuntimeTest(unittest.TestCase):
+    def test_reported_model_and_cost_survive_result_parsing(self):
+        payloads = [
+            {"type": "assistant", "message": {"model": "reported-model", "content": []}},
+            {"type": "result", "result": "answer", "usage": {"input_tokens": 5},
+             "modelUsage": {"reported-model": {"inputTokens": 5}}, "total_cost_usd": .01},
+        ]
+        process = _FakeProcess("\n".join(json.dumps(p) for p in payloads) + "\n")
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process):
+                result = ClaudeCodeRuntime(command=sys.executable).ask("q", workspace=folder)
+        self.assertEqual(["reported-model"], result.usage["reportedModels"])
+        self.assertEqual(.01, result.usage["total_cost_usd"])
+        self.assertIn("reported-model", result.usage["modelUsage"])
+
     def test_cancel_terminates_real_child_and_preserves_partial_answer(self):
         class LocalRuntime(ClaudeCodeRuntime):
             def build_command(self, question, *, workspace, session_id=None, repositories=None):
@@ -56,7 +70,7 @@ class ClaudeRuntimeTest(unittest.TestCase):
             return process
         with tempfile.TemporaryDirectory() as folder:
             started = time.monotonic()
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", side_effect=launch):
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", side_effect=launch):
                 result = LocalRuntime(command=sys.executable, timeout_seconds=10).ask(
                     "q", workspace=folder, cancel_check=cancel.is_set,
                     event_callback=lambda event: cancel.set() if event["eventType"] == "text" else None,
@@ -79,7 +93,7 @@ class ClaudeRuntimeTest(unittest.TestCase):
             process = _FakeProcess(stream)
             events = []
             runtime = ClaudeCodeRuntime(command=sys.executable)
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process) as popen:
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process) as popen:
                 result = runtime.ask("提款有哪些校验？", workspace=str(workspace), event_callback=events.append)
                 self.assertEqual("session-1", result.runtime_session_id)
                 self.assertEqual("提款需要校验银行卡。", result.answer)
@@ -96,7 +110,7 @@ class ClaudeRuntimeTest(unittest.TestCase):
                 self.assertIn("--disallowed-tools", command)
 
             process = _FakeProcess(stream)
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process) as popen:
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process) as popen:
                 runtime.ask("银行卡为什么必须存在？", workspace=str(workspace), session_id="session-1")
                 command = popen.call_args.args[0]
                 self.assertIn("--resume", command)
@@ -119,8 +133,8 @@ class ClaudeRuntimeTest(unittest.TestCase):
         process = _FakeProcess("\n".join(json.dumps(payload) for payload in payloads) + "\n")
         events = []
         with tempfile.TemporaryDirectory() as folder:
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process):
-                with self.assertLogs("business_code_agent.query_agent.claude_runtime", level="INFO") as logs:
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process):
+                with self.assertLogs("business_code_agent.query.claude_runtime", level="INFO") as logs:
                     result = ClaudeCodeRuntime(command=sys.executable).ask(
                         "q", workspace=folder, event_callback=events.append)
         self.assertEqual(result.events, events)
@@ -139,7 +153,7 @@ class ClaudeRuntimeTest(unittest.TestCase):
     def test_nonzero_exit_is_reported(self):
         with tempfile.TemporaryDirectory() as folder:
             process = _FakeProcess("", "authentication failed\n", return_code=3)
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process):
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process):
                 with self.assertRaises(ClaudeRuntimeError) as raised:
                     ClaudeCodeRuntime(command=sys.executable).ask("q", workspace=folder)
             self.assertIn("authentication failed", str(raised.exception))
@@ -148,21 +162,21 @@ class ClaudeRuntimeTest(unittest.TestCase):
         answer = "完整回答" * 2000
         process = _FakeProcess(json.dumps({"type": "result", "result": answer}) + "\n")
         with tempfile.TemporaryDirectory() as folder:
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process):
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process):
                 result = ClaudeCodeRuntime(command=sys.executable).ask("q", workspace=folder)
         self.assertEqual(answer, result.answer)
 
     def test_structured_failure_is_reported_even_when_process_exits_zero(self):
         stream = json.dumps({"type": "result", "is_error": True, "errors": ["authentication failed"]}) + "\n"
         with tempfile.TemporaryDirectory() as folder:
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=_FakeProcess(stream)):
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=_FakeProcess(stream)):
                 with self.assertRaisesRegex(ClaudeRuntimeError, "authentication failed"):
                     ClaudeCodeRuntime(command=sys.executable).ask("q", workspace=folder)
 
     def test_timeout_terminates_process(self):
         with tempfile.TemporaryDirectory() as folder:
             process = _FakeProcess("", running=True)
-            with patch("business_code_agent.query_agent.claude_runtime.subprocess.Popen", return_value=process):
+            with patch("business_code_agent.query.claude_runtime.subprocess.Popen", return_value=process):
                 with self.assertRaises(ClaudeRuntimeError) as raised:
                     ClaudeCodeRuntime(command=sys.executable, timeout_seconds=1).ask("q", workspace=folder)
             self.assertIn("超时", str(raised.exception))

@@ -1,0 +1,145 @@
+/* Code Atlas design tokens
+ *
+ * One source of truth for the workbench shell. The layers stay explicit:
+ * primitive values -> semantic intent -> component contracts.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Primitive: cool neutral palette */
+  --primitive-neutral-0: #ffffff;
+  --primitive-neutral-25: #fcfcfb;
+  --primitive-neutral-50: #f6f7f6;
+  --primitive-neutral-100: #eef0ef;
+  --primitive-neutral-200: #dfe3e1;
+  --primitive-neutral-300: #c7ceca;
+  --primitive-neutral-500: #737e78;
+  --primitive-neutral-600: #59645e;
+  --primitive-neutral-700: #3d4742;
+  --primitive-neutral-900: #202622;
+
+  /* Primitive: one restrained accent plus semantic source hues */
+  --primitive-brand-100: #e4f0eb;
+  --primitive-brand-500: #2f7566;
+  --primitive-brand-700: #20584d;
+  --primitive-blue-500: #3d6f94;
+  --primitive-blue-100: #e9f1f6;
+  --primitive-amber-600: #8b621e;
+  --primitive-amber-100: #faf1df;
+  --primitive-red-600: #ad4944;
+  --primitive-red-100: #fbe9e7;
+
+  /* Primitive: type, rhythm, shape and motion */
+  --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-display: var(--font-body);
+  --font-code: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+  --type-xs: 0.6875rem;
+  --type-sm: 0.75rem;
+  --type-md: 0.8125rem;
+  --type-lg: 0.9375rem;
+  --type-xl: 1.1875rem;
+  --type-display: 1.625rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-input: 16px;
+  --radius-pill: 999px;
+  --motion-fast: 120ms;
+  --motion-normal: 160ms;
+  --shadow-1: 0 1px 2px rgb(32 38 34 / 5%);
+  --shadow-2: 0 10px 28px rgb(32 38 34 / 10%);
+  --rule-weight: 1px;
+
+  /* Semantic: surfaces, text, borders and evidence states */
+  --color-canvas: var(--primitive-neutral-50);
+  --color-sidebar: #f0f2f1;
+  --color-surface: var(--primitive-neutral-25);
+  --color-surface-raised: var(--primitive-neutral-0);
+  --color-surface-muted: var(--primitive-neutral-100);
+  --color-well: #f8f9f8;
+  --color-text: var(--primitive-neutral-900);
+  --color-text-secondary: var(--primitive-neutral-600);
+  --color-text-faint: var(--primitive-neutral-500);
+  --color-border: var(--primitive-neutral-200);
+  --color-border-strong: var(--primitive-neutral-300);
+  --color-brand: var(--primitive-brand-500);
+  --color-brand-strong: var(--primitive-brand-700);
+  --color-brand-soft: var(--primitive-brand-100);
+  --color-on-brand: #f7fffb;
+  --color-code: var(--primitive-blue-500);
+  --color-code-soft: var(--primitive-blue-100);
+  --color-business: var(--primitive-brand-500);
+  --color-business-soft: var(--primitive-brand-100);
+  --color-requirement: var(--primitive-amber-600);
+  --color-requirement-soft: var(--primitive-amber-100);
+  --color-danger: var(--primitive-red-600);
+  --color-danger-soft: var(--primitive-red-100);
+  --color-graph-tag: var(--primitive-neutral-600);
+  --color-graph-tag-soft: var(--primitive-neutral-100);
+  --color-focus: var(--color-brand);
+
+  /* Component: stable contracts for the workbench */
+  --component-nav-width: 224px;
+  --component-topbar-height: 52px;
+  --component-nav-bg: var(--color-sidebar);
+  --component-nav-text: var(--color-text-secondary);
+  --component-nav-hover-bg: #e8ebe9;
+  --component-nav-active-bg: var(--color-brand-soft);
+  --component-nav-active-text: var(--color-brand-strong);
+  --component-panel-bg: var(--color-surface);
+  --component-card-bg: var(--color-surface-raised);
+  --component-card-border: var(--color-border);
+  --component-input-bg: var(--color-surface-raised);
+  --component-input-border: var(--color-border-strong);
+  --component-button-primary-bg: var(--color-brand);
+  --component-button-primary-hover: var(--color-brand-strong);
+  --component-button-primary-text: var(--color-on-brand);
+  --component-button-height: 34px;
+  --component-control-radius: var(--radius-sm);
+  --component-panel-radius: var(--radius-lg);
+  --component-focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-focus) 18%, transparent);
+  --icon-size-sm: 14px;
+  --icon-size-md: 18px;
+  --icon-size-lg: 22px;
+  --icon-stroke: 1.8;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #151918;
+  --color-sidebar: #191e1c;
+  --color-surface: #181d1b;
+  --color-surface-raised: #202622;
+  --color-surface-muted: #29312d;
+  --color-well: #141918;
+  --color-text: #e8eeea;
+  --color-text-secondary: #a7b1ab;
+  --color-text-faint: #7d8982;
+  --color-border: #303a35;
+  --color-border-strong: #455149;
+  --color-brand: #63bd99;
+  --color-brand-strong: #8bd5b4;
+  --color-brand-soft: #1d382c;
+  --color-on-brand: #0d2118;
+  --color-code: #8ebada;
+  --color-code-soft: #213543;
+  --color-business: #63bd99;
+  --color-business-soft: #1d382c;
+  --color-requirement: #dfb665;
+  --color-requirement-soft: #3b301b;
+  --color-danger: #ed8b86;
+  --color-danger-soft: #422826;
+  --color-graph-tag: #b6c0ba;
+  --color-graph-tag-soft: #29322d;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 42%);
+  --component-nav-hover-bg: #232b27;
+}

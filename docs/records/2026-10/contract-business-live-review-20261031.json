@@ -1,0 +1,37 @@
+{
+  "projectId": "complex-loan-validation",
+  "caseId": "v2-channel-display",
+  "set": "development",
+  "reviewer": "assistant source review, not independent human evaluation",
+  "actualModel": "qwen3.8-27b",
+  "actualModelCalls": 8,
+  "inputTokens": 101327,
+  "outputTokens": 1029,
+  "durationSeconds": 82.129,
+  "maxRequestChars": 41160,
+  "finalRequestChars": 35859,
+  "finalOutputTokens": 544,
+  "sourceOmissions": 0,
+  "conflictingSources": [],
+  "autoBusinessObservedBeforeModelRequest": 2,
+  "programBindingsPassed": true,
+  "businessInterpretationFullyPassed": false,
+  "findings": [
+    "已识别透传状态并组织业务区分，建议复用已有字段，保留消费端缺口",
+    "book异常后主状态被解读为固定待入账；源码存在try先写成功、后续调用可能异常、catch未重写主状态的顺序，不能保证这种总断言",
+    "三次搜索另一系统前端均无命中；输入增加，不支持成本改善结论"
+  ],
+  "postRunLocalCorrections": {
+    "additionalModelCalls": 0,
+    "answerVersion": 3,
+    "guardedExceptionCases": 1,
+    "acceptedBusinessCases": 4,
+    "originalAnswerChars": 10910,
+    "localReassemblyAnswerChars": 4138,
+    "modelQualityOfNewVersionVerified": false,
+    "controllerReplay": "contract-business-controller-replay-20261031.json",
+    "localReassembly": "langchain-v6-business-v3-reassembly-20261031.json"
+  },
+  "relatedTests": 116,
+  "defaultEnabled": false
+}

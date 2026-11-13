@@ -9,12 +9,12 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest.mock import patch
 
-from business_code_agent.project_context import ProjectRegistry
+from business_code_agent.platform.projects import ProjectRegistry
 from business_code_agent.evaluation.ast_service import AstService
-from business_code_agent.query_agent.api import make_server
-from business_code_agent.query_agent.runtime import RuntimeResult
-from business_code_agent.query_agent.service import QueryService as RealQueryService
-from business_code_agent.schema import connect
+from business_code_agent.api.server import make_server
+from business_code_agent.query.runtime import RuntimeResult
+from business_code_agent.query.service import QueryService as RealQueryService
+from business_code_agent.storage.schema import connect
 
 
 class _Runtime:
@@ -114,7 +114,7 @@ class ProjectContextTest(unittest.TestCase):
             def service_factory(db, **kwargs):
                 return RealQueryService(db, runtime=_Runtime(), **kwargs)
 
-            with patch("business_code_agent.query_agent.api.QueryService", service_factory):
+            with patch("business_code_agent.api.server.QueryService", service_factory):
                 server = make_server(str(root / "unused.db"), port=0, project_registry=registry)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()

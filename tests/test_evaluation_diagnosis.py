@@ -7,7 +7,7 @@ from business_code_agent.evaluation.diagnosis import prepare_reassessment, diagn
 from business_code_agent.evaluation.runner import _arm_documents
 from business_code_agent.evaluation.scoring import RubricInvalid, parse_review, model_review_score
 from business_code_agent.evaluation.harness import judge_answer
-from business_code_agent.query_agent.runtime import RuntimeResult
+from business_code_agent.query.runtime import RuntimeResult
 
 
 class DiagnosisTest(unittest.TestCase):

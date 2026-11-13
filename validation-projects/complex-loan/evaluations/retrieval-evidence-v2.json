@@ -1,0 +1,1054 @@
+{
+  "id": "loan-retrieval-evidence-v2",
+  "name": "贷款跨系统检索诊断",
+  "projectId": "complex-loan-validation",
+  "annotationStatus": "draft",
+  "annotationSource": "assistant_source_checked_not_human_reviewed",
+  "notes": "20 道现有验证题；来源是已知回归场景，不宣称来自真实生产用户。标注只用于必要证据诊断，完整性仍待人工复核。没有复制参考答案或评分标准。 v2 修订担保覆盖层引文，纳入 supportable 的除法规则；首批冻结结果保留，不用于新标注比较。",
+  "cases": [
+    {
+      "id": "v2-callback-twice",
+      "question": "一笔提款的付款成功回调被模拟服务重复投递了两次。第二次到达时，如果第一次触发的入账还没有完成（Fineract 还没放款成功），会发生什么？两次投递各自走到哪一步，台账会不会重复变化？",
+      "category": "technical_flow",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "payment-guard",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        },
+        {
+          "id": "booking-result",
+          "role": "outcome",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void book(DrawdownOrder order) {\n        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n            return;\n        }\n        try {\n            if (fineract.isLoanActive(order.getLoanAccountNo())) {\n                log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n            } else {\n                fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n            }\n            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n            order.setBookedAmount(order.getAmount());\n            order.setStatus(DrawdownOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        } catch (Exception e) {\n            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n            order.setBookingLastError(e.getMessage());\n            order.setUpdatedAt(Ids.now());\n            log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());",
+                "lineStart": 218
+              }
+            ]
+          ]
+        },
+        {
+          "id": "retry-route",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+                "quote": "        // 提款：受理超时主动查单\n        LocalDateTime deadline = LocalDateTime.now().minus(Duration.ofSeconds(paymentQueryTimeoutSeconds));\n        List<DrawdownOrder> pendingPayments = drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n        for (DrawdownOrder order : pendingPayments) {\n            if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"提款付款超时，主动查单: {}\", order.getBizOrderNo());\n                drawdownService.queryAndSettle(order);\n            }\n        }\n        // 提款：入账未完成 → 重试（含\"外部已成功、中台未入账\"的可恢复状态）\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\n            drawdownService.book(order);\n        }\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\n            if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\n                drawdownService.book(order);\n            }",
+                "lineStart": 62
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void book(DrawdownOrder order) {\n        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n            return;\n        }\n        try {\n            if (fineract.isLoanActive(order.getLoanAccountNo())) {\n                log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n            } else {\n                fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n            }\n            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n            order.setBookedAmount(order.getAmount());\n            order.setStatus(DrawdownOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        } catch (Exception e) {\n            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n            order.setBookingLastError(e.getMessage());\n            order.setUpdatedAt(Ids.now());\n            log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());",
+                "lineStart": 218
+              }
+            ]
+          ]
+        },
+        {
+          "id": "ledger-write",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public void confirmOccupy(String creditId, String bizOrderNo, String loanAccountNo,\n                              String productId, boolean productRequiresGuarantee, BigDecimal bookedAmount) {\n        CreditLimit limit = get(creditId);\n        limit.setPreOccupied(limit.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n        limit.setOccupied(limit.getOccupied().add(bookedAmount));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.OCCUPY,\n                LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            sub.setOccupied(sub.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            group.setOccupied(group.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                coverage.setPreOccupied(coverage.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n                coverage.setOccupied(coverage.getOccupied().add(bookedAmount));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.OCCUPY,\n                        LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 131
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-record-count",
+      "question": "同样是提款受理，为什么有的业务单台账里出现 4 条 PRE_OCCUPY 流水，有的只有 3 条？每条流水的 productId 字段分别是什么值？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "conditional-layers",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "        if (availableForDrawdown(creditId, productId, productRequiresGuarantee).compareTo(amount) < 0) {\n            throw new BizException(BizException.Code.LIMIT_INSUFFICIENT);\n        }\n        limit.setPreOccupied(limit.getPreOccupied().add(amount));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.PRE_OCCUPY,\n                LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().add(amount));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.PRE_OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, productId, bizOrderNo, null);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().add(amount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.PRE_OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                coverage.setPreOccupied(coverage.getPreOccupied().add(amount));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.PRE_OCCUPY,\n                        LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n            });",
+                "lineStart": 103
+              }
+            ]
+          ]
+        },
+        {
+          "id": "record-product",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    private void record(String creditId, LimitRecord.Layer layer, LimitRecord.Kind kind,\n                        LimitRecord.Reason reason, BigDecimal amount, String productId,\n                        String bizOrderNo, String loanAccountNo) {\n        LimitRecord r = new LimitRecord();\n        r.setRecordId(Ids.next(\"LR-\"));\n        r.setCreditId(creditId);\n        r.setLayer(layer);\n        r.setKind(kind);\n        r.setReason(reason);\n        r.setAmount(amount);\n        r.setProductId(productId);\n        r.setBizOrderNo(bizOrderNo);\n        r.setLoanAccountNo(loanAccountNo);\n        r.setCreatedAt(Ids.now());\n        recordRepo.save(r);",
+                "lineStart": 240
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-decrease-edge",
+      "question": "企业甲占用 25 万、预占 3 万，此时申请把总授信降到 28 万整——restricted 会置位吗？那笔预占中的提款随后入账成功，结果是什么？如果降到 27 万呢？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "strict-boundary",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void effectuate(CreditApplicationOrder order) {\n        BigDecimal limitAmount = order.getApprovedLimit();\n        switch (order.getType()) {\n            case INITIAL -> {\n                CreditLimit limit = new CreditLimit();\n                String creditId = Ids.next(\"CR-\");\n                limit.setCreditId(creditId);\n                limit.setCustomerName(order.getCustomerName());\n                limit.setTotalLimit(limitAmount);\n                limit.setOccupied(BigDecimal.ZERO);\n                limit.setPreOccupied(BigDecimal.ZERO);\n                limit.setFrozen(false);\n                limit.setRestricted(false);\n                limitRepo.save(limit);\n                order.setCreatedCreditId(creditId);\n                applyLayers(order, creditId);\n            }\n            case LIMIT_INCREASE, RENEWAL -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n                applyLayers(order, limit.getCreditId());\n            }\n            case LIMIT_DECREASE -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                // 降额规则：占用高于新上限时保留实际占用、限制新增提款，不改已有债务\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n            }",
+                "lineStart": 121
+              }
+            ]
+          ]
+        },
+        {
+          "id": "remaining",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditLimit.java",
+                "quote": "    /** 总授信层余量；restricted 时下限取 0。 */\n    public BigDecimal totalRemaining() {\n        BigDecimal remaining = totalLimit.subtract(occupied).subtract(preOccupied);\n        return restricted ? remaining.max(BigDecimal.ZERO) : remaining;",
+                "lineStart": 29
+              }
+            ]
+          ]
+        },
+        {
+          "id": "booking-ledger",
+          "role": "outcome",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public void confirmOccupy(String creditId, String bizOrderNo, String loanAccountNo,\n                              String productId, boolean productRequiresGuarantee, BigDecimal bookedAmount) {\n        CreditLimit limit = get(creditId);\n        limit.setPreOccupied(limit.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n        limit.setOccupied(limit.getOccupied().add(bookedAmount));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.OCCUPY,\n                LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            sub.setOccupied(sub.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            group.setOccupied(group.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                coverage.setPreOccupied(coverage.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n                coverage.setOccupied(coverage.getOccupied().add(bookedAmount));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.OCCUPY,\n                        LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 131
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-approved-limit",
+      "question": "模拟审批返回的批准额度低于申请额度时，INITIAL 申请和 LIMIT_INCREASE 申请分别怎么生效？提额申请被批了比现有授信还低的额度，会出什么结果？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "callback-effective",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void onApprovalResult(CreditApplicationOrder order, String result, BigDecimal approvedLimit) {\n        if (order.terminal()) {\n            return;\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"APPROVED\".equals(result)) {\n            BigDecimal effective = approvedLimit == null ? order.getRequestedLimit() : approvedLimit;\n            order.setApprovedLimit(effective);\n            order.setStatus(CreditApplicationOrder.Status.APPROVED);\n            effectuate(order);\n        } else {\n            order.setStatus(CreditApplicationOrder.Status.REJECTED);\n        }",
+                "lineStart": 104
+              }
+            ]
+          ]
+        },
+        {
+          "id": "initial-and-increase",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void effectuate(CreditApplicationOrder order) {\n        BigDecimal limitAmount = order.getApprovedLimit();\n        switch (order.getType()) {\n            case INITIAL -> {\n                CreditLimit limit = new CreditLimit();\n                String creditId = Ids.next(\"CR-\");\n                limit.setCreditId(creditId);\n                limit.setCustomerName(order.getCustomerName());\n                limit.setTotalLimit(limitAmount);\n                limit.setOccupied(BigDecimal.ZERO);\n                limit.setPreOccupied(BigDecimal.ZERO);\n                limit.setFrozen(false);\n                limit.setRestricted(false);\n                limitRepo.save(limit);\n                order.setCreatedCreditId(creditId);\n                applyLayers(order, creditId);\n            }\n            case LIMIT_INCREASE, RENEWAL -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n                applyLayers(order, limit.getCreditId());\n            }\n            case LIMIT_DECREASE -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                // 降额规则：占用高于新上限时保留实际占用、限制新增提款，不改已有债务\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n            }",
+                "lineStart": 121
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-strategy-code",
+      "question": "中台创建借据的请求里 transactionProcessingStrategyCode 传的是什么值？这个值在 Fineract 侧由谁消费、怎样决定还款金额的分配顺序？它和 Fineract 贷款产品上配置的策略是什么关系？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "requested-code",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/fineract/FineractClient.java",
+                "quote": "        Map<String, Object> payload = Map.ofEntries(\n                Map.entry(\"productId\", Long.valueOf(fineractProductId)),\n                Map.entry(\"principal\", principal),\n                Map.entry(\"loanTermFrequency\", termMonths),\n                Map.entry(\"loanTermFrequencyType\", 2),          // 2=MONTHS（PeriodFrequencyType）\n                Map.entry(\"repaymentEvery\", 1),\n                Map.entry(\"repaymentFrequencyType\", 2),\n                Map.entry(\"interestType\", 0),                   // 0=DECLINING_BALANCE\n                Map.entry(\"interestCalculationPeriodMethod\", 1),// 1=SAME_AS_REPAYMENT_PERIOD\n                Map.entry(\"amortizationType\", amortizationType(repaymentMode)),\n                Map.entry(\"transactionProcessingStrategyCode\", \"mifos-standard-strategy\"),\n                Map.entry(\"submittedOnDate\", Ids.now().toLocalDate().toString()),\n                Map.entry(\"expectedDisbursementDate\", Ids.now().toLocalDate().toString()),\n                Map.entry(\"repaymentStartDateType\", 1),         // 1=DISBURSEMENT_DATE\n                Map.entry(\"dateFormat\", Ids.DATE_FMT),\n                Map.entry(\"locale\", \"en\"));\n        Map<String, Object> resp = http.post().uri(\"/loans\")\n                .body(payload)",
+                "lineStart": 57
+              }
+            ]
+          ]
+        },
+        {
+          "id": "processor-selection",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/fineract/FineractClient.java",
+                "quote": "                Map.entry(\"amortizationType\", amortizationType(repaymentMode)),\n                Map.entry(\"transactionProcessingStrategyCode\", \"mifos-standard-strategy\"),",
+                "lineStart": 66
+              },
+              {
+                "sourceId": "fineract-repo",
+                "path": "fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanRepaymentScheduleTransactionProcessorFactory.java",
+                "quote": "    public LoanRepaymentScheduleTransactionProcessor determineProcessor(final String transactionProcessingStrategy) {\n\n        Optional<LoanRepaymentScheduleTransactionProcessor> processor = processors.stream()\n                .filter(p -> p.accept(transactionProcessingStrategy)).findFirst();\n\n        if (processor.isEmpty() && Boolean.TRUE.equals(errorNotFoundFail)) {\n            throw new LoanTransactionProcessingStrategyNotFoundException(transactionProcessingStrategy);\n        } else {\n            return processor.orElse(defaultLoanRepaymentScheduleTransactionProcessor);\n        }",
+                "lineStart": 39
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-channel-display",
+      "question": "运营想区分页面上显示\"处理中\"的提款单，到底是\"外部还没结果\"还是\"中台入账失败\"。当前渠道接口能直接支持吗？依据哪些字段？如果只能改一处代码，改哪里收益最大？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "channel-fields",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "channel-service-repo",
+                "path": "src/main/java/com/rsd/channel/ChannelService.java",
+                "quote": "    /** 结果查询：取中台原始状态，按映射合并为展示状态，同时保存原始状态供追踪。 */\n    @SuppressWarnings(\"unchecked\")\n    public Map<String, Object> drawdownDetail(String channelRefNo) {\n        ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\n        Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\n        String display = displayOf(String.valueOf(middleDetail.get(\"status\")));\n        record.setDisplayStatus(display);\n        record.setMiddleRawStatus(String.valueOf(middleDetail.get(\"status\")));\n        record.setUpdatedAt(LocalDateTime.now().withNano(0));\n        recordRepo.save(record);\n        return Map.of(\"channelRefNo\", channelRefNo, \"displayStatus\", display,\n                \"middleStatus\", middleDetail.get(\"status\"), \"detail\", middleDetail);",
+                "lineStart": 125
+              }
+            ]
+          ]
+        },
+        {
+          "id": "middle-booking-fields",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public Map<String, Object> detail(String bizOrderNo) {\n        DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\n        return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n                \"amount\", order.getAmount(),\n                \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n                        \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n                \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                        \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n                        \"retryCount\", order.getBookingRetryCount()));",
+                "lineStart": 257
+              }
+            ]
+          ]
+        },
+        {
+          "id": "success-boundary",
+          "role": "business_semantics",
+          "alternatives": [
+            [
+              {
+                "sourceId": "business-context",
+                "path": "boundaries.md",
+                "quote": "## 外部成功不等于业务成功\n\n外部付款返回成功只表示执行侧完成，不代表贷款业务已经完成。业务最终状态还要以中台完成借据登记和内部台账收敛为准。",
+                "lineStart": 3
+              }
+            ],
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-stale-failed",
+      "question": "补偿任务对一笔付款主动查单拿到 FAILED，但同一时刻这笔单子的入账刚好完成、业务单已经 SUCCESS。系统会出现重复释放预占或\"失败覆盖成功\"吗？靠什么机制避免？",
+      "category": "technical_flow",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "terminal-and-failure-guard",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        },
+        {
+          "id": "release-side-effects",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public void releasePreOccupied(String creditId, String bizOrderNo, String productId,\n                                   boolean productRequiresGuarantee, BigDecimal amount) {\n        CreditLimit limit = get(creditId);\n        limit.setPreOccupied(limit.getPreOccupied().subtract(amount).max(BigDecimal.ZERO));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.RELEASE,\n                LimitRecord.Reason.DRAWDOWN_FAILED, amount, null, bizOrderNo, null);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().subtract(amount).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.DRAWDOWN_FAILED, amount, productId, bizOrderNo, null);",
+                "lineStart": 163
+              }
+            ]
+          ]
+        },
+        {
+          "id": "query-entry",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void queryAndSettle(DrawdownOrder order) {\n        SimulatorClient.ExternalStatus status = simulator.query(\"PAYMENT\", order.getExtSerialNo());\n        if (\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status())) {\n            onPaymentResult(order, status.status());",
+                "lineStart": 246
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v2-version-edge",
+      "question": "运营把采购贷年利率从 8% 改成 7.5% 后，立刻生成了一张新报价；同时另一人拿着 29 分钟前（旧利率时期）生成的老报价提交申请。两张单各按什么规则执行？什么情况下老报价会被拒绝？",
+      "category": "code_detail",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "version-choice",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    private ProductConfigVersion resolveVersion(ProductConfig product) {\n        Optional<ProductConfigVersion> latest = versionRepo.findFirstByProductIdOrderByVersionDesc(product.getProductId());\n        if (latest.isPresent() && sameRules(latest.get(), product)) {\n            return latest.get();\n        }\n        ProductConfigVersion version = new ProductConfigVersion();\n        version.setVersionId(\"PV-\" + product.getProductId() + \"-\"\n                + (latest.map(v -> v.getVersion() + 1).orElse(1)));\n        version.setProductId(product.getProductId());\n        version.setVersion(latest.map(v -> v.getVersion() + 1).orElse(1));\n        version.setMinAmount(product.getMinAmount());\n        version.setMaxAmount(product.getMaxAmount());\n        version.setTerms(product.getTerms());\n        version.setRepaymentModes(product.getRepaymentModes());\n        version.setAnnualInterestRate(product.getAnnualInterestRate());\n        version.setRequiresGuarantee(product.isRequiresGuarantee());\n        version.setFineractProductId(product.getFineractProductId());\n        version.setEffectiveAt(Ids.now());\n        return versionRepo.save(version);\n    }\n\n    private boolean sameRules(ProductConfigVersion version, ProductConfig product) {\n        return version.getMinAmount().compareTo(product.getMinAmount()) == 0\n                && version.getMaxAmount().compareTo(product.getMaxAmount()) == 0\n                && version.getTerms().equals(product.getTerms())\n                && version.getRepaymentModes().equals(product.getRepaymentModes())\n                && version.getAnnualInterestRate().compareTo(product.getAnnualInterestRate()) == 0\n                && version.isRequiresGuarantee() == product.isRequiresGuarantee();",
+                "lineStart": 90
+              }
+            ]
+          ]
+        },
+        {
+          "id": "quote-binding",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public DrawdownOrder apply(String quoteNo, String payeeName, String payeeAccount, String purpose) {\n        DrawdownQuote quote = quoteRepo.findById(quoteNo).orElseThrow();\n        if (!quote.usable(Ids.now())) {\n            throw new BizException(BizException.Code.QUOTE_EXPIRED);\n        }\n        ProductConfigVersion version = versionRepo.findById(quote.getProductVersionId()).orElseThrow();\n        validateAmountAndTerm(version, quote.getAmount(), quote.getTermMonths(), quote.getRepaymentMode());\n        // 报价到提交期间条件变化必须重新校验：按多层口径、以申请时点为准\n        if (limitService.availableForDrawdown(quote.getCreditId(), version.getProductId(),\n                version.isRequiresGuarantee()).compareTo(quote.getAmount()) < 0) {\n            throw new BizException(BizException.Code.LIMIT_INSUFFICIENT);",
+                "lineStart": 123
+              }
+            ]
+          ]
+        },
+        {
+          "id": "quote-expiry",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownQuote.java",
+                "quote": "    public boolean usable(LocalDateTime now) {\n        return status == Status.UNUSED && now.isBefore(validUntil);",
+                "lineStart": 30
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "biz-payment-pending",
+      "question": "供应商确认已经收到采购款，但客户查借款进度仍显示处理中，可借额度也没有恢复。请按当前实现说明应该查哪些系统、如何区分正常等待和处理故障，以及系统会怎样继续处理。",
+      "category": "business_investigation",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "external-success",
+          "role": "business_semantics",
+          "alternatives": [
+            [
+              {
+                "sourceId": "business-context",
+                "path": "boundaries.md",
+                "quote": "## 外部成功不等于业务成功\n\n外部付款返回成功只表示执行侧完成，不代表贷款业务已经完成。业务最终状态还要以中台完成借据登记和内部台账收敛为准。",
+                "lineStart": 3
+              }
+            ],
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        },
+        {
+          "id": "channel-and-middle",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "channel-service-repo",
+                "path": "src/main/java/com/rsd/channel/ChannelService.java",
+                "quote": "    /** 结果查询：取中台原始状态，按映射合并为展示状态，同时保存原始状态供追踪。 */\n    @SuppressWarnings(\"unchecked\")\n    public Map<String, Object> drawdownDetail(String channelRefNo) {\n        ChannelApplicationRecord record = requireRecord(channelRefNo, BizType.DRAWDOWN);\n        Map<String, Object> middleDetail = middle.drawdownDetail(record.getBizOrderNo());\n        String display = displayOf(String.valueOf(middleDetail.get(\"status\")));\n        record.setDisplayStatus(display);\n        record.setMiddleRawStatus(String.valueOf(middleDetail.get(\"status\")));\n        record.setUpdatedAt(LocalDateTime.now().withNano(0));\n        recordRepo.save(record);\n        return Map.of(\"channelRefNo\", channelRefNo, \"displayStatus\", display,\n                \"middleStatus\", middleDetail.get(\"status\"), \"detail\", middleDetail);",
+                "lineStart": 125
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public Map<String, Object> detail(String bizOrderNo) {\n        DrawdownOrder order = orderRepo.findById(bizOrderNo).orElseThrow();\n        return Map.of(\"bizOrderNo\", order.getBizOrderNo(), \"status\", order.getStatus().name(),\n                \"amount\", order.getAmount(),\n                \"payments\", List.of(Map.of(\"extSerialNo\", order.getExtSerialNo() == null ? \"\" : order.getExtSerialNo(),\n                        \"status\", order.getPaymentStatus().name(), \"amount\", order.getAmount())),\n                \"booking\", Map.of(\"status\", order.getBookingStatus().name(),\n                        \"loanAccountNo\", order.getLoanAccountNo() == null ? \"\" : order.getLoanAccountNo(),\n                        \"retryCount\", order.getBookingRetryCount()));",
+                "lineStart": 257
+              }
+            ]
+          ]
+        },
+        {
+          "id": "retry-booking",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+                "quote": "        // 提款：受理超时主动查单\n        LocalDateTime deadline = LocalDateTime.now().minus(Duration.ofSeconds(paymentQueryTimeoutSeconds));\n        List<DrawdownOrder> pendingPayments = drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n        for (DrawdownOrder order : pendingPayments) {\n            if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"提款付款超时，主动查单: {}\", order.getBizOrderNo());\n                drawdownService.queryAndSettle(order);\n            }\n        }\n        // 提款：入账未完成 → 重试（含\"外部已成功、中台未入账\"的可恢复状态）\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\n            drawdownService.book(order);\n        }\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\n            if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\n                drawdownService.book(order);\n            }",
+                "lineStart": 62
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void book(DrawdownOrder order) {\n        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n            return;\n        }\n        try {\n            if (fineract.isLoanActive(order.getLoanAccountNo())) {\n                log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n            } else {\n                fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n            }\n            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n            order.setBookedAmount(order.getAmount());\n            order.setStatus(DrawdownOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        } catch (Exception e) {\n            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n            order.setBookingLastError(e.getMessage());\n            order.setUpdatedAt(Ids.now());\n            log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());",
+                "lineStart": 218
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "biz-repaid-limit",
+      "question": "企业已经还了一笔钱，财务看到扣款成功，但企业反映可借额度没有增加，或者增加金额小于付款金额。请依据源码梳理核查路径，说明哪些情况符合规则、哪些环节需要继续调查。",
+      "category": "business_investigation",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "allocation-meaning",
+          "role": "business_semantics",
+          "alternatives": [
+            [
+              {
+                "sourceId": "business-context",
+                "path": "cross-system.md",
+                "quote": "## 还款金额的归属\n\n还款进入 Fineract 后，费用、罚息、利息和本金的拆分由 Fineract 的产品分配规则决定。中台根据返回的分配结果恢复本金占用；“还款总额”不能直接等同于“可恢复额度”。",
+                "lineStart": 7
+              }
+            ],
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+                "quote": "            String transactionId = fineract.repayLoan(order.getLoanAccountNo(), order.getAmount());\n            FineractClient.RepaymentAllocation allocation =\n                    fineract.getRepaymentAllocation(order.getLoanAccountNo(), transactionId);\n            order.setFineractTransactionId(allocation.transactionId());\n            order.setPrincipalPortion(allocation.principalPortion());\n            order.setInterestPortion(allocation.interestPortion());\n            order.setFeePortion(allocation.feePortion());\n            order.setStatus(RepaymentOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            // 只有本金部分逐层恢复授信占用；利息、费用不恢复（担保层按覆盖比例折算）\n            DrawdownOrder drawdown = drawdownRepo.findByLoanAccountNo(order.getLoanAccountNo()).orElse(null);\n            String productId = drawdown == null ? null : drawdown.getProductId();\n            boolean requiresGuarantee = productId == null || productRepo.findById(productId)\n                    .map(ProductConfig::isRequiresGuarantee).orElse(false);\n            limitService.restoreByPrincipal(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), productId, requiresGuarantee, allocation.principalPortion());",
+                "lineStart": 119
+              }
+            ]
+          ]
+        },
+        {
+          "id": "fineract-to-ledger",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+                "quote": "            String transactionId = fineract.repayLoan(order.getLoanAccountNo(), order.getAmount());\n            FineractClient.RepaymentAllocation allocation =\n                    fineract.getRepaymentAllocation(order.getLoanAccountNo(), transactionId);\n            order.setFineractTransactionId(allocation.transactionId());\n            order.setPrincipalPortion(allocation.principalPortion());\n            order.setInterestPortion(allocation.interestPortion());\n            order.setFeePortion(allocation.feePortion());\n            order.setStatus(RepaymentOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            // 只有本金部分逐层恢复授信占用；利息、费用不恢复（担保层按覆盖比例折算）\n            DrawdownOrder drawdown = drawdownRepo.findByLoanAccountNo(order.getLoanAccountNo()).orElse(null);\n            String productId = drawdown == null ? null : drawdown.getProductId();\n            boolean requiresGuarantee = productId == null || productRepo.findById(productId)\n                    .map(ProductConfig::isRequiresGuarantee).orElse(false);\n            limitService.restoreByPrincipal(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), productId, requiresGuarantee, allocation.principalPortion());",
+                "lineStart": 119
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    @Transactional\n    public void restoreByPrincipal(String creditId, String bizOrderNo, String loanAccountNo,\n                                   String productId, boolean productRequiresGuarantee, BigDecimal principalPortion) {\n        if (principalPortion.signum() <= 0) {\n            return;\n        }\n        CreditLimit limit = get(creditId);\n        limit.setOccupied(limit.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.RELEASE,\n                LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setOccupied(sub.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setOccupied(group.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                // 部分还本按规则减少担保覆盖占用（主场景：还本 10 万、覆盖比例 80% → 覆盖占用减 8 万）\n                BigDecimal release = principalPortion.multiply(coverage.getCoverageRatio())\n                        .setScale(2, java.math.RoundingMode.DOWN);\n                coverage.setOccupied(coverage.getOccupied().subtract(release).max(BigDecimal.ZERO));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.RELEASE,\n                        LimitRecord.Reason.PRINCIPAL_REPAID, release, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 190
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "biz-same-credit",
+      "question": "同一集团的两家企业反馈：本企业没有新增借款，总授信也没变，可申请的金额却减少了；另外，换成客户经理入口后可选条件又不同。请解释当前代码支持哪些原因，以及调查时如何区分它们。",
+      "category": "business_investigation",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-diagnostic-v3.json",
+      "evidence": [
+        {
+          "id": "shared-membership",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public Optional<GroupLimit> findGroupOf(String creditId) {\n        return groupMemberRepo.findByCreditId(creditId)\n                .flatMap(member -> groupRepo.findById(member.getGroupNo()));",
+                "lineStart": 231
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public BigDecimal availableForDrawdown(String creditId, String productId, boolean productRequiresGuarantee) {\n        CreditLimit limit = get(creditId);\n        if (limit.isFrozen()) {\n            return BigDecimal.ZERO;\n        }\n        BigDecimal available = limit.totalRemaining();\n        Optional<ProductSubLimit> sub = findSubLimit(creditId, productId);\n        if (sub.isPresent()) {\n            available = available.min(sub.get().remaining());\n        }\n        Optional<GroupLimit> group = findGroupOf(creditId);\n        if (group.isPresent()) {\n            available = available.min(group.get().remaining());\n        }\n        if (productRequiresGuarantee) {\n            Optional<GuaranteeCoverage> coverage = findCoverage(creditId);\n            if (coverage.isEmpty()) {\n                return BigDecimal.ZERO; // 担保要求=开 但无有效担保覆盖，不可借\n            }\n            available = available.min(coverage.get().supportable());\n        }\n        return available.max(BigDecimal.ZERO);",
+                "lineStart": 74
+              }
+            ]
+          ]
+        },
+        {
+          "id": "channel-limits",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "channel-service-repo",
+                "path": "src/main/java/com/rsd/channel/ChannelService.java",
+                "quote": "        ChannelProductRule rule = ruleRepo.findByChannelId(channelId).stream()\n                .filter(r -> r.getProductId().equals(productId) && r.isEnabled())\n                .findFirst()\n                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \"PRODUCT_NOT_OPEN\"));\n        if (amount.compareTo(rule.getMaxAmount()) > 0) {\n            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \"CHANNEL_AMOUNT_LIMIT\");\n        }\n        if (!rule.termList().contains(termMonths)) {\n            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \"CHANNEL_TERM_LIMIT\");\n        }\n\n        // 字段转换：渠道语义 → 中台契约（quote → apply 两步，均按 docs/接口契约-阶段2.md）\n        Map<String, Object> quote = middle.quote(Map.of(\n                \"creditId\", creditId,\n                \"productId\", productId,\n                \"amount\", amount,\n                \"termMonths\", termMonths,\n                \"repaymentMode\", String.valueOf(request.get(\"repaymentMode\")),\n                \"firstRepaymentDate\", String.valueOf(request.getOrDefault(\"firstRepaymentDate\", \"\"))));\n        Map<String, Object> applied = middle.applyDrawdown(String.valueOf(quote.get(\"quoteNo\")),\n                String.valueOf(request.get(\"payeeName\")),\n                String.valueOf(request.get(\"payeeAccount\")),\n                String.valueOf(request.getOrDefault(\"purpose\", \"\")));",
+                "lineStart": 83
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-multilayer-calc",
+      "question": "种子数据里企业甲总授信 80 万元，页面申请采购贷时最多只能借 50 万。请说明四个额度层各自的余量、最终可用额度怎么算出来、代码在哪个类。",
+      "category": "middle_rule",
+      "split": "development",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "configured-layers",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/MiddleApplication.java",
+                "quote": "                limits.save(credit(\"CR-202609010001\", \"企业甲\", \"800000\"));\n                limits.save(credit(\"CR-202609010002\", \"企业乙\", \"500000\"));\n\n                groups.save(group(\"G-202609001\", \"甲乙集团\", \"600000\"));\n\n                members.save(member(\"GM-001\", \"G-202609001\", \"CR-202609010001\"));\n                members.save(member(\"GM-002\", \"G-202609001\", \"CR-202609010002\"));\n\n                subLimits.save(subLimit(\"SL-001\", \"CR-202609010001\", \"LOAN-PURCHASE\", \"700000\"));\n\n                GuaranteeCoverage coverage = new GuaranteeCoverage();\n                coverage.setCoverageId(\"GC-001\");\n                coverage.setCreditId(\"CR-202609010001\");\n                coverage.setOrgName(\"担保机构丙\");\n                coverage.setCoverageLimit(new BigDecimal(\"400000\"));\n                coverage.setOccupied(BigDecimal.ZERO);\n                coverage.setPreOccupied(BigDecimal.ZERO);\n                coverage.setCoverageRatio(new BigDecimal(\"0.8\"));",
+                "lineStart": 49
+              }
+            ]
+          ]
+        },
+        {
+          "id": "available-minimum",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public BigDecimal availableForDrawdown(String creditId, String productId, boolean productRequiresGuarantee) {\n        CreditLimit limit = get(creditId);\n        if (limit.isFrozen()) {\n            return BigDecimal.ZERO;\n        }\n        BigDecimal available = limit.totalRemaining();\n        Optional<ProductSubLimit> sub = findSubLimit(creditId, productId);\n        if (sub.isPresent()) {\n            available = available.min(sub.get().remaining());\n        }\n        Optional<GroupLimit> group = findGroupOf(creditId);\n        if (group.isPresent()) {\n            available = available.min(group.get().remaining());\n        }\n        if (productRequiresGuarantee) {\n            Optional<GuaranteeCoverage> coverage = findCoverage(creditId);\n            if (coverage.isEmpty()) {\n                return BigDecimal.ZERO; // 担保要求=开 但无有效担保覆盖，不可借\n            }\n            available = available.min(coverage.get().supportable());\n        }\n        return available.max(BigDecimal.ZERO);",
+                "lineStart": 74
+              }
+            ]
+          ]
+        },
+        {
+          "id": "supportable",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/GuaranteeCoverage.java",
+                "quote": "    /** 该层允许的借款金额＝剩余覆盖 ÷ 覆盖比例。 */\n    public BigDecimal supportable() {\n        return remaining().divide(coverageRatio, 2, java.math.RoundingMode.DOWN);\n    }\n\n    public BigDecimal remaining() {\n        return coverageLimit.subtract(occupied).subtract(preOccupied);\n    }",
+                "lineStart": 26
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-multilayer-booking",
+      "question": "一笔 30 万采购贷提款受理后、入账前，额度台账发生了什么？入账成功后呢？请说明台账流水的层次结构。",
+      "category": "middle_rule",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "preoccupation",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "        if (availableForDrawdown(creditId, productId, productRequiresGuarantee).compareTo(amount) < 0) {\n            throw new BizException(BizException.Code.LIMIT_INSUFFICIENT);\n        }\n        limit.setPreOccupied(limit.getPreOccupied().add(amount));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.PRE_OCCUPY,\n                LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().add(amount));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.PRE_OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, productId, bizOrderNo, null);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().add(amount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.PRE_OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                coverage.setPreOccupied(coverage.getPreOccupied().add(amount));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.PRE_OCCUPY,\n                        LimitRecord.Reason.DRAWDOWN_ACCEPTED, amount, null, bizOrderNo, null);\n            });",
+                "lineStart": 103
+              }
+            ]
+          ]
+        },
+        {
+          "id": "booking-confirmation",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void book(DrawdownOrder order) {\n        if (order.getBookingStatus() == DrawdownOrder.BookingStatus.BOOKED) {\n            return;\n        }\n        try {\n            if (fineract.isLoanActive(order.getLoanAccountNo())) {\n                log.info(\"借据已生效，跳过重复放款登记: {}\", order.getLoanAccountNo());\n            } else {\n                fineract.disburseLoan(order.getLoanAccountNo(), order.getAmount());\n            }\n            order.setBookingStatus(DrawdownOrder.BookingStatus.BOOKED);\n            order.setBookedAmount(order.getAmount());\n            order.setStatus(DrawdownOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            limitService.confirmOccupy(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());\n        } catch (Exception e) {\n            order.setBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED);\n            order.setBookingRetryCount(order.getBookingRetryCount() + 1);\n            order.setBookingLastError(e.getMessage());\n            order.setUpdatedAt(Ids.now());\n            log.warn(\"入账失败转补偿: {} retry={}\", order.getBizOrderNo(), order.getBookingRetryCount());",
+                "lineStart": 218
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public void confirmOccupy(String creditId, String bizOrderNo, String loanAccountNo,\n                              String productId, boolean productRequiresGuarantee, BigDecimal bookedAmount) {\n        CreditLimit limit = get(creditId);\n        limit.setPreOccupied(limit.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n        limit.setOccupied(limit.getOccupied().add(bookedAmount));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.OCCUPY,\n                LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setPreOccupied(sub.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            sub.setOccupied(sub.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            group.setOccupied(group.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                coverage.setPreOccupied(coverage.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n                coverage.setOccupied(coverage.getOccupied().add(bookedAmount));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.OCCUPY,\n                        LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 131
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-decrease-rule",
+      "question": "企业甲总授信从 80 万降到 30 万，此时已有占用 40 万。系统会怎么处理？已有借据还款还能恢复占用吗？还能再提款吗？",
+      "category": "middle_rule",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "decrease-restricted",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void effectuate(CreditApplicationOrder order) {\n        BigDecimal limitAmount = order.getApprovedLimit();\n        switch (order.getType()) {\n            case INITIAL -> {\n                CreditLimit limit = new CreditLimit();\n                String creditId = Ids.next(\"CR-\");\n                limit.setCreditId(creditId);\n                limit.setCustomerName(order.getCustomerName());\n                limit.setTotalLimit(limitAmount);\n                limit.setOccupied(BigDecimal.ZERO);\n                limit.setPreOccupied(BigDecimal.ZERO);\n                limit.setFrozen(false);\n                limit.setRestricted(false);\n                limitRepo.save(limit);\n                order.setCreatedCreditId(creditId);\n                applyLayers(order, creditId);\n            }\n            case LIMIT_INCREASE, RENEWAL -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n                applyLayers(order, limit.getCreditId());\n            }\n            case LIMIT_DECREASE -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                // 降额规则：占用高于新上限时保留实际占用、限制新增提款，不改已有债务\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n            }",
+                "lineStart": 121
+              }
+            ]
+          ]
+        },
+        {
+          "id": "remaining",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditLimit.java",
+                "quote": "    /** 总授信层余量；restricted 时下限取 0。 */\n    public BigDecimal totalRemaining() {\n        BigDecimal remaining = totalLimit.subtract(occupied).subtract(preOccupied);\n        return restricted ? remaining.max(BigDecimal.ZERO) : remaining;",
+                "lineStart": 29
+              }
+            ]
+          ]
+        },
+        {
+          "id": "repayment-restoration",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    @Transactional\n    public void restoreByPrincipal(String creditId, String bizOrderNo, String loanAccountNo,\n                                   String productId, boolean productRequiresGuarantee, BigDecimal principalPortion) {\n        if (principalPortion.signum() <= 0) {\n            return;\n        }\n        CreditLimit limit = get(creditId);\n        limit.setOccupied(limit.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.RELEASE,\n                LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setOccupied(sub.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setOccupied(group.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                // 部分还本按规则减少担保覆盖占用（主场景：还本 10 万、覆盖比例 80% → 覆盖占用减 8 万）\n                BigDecimal release = principalPortion.multiply(coverage.getCoverageRatio())\n                        .setScale(2, java.math.RoundingMode.DOWN);\n                coverage.setOccupied(coverage.getOccupied().subtract(release).max(BigDecimal.ZERO));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.RELEASE,\n                        LimitRecord.Reason.PRINCIPAL_REPAID, release, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 190
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-group-sharing",
+      "question": "企业乙和企业甲同属一个集团限额。企业乙借了 20 万之后，企业甲的可借额度有什么变化？这个约束在代码哪里实现？",
+      "category": "cross_system",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "membership-and-minimum",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public Optional<GroupLimit> findGroupOf(String creditId) {\n        return groupMemberRepo.findByCreditId(creditId)\n                .flatMap(member -> groupRepo.findById(member.getGroupNo()));",
+                "lineStart": 231
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public BigDecimal availableForDrawdown(String creditId, String productId, boolean productRequiresGuarantee) {\n        CreditLimit limit = get(creditId);\n        if (limit.isFrozen()) {\n            return BigDecimal.ZERO;\n        }\n        BigDecimal available = limit.totalRemaining();\n        Optional<ProductSubLimit> sub = findSubLimit(creditId, productId);\n        if (sub.isPresent()) {\n            available = available.min(sub.get().remaining());\n        }\n        Optional<GroupLimit> group = findGroupOf(creditId);\n        if (group.isPresent()) {\n            available = available.min(group.get().remaining());\n        }\n        if (productRequiresGuarantee) {\n            Optional<GuaranteeCoverage> coverage = findCoverage(creditId);\n            if (coverage.isEmpty()) {\n                return BigDecimal.ZERO; // 担保要求=开 但无有效担保覆盖，不可借\n            }\n            available = available.min(coverage.get().supportable());\n        }\n        return available.max(BigDecimal.ZERO);",
+                "lineStart": 74
+              }
+            ]
+          ]
+        },
+        {
+          "id": "group-occupation",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "        findGroupOf(creditId).ifPresent(group -> {\n            group.setPreOccupied(group.getPreOccupied().subtract(bookedAmount).max(BigDecimal.ZERO));\n            group.setOccupied(group.getOccupied().add(bookedAmount));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.OCCUPY,\n                    LimitRecord.Reason.DRAWDOWN_BOOKED, bookedAmount, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 145
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-approval-flow",
+      "question": "从客户在渠道提交授信申请，到中台账本上出现一笔生效的授信，完整链路是什么？审批结果有哪几种回到中台的方式？",
+      "category": "cross_system",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "channel-credit",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "channel-service-repo",
+                "path": "src/main/java/com/rsd/channel/ChannelService.java",
+                "quote": "    public Map<String, Object> applyCredit(String channelId, Map<String, Object> request) {\n        if (!channelAllowsCredit(channelId)) {\n            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, \"CHANNEL_CREDIT_NOT_OPEN\");\n        }\n        Map<String, Object> applied = middle.applyCredit(request);\n        String channelRefNo = nextRef();\n        ChannelApplicationRecord record = new ChannelApplicationRecord();\n        record.setChannelRefNo(channelRefNo);\n        record.setChannelId(channelId);\n        record.setBizType(BizType.CREDIT);\n        record.setBizOrderNo(String.valueOf(applied.get(\"bizOrderNo\")));\n        record.setDisplayStatus(\"PROCESSING\");\n        record.setChannelRuleSnapshotJson(\"{\\\"channelId\\\":\\\"\" + channelId + \"\\\",\\\"entry\\\":\\\"credit-application\\\"}\");\n        record.setCreatedAt(LocalDateTime.now().withNano(0));\n        record.setUpdatedAt(record.getCreatedAt());\n        recordRepo.save(record);\n        return Map.of(\"channelRefNo\", channelRefNo,\n                \"bizOrderNo\", applied.get(\"bizOrderNo\"),\n                \"displayStatus\", \"PROCESSING\");",
+                "lineStart": 143
+              }
+            ]
+          ]
+        },
+        {
+          "id": "approval-result",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/external/ExternalResultController.java",
+                "quote": "                    CreditApplicationOrder order = creditRepo.findById(callback.bizOrderNo()).orElse(null);\n                    if (order != null && callback.extSerialNo().equals(order.getApprovalExtSerialNo())) {\n                        creditService.onApprovalResult(order, callback.result(), callback.approvedLimit());\n                    }\n                }\n                default -> log.warn(\"未知回调类型: {}\", callback.type());\n            }",
+                "lineStart": 73
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void onApprovalResult(CreditApplicationOrder order, String result, BigDecimal approvedLimit) {\n        if (order.terminal()) {\n            return;\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"APPROVED\".equals(result)) {\n            BigDecimal effective = approvedLimit == null ? order.getRequestedLimit() : approvedLimit;\n            order.setApprovedLimit(effective);\n            order.setStatus(CreditApplicationOrder.Status.APPROVED);\n            effectuate(order);\n        } else {\n            order.setStatus(CreditApplicationOrder.Status.REJECTED);\n        }",
+                "lineStart": 104
+              }
+            ]
+          ]
+        },
+        {
+          "id": "poll-approval",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+                "quote": "        // 授信审批：未拿到流水号的重试提交；受理超时的查审批结论\n        creditRepo.findByStatus(CreditApplicationOrder.Status.PROCESSING).forEach(order -> {\n            if (order.getApprovalExtSerialNo() == null) {\n                creditService.submitApproval(order);\n            } else if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"授信审批超时，主动查单: {}\", order.getBizOrderNo());\n                creditService.queryAndSettle(order);\n            }",
+                "lineStart": 93
+              }
+            ]
+          ]
+        },
+        {
+          "id": "effectuation",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void effectuate(CreditApplicationOrder order) {\n        BigDecimal limitAmount = order.getApprovedLimit();\n        switch (order.getType()) {\n            case INITIAL -> {\n                CreditLimit limit = new CreditLimit();\n                String creditId = Ids.next(\"CR-\");\n                limit.setCreditId(creditId);\n                limit.setCustomerName(order.getCustomerName());\n                limit.setTotalLimit(limitAmount);\n                limit.setOccupied(BigDecimal.ZERO);\n                limit.setPreOccupied(BigDecimal.ZERO);\n                limit.setFrozen(false);\n                limit.setRestricted(false);\n                limitRepo.save(limit);\n                order.setCreatedCreditId(creditId);\n                applyLayers(order, creditId);\n            }\n            case LIMIT_INCREASE, RENEWAL -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n                applyLayers(order, limit.getCreditId());\n            }\n            case LIMIT_DECREASE -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                // 降额规则：占用高于新上限时保留实际占用、限制新增提款，不改已有债务\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n            }",
+                "lineStart": 121
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-freeze-rule",
+      "question": "授信因风险原因被冻结。此时已有借据的还款入账还会恢复占用吗？客户还能发起新提款吗？冻结和降额的限制有什么区别？",
+      "category": "middle_rule",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "freeze-eligibility",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    public BigDecimal availableForDrawdown(String creditId, String productId, boolean productRequiresGuarantee) {\n        CreditLimit limit = get(creditId);\n        if (limit.isFrozen()) {\n            return BigDecimal.ZERO;\n        }\n        BigDecimal available = limit.totalRemaining();\n        Optional<ProductSubLimit> sub = findSubLimit(creditId, productId);",
+                "lineStart": 74
+              }
+            ]
+          ]
+        },
+        {
+          "id": "principal-restoration",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    @Transactional\n    public void restoreByPrincipal(String creditId, String bizOrderNo, String loanAccountNo,\n                                   String productId, boolean productRequiresGuarantee, BigDecimal principalPortion) {\n        if (principalPortion.signum() <= 0) {\n            return;\n        }\n        CreditLimit limit = get(creditId);\n        limit.setOccupied(limit.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.RELEASE,\n                LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setOccupied(sub.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setOccupied(group.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n        });\n        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                // 部分还本按规则减少担保覆盖占用（主场景：还本 10 万、覆盖比例 80% → 覆盖占用减 8 万）\n                BigDecimal release = principalPortion.multiply(coverage.getCoverageRatio())\n                        .setScale(2, java.math.RoundingMode.DOWN);\n                coverage.setOccupied(coverage.getOccupied().subtract(release).max(BigDecimal.ZERO));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.RELEASE,\n                        LimitRecord.Reason.PRINCIPAL_REPAID, release, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 190
+              }
+            ]
+          ]
+        },
+        {
+          "id": "decrease-difference",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/CreditService.java",
+                "quote": "    public void effectuate(CreditApplicationOrder order) {\n        BigDecimal limitAmount = order.getApprovedLimit();\n        switch (order.getType()) {\n            case INITIAL -> {\n                CreditLimit limit = new CreditLimit();\n                String creditId = Ids.next(\"CR-\");\n                limit.setCreditId(creditId);\n                limit.setCustomerName(order.getCustomerName());\n                limit.setTotalLimit(limitAmount);\n                limit.setOccupied(BigDecimal.ZERO);\n                limit.setPreOccupied(BigDecimal.ZERO);\n                limit.setFrozen(false);\n                limit.setRestricted(false);\n                limitRepo.save(limit);\n                order.setCreatedCreditId(creditId);\n                applyLayers(order, creditId);\n            }\n            case LIMIT_INCREASE, RENEWAL -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n                applyLayers(order, limit.getCreditId());\n            }\n            case LIMIT_DECREASE -> {\n                CreditLimit limit = requireCredit(order.getTargetCreditId());\n                limit.setTotalLimit(limitAmount);\n                // 降额规则：占用高于新上限时保留实际占用、限制新增提款，不改已有债务\n                limit.setRestricted(limit.getOccupied().add(limit.getPreOccupied()).compareTo(limitAmount) > 0);\n            }",
+                "lineStart": 121
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-version-snapshot",
+      "question": "运营把采购贷年利率从 8% 改成 7.5% 之后，一张改动之前生成的报价单此时提交申请，按哪个利率与规则执行？代码靠什么机制保证？",
+      "category": "middle_rule",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "snapshot-configuration",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    private ProductConfigVersion resolveVersion(ProductConfig product) {\n        Optional<ProductConfigVersion> latest = versionRepo.findFirstByProductIdOrderByVersionDesc(product.getProductId());\n        if (latest.isPresent() && sameRules(latest.get(), product)) {\n            return latest.get();\n        }\n        ProductConfigVersion version = new ProductConfigVersion();\n        version.setVersionId(\"PV-\" + product.getProductId() + \"-\"\n                + (latest.map(v -> v.getVersion() + 1).orElse(1)));\n        version.setProductId(product.getProductId());\n        version.setVersion(latest.map(v -> v.getVersion() + 1).orElse(1));\n        version.setMinAmount(product.getMinAmount());\n        version.setMaxAmount(product.getMaxAmount());\n        version.setTerms(product.getTerms());\n        version.setRepaymentModes(product.getRepaymentModes());\n        version.setAnnualInterestRate(product.getAnnualInterestRate());\n        version.setRequiresGuarantee(product.isRequiresGuarantee());\n        version.setFineractProductId(product.getFineractProductId());\n        version.setEffectiveAt(Ids.now());\n        return versionRepo.save(version);\n    }\n\n    private boolean sameRules(ProductConfigVersion version, ProductConfig product) {\n        return version.getMinAmount().compareTo(product.getMinAmount()) == 0\n                && version.getMaxAmount().compareTo(product.getMaxAmount()) == 0\n                && version.getTerms().equals(product.getTerms())\n                && version.getRepaymentModes().equals(product.getRepaymentModes())\n                && version.getAnnualInterestRate().compareTo(product.getAnnualInterestRate()) == 0\n                && version.isRequiresGuarantee() == product.isRequiresGuarantee();",
+                "lineStart": 90
+              }
+            ]
+          ]
+        },
+        {
+          "id": "apply-version",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public DrawdownOrder apply(String quoteNo, String payeeName, String payeeAccount, String purpose) {\n        DrawdownQuote quote = quoteRepo.findById(quoteNo).orElseThrow();\n        if (!quote.usable(Ids.now())) {\n            throw new BizException(BizException.Code.QUOTE_EXPIRED);\n        }\n        ProductConfigVersion version = versionRepo.findById(quote.getProductVersionId()).orElseThrow();\n        validateAmountAndTerm(version, quote.getAmount(), quote.getTermMonths(), quote.getRepaymentMode());\n        // 报价到提交期间条件变化必须重新校验：按多层口径、以申请时点为准\n        if (limitService.availableForDrawdown(quote.getCreditId(), version.getProductId(),\n                version.isRequiresGuarantee()).compareTo(quote.getAmount()) < 0) {\n            throw new BizException(BizException.Code.LIMIT_INSUFFICIENT);",
+                "lineStart": 123
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3-guarantee-restore",
+      "question": "一笔担保要求=开的 12 期借款，第三期提前归还本金 10 万元。四个额度层各恢复多少？恢复金额的依据是什么？",
+      "category": "middle_rule",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1-phase3.json",
+      "evidence": [
+        {
+          "id": "principal-portion",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/repay/RepaymentService.java",
+                "quote": "            String transactionId = fineract.repayLoan(order.getLoanAccountNo(), order.getAmount());\n            FineractClient.RepaymentAllocation allocation =\n                    fineract.getRepaymentAllocation(order.getLoanAccountNo(), transactionId);\n            order.setFineractTransactionId(allocation.transactionId());\n            order.setPrincipalPortion(allocation.principalPortion());\n            order.setInterestPortion(allocation.interestPortion());\n            order.setFeePortion(allocation.feePortion());\n            order.setStatus(RepaymentOrder.Status.SUCCESS);\n            order.setUpdatedAt(Ids.now());\n            // 只有本金部分逐层恢复授信占用；利息、费用不恢复（担保层按覆盖比例折算）\n            DrawdownOrder drawdown = drawdownRepo.findByLoanAccountNo(order.getLoanAccountNo()).orElse(null);\n            String productId = drawdown == null ? null : drawdown.getProductId();\n            boolean requiresGuarantee = productId == null || productRepo.findById(productId)\n                    .map(ProductConfig::isRequiresGuarantee).orElse(false);\n            limitService.restoreByPrincipal(order.getCreditId(), order.getBizOrderNo(),\n                    order.getLoanAccountNo(), productId, requiresGuarantee, allocation.principalPortion());",
+                "lineStart": 119
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "        if (productRequiresGuarantee) {\n            findCoverage(creditId).ifPresent(coverage -> {\n                // 部分还本按规则减少担保覆盖占用（主场景：还本 10 万、覆盖比例 80% → 覆盖占用减 8 万）\n                BigDecimal release = principalPortion.multiply(coverage.getCoverageRatio())\n                        .setScale(2, java.math.RoundingMode.DOWN);\n                coverage.setOccupied(coverage.getOccupied().subtract(release).max(BigDecimal.ZERO));\n                record(creditId, LimitRecord.Layer.GUARANTEE, LimitRecord.Kind.RELEASE,\n                        LimitRecord.Reason.PRINCIPAL_REPAID, release, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 211
+              }
+            ]
+          ]
+        },
+        {
+          "id": "other-layers",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/credit/LimitService.java",
+                "quote": "    @Transactional\n    public void restoreByPrincipal(String creditId, String bizOrderNo, String loanAccountNo,\n                                   String productId, boolean productRequiresGuarantee, BigDecimal principalPortion) {\n        if (principalPortion.signum() <= 0) {\n            return;\n        }\n        CreditLimit limit = get(creditId);\n        limit.setOccupied(limit.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n        record(creditId, LimitRecord.Layer.TOTAL, LimitRecord.Kind.RELEASE,\n                LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);\n\n        findSubLimit(creditId, productId).ifPresent(sub -> {\n            sub.setOccupied(sub.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.PRODUCT, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, productId, bizOrderNo, loanAccountNo);\n        });\n        findGroupOf(creditId).ifPresent(group -> {\n            group.setOccupied(group.getOccupied().subtract(principalPortion).max(BigDecimal.ZERO));\n            record(creditId, LimitRecord.Layer.GROUP, LimitRecord.Kind.RELEASE,\n                    LimitRecord.Reason.PRINCIPAL_REPAID, principalPortion, null, bizOrderNo, loanAccountNo);",
+                "lineStart": 190
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v1-callback-query",
+      "question": "模拟服务配置了\"回调不送达\"场景时，中台如何最终拿到付款结果？请说明回调重试、查单触发条件和两条路径的共同出口。",
+      "category": "cross_system",
+      "split": "holdout",
+      "origin": "known_regression",
+      "sourceSuite": "complex-loan-v1.json",
+      "evidence": [
+        {
+          "id": "external-callback",
+          "role": "implementation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "external-simulator-repo",
+                "path": "src/main/java/com/rsd/simulator/CallbackDispatcher.java",
+                "quote": "\n    @Scheduled(fixedDelay = 1000)\n    public void dispatch() {\n        List<ExtTransaction> pending = txRepo.findByStatus(\"PROCESSING\");\n        for (ExtTransaction tx : pending) {\n            if (tx.getProcessDueAt() == null || LocalDateTime.now().withNano(0).isBefore(tx.getProcessDueAt())) {\n                continue;\n            }\n            resolveAndDeliver(tx);\n        }\n    }\n\n    @Transactional\n    void resolveAndDeliver(ExtTransaction tx) {\n        if (!tx.isResultResolved()) {\n            String status = tx.getScenario() == ExtTransaction.Scenario.ASYNC_FAIL ? \"FAILED\" : \"SUCCESS\";\n            tx.setStatus(status);\n            tx.setResultResolved(true);\n            tx.setFinishedAt(LocalDateTime.now().withNano(0));\n            if (tx.getKind() == ExtTransaction.Kind.APPROVAL) {\n                tx.setResultDetail(\"SUCCESS\".equals(status) ? \"APPROVED\" : \"REJECTED\");\n                if (\"APPROVED\".equals(tx.getResultDetail())) {\n                    tx.setResultAmount(tx.getAmount());\n                }\n            }\n        }\n        if (tx.isCallbackSuppressed()) {\n            log.info(\"场景要求不回调，等待中台查单: {}\", tx.getExtSerialNo());\n            return;\n        }\n        long attempts = callbackRepo.countByExtSerialNo(tx.getExtSerialNo());\n        if (attempts >= props.callbackMaxAttempts()) {\n            log.warn(\"回调重试次数已用尽，等待中台查单: {}\", tx.getExtSerialNo());\n            return;\n        }\n        boolean ok = callbackClient.deliver(tx,\n                tx.getKind() == ExtTransaction.Kind.APPROVAL ? tx.getResultDetail() : tx.getStatus(),\n                tx.getFinishedAt() == null ? \"\" : tx.getFinishedAt().toString());\n        CallbackLog entry = new CallbackLog();\n        entry.setLogId(\"CB-\" + tx.getExtSerialNo() + \"-\" + (attempts + 1));\n        entry.setExtSerialNo(tx.getExtSerialNo());\n        entry.setAttempt((int) attempts + 1);\n        entry.setSuccess(ok);\n        entry.setResponse(ok ? \"received\" : \"unreachable\");\n        entry.setDeliveredAt(LocalDateTime.now().withNano(0));\n        callbackRepo.save(entry);",
+                "lineStart": 35
+              }
+            ]
+          ]
+        },
+        {
+          "id": "timeout-query",
+          "role": "condition",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+                "quote": "        // 提款：受理超时主动查单\n        LocalDateTime deadline = LocalDateTime.now().minus(Duration.ofSeconds(paymentQueryTimeoutSeconds));\n        List<DrawdownOrder> pendingPayments = drawdownRepo.findByPaymentStatus(DrawdownOrder.PaymentStatus.PROCESSING);\n        for (DrawdownOrder order : pendingPayments) {\n            if (order.getUpdatedAt() != null && order.getUpdatedAt().isBefore(deadline)) {\n                log.info(\"提款付款超时，主动查单: {}\", order.getBizOrderNo());\n                drawdownService.queryAndSettle(order);\n            }\n        }\n        // 提款：入账未完成 → 重试（含\"外部已成功、中台未入账\"的可恢复状态）\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK)) {\n            drawdownService.book(order);\n        }\n        for (DrawdownOrder order : drawdownRepo.findByBookingStatus(DrawdownOrder.BookingStatus.RETRY_NEEDED)) {\n            if (order.getBookingRetryCount() != null && order.getBookingRetryCount() < bookingRetryMax) {\n                drawdownService.book(order);\n            }",
+                "lineStart": 62
+              }
+            ]
+          ]
+        },
+        {
+          "id": "common-entry",
+          "role": "relation",
+          "alternatives": [
+            [
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/external/ExternalResultController.java",
+                "quote": "        try {\n            switch (callback.type()) {\n                case \"PAYMENT\" -> {\n                    DrawdownOrder order = drawdownRepo.findById(callback.bizOrderNo()).orElse(null);\n                    if (order != null && callback.extSerialNo().equals(order.getExtSerialNo())) {\n                        drawdownService.onPaymentResult(order, callback.result());\n                    }\n                }",
+                "lineStart": 58
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void queryAndSettle(DrawdownOrder order) {\n        SimulatorClient.ExternalStatus status = simulator.query(\"PAYMENT\", order.getExtSerialNo());\n        if (\"SUCCESS\".equals(status.status()) || \"FAILED\".equals(status.status())) {\n            onPaymentResult(order, status.status());",
+                "lineStart": 246
+              },
+              {
+                "sourceId": "loan-middle-repo",
+                "path": "src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+                "quote": "    public void onPaymentResult(DrawdownOrder order, String result) {\n        if (order.terminal()) {\n            return; // 幂等：终态后收到的任何结果只影响外部流水，不改业务单\n        }\n        order.setUpdatedAt(Ids.now());\n        if (\"SUCCESS\".equals(result)) {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.SUCCESS) {\n                return; // 幂等：成功已受理过\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.SUCCESS);\n            order.setStatus(DrawdownOrder.Status.EXTERNAL_SUCCESS_BOOKING_PENDING);\n            order.setBookingStatus(DrawdownOrder.BookingStatus.TO_BOOK);\n            book(order); // 同步尝试入账；失败转 RETRY_NEEDED 由补偿任务继续\n        } else {\n            if (order.getPaymentStatus() == DrawdownOrder.PaymentStatus.FAILED) {\n                return;\n            }\n            order.setPaymentStatus(DrawdownOrder.PaymentStatus.FAILED);\n            order.setStatus(DrawdownOrder.Status.FAILED);\n            limitService.releasePreOccupied(order.getCreditId(), order.getBizOrderNo(), order.getProductId(),\n                    requiresGuarantee(order.getProductId()), order.getAmount());",
+                "lineStart": 189
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

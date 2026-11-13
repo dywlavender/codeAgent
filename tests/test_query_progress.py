@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from business_code_agent.query_agent.progress import ProgressEvents
+from business_code_agent.query.progress import ProgressEvents
 
 
 class ProgressTest(unittest.TestCase):
@@ -71,7 +71,7 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual("source", result[0]["payload"]["output"])
 
     def test_text_is_batched_and_snapshot_replaces_same_block(self):
-        with patch("business_code_agent.query_agent.progress.time.monotonic", return_value=0) as clock:
+        with patch("business_code_agent.query.progress.time.monotonic", return_value=0) as clock:
             progress = ProgressEvents()
             progress.feed({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "m"}}})
             for chunk in ["先", "校验", "\n", "REPAYTYPE"]:

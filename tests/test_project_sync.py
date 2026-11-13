@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from business_code_agent.project_sync import sync_project
-from business_code_agent.schema import connect
+from business_code_agent.codeintel.sync import sync_project
+from business_code_agent.storage.schema import connect
 
 
 @unittest.skipUnless(shutil.which("git"), "Git is required")

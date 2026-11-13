@@ -1,0 +1,98 @@
+{
+  "projectId": "complex-loan-validation",
+  "caseId": "v2-channel-display",
+  "set": "development",
+  "reviewer": "assistant source review, not independent human evaluation",
+  "comparisonBoundary": "two same-model/same-budget contract-tool runs differ by answer mode; no fresh files-only baseline; one case cannot establish general retrieval gains",
+  "model": "qwen3.8-27b",
+  "totalAuthorizedModelCalls": 16,
+  "totalActualModelCalls": 16,
+  "runs": {
+    "plain": {
+      "result": "docs/records/2026-10/langchain-v5-contract-plain-channel-20261031.json",
+      "trace": "docs/records/2026-10/langchain-v5-contract-plain-channel-20261031.trace.json",
+      "calls": 8,
+      "inputTokens": 69398,
+      "outputTokens": 2407,
+      "durationSeconds": 58.878,
+      "maxInputChars": 35927,
+      "finalInputChars": 16608,
+      "finalOutputTokens": 1967,
+      "selected": [
+        {
+          "contractId": "C5",
+          "responseTraced": true,
+          "fields": 15,
+          "gaps": []
+        }
+      ],
+      "followups": [],
+      "toolNames": [
+        "FindCapability",
+        "TraceResponseFields",
+        "Read",
+        "Grep",
+        "Read",
+        "Grep",
+        "Grep"
+      ],
+      "checks": {
+        "structured_fields_found": true,
+        "no_channel_consumer_verified": true,
+        "whole_question_passed": false
+      },
+      "findings": [
+        "完整响应字段已识别；句首仍将接口与展示字段混为一谈",
+        "TO_BOOK 与 RETRY_NEEDED 的含义有说明，但修改 displayOf 收益最大的判断缺少消费端依据",
+        "仅拆 EXTERNAL_SUCCESS_BOOKING_PENDING 可区分阶段，不能独自判断正常待入账与失败重试"
+      ]
+    },
+    "structured": {
+      "result": "docs/records/2026-10/langchain-v5-contract-structured-channel-20261031.json",
+      "trace": "docs/records/2026-10/langchain-v5-contract-structured-channel-20261031.trace.json",
+      "calls": 8,
+      "inputTokens": 76018,
+      "outputTokens": 540,
+      "durationSeconds": 34.778,
+      "maxInputChars": 38081,
+      "finalInputChars": 31969,
+      "finalOutputTokens": 70,
+      "selected": [
+        {
+          "contractId": "C5",
+          "responseTraced": true,
+          "fields": 15,
+          "gaps": []
+        }
+      ],
+      "followups": [],
+      "toolNames": [
+        "FindCapability",
+        "TraceResponseFields",
+        "Read",
+        "Grep",
+        "Read",
+        "Grep",
+        "Grep"
+      ],
+      "checks": {
+        "structured_fields_found": true,
+        "no_channel_consumer_verified": true,
+        "whole_question_passed": false
+      },
+      "findings": [
+        "程序字段和展示映射准确",
+        "选中的55行原文因单段12行规则被整个丢弃；3段候选实际只输出2段",
+        "缺少对失败与等待的业务解释和具体改动选择，不能算完整答案"
+      ]
+    }
+  },
+  "localReassembly": {
+    "additionalModelCalls": 0,
+    "acceptedBusinessReferences": 3,
+    "acceptedBusinessLines": 66,
+    "issues": [],
+    "fullBusinessAnswerValidated": false
+  },
+  "decision": "keep experimental defaults off; retain source-index improvement; do not claim complete business QA success"
+}
