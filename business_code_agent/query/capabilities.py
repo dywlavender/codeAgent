@@ -40,8 +40,12 @@ class FileCapability:
                            if source.kind == "source" and source.available)
         return (
             f"可读取的源码根：{mounts or '无'}；需求目录为 requirements/。"
-            "所有路径必须使用这些根下的相对路径。Glob/Grep 只用于定位，"
-            "关键实现结论必须 Read 并引用真实路径与行号。"
+            "所有路径必须使用这些根下的相对路径。"
+            "已知文件时直接 Read；已知类名或文件名用 Glob（支持 * 与 **，不支持 {a,b} 花括号）。"
+            "只有关键词且范围较大时，先用 Grep(output_mode='files') 找候选文件，再缩小 path 用 "
+            "Grep(output_mode='matches', context=2) 定位行号，最后 Read 核实。"
+            "Grep 仅支持 matches 与 files 两种 output_mode。不要求每道题依次调用所有工具。"
+            "Glob/Grep 只用于定位，关键实现结论必须 Read 并引用真实路径与行号。"
         )
 
 

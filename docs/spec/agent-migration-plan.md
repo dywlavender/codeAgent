@@ -452,6 +452,50 @@ P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层�
 - 新增 4 项工具回归：文件级聚合分页、子目录/单文件扫描与授权、匹配上下文、非法 `output_mode`；核心、直接和业务相关 73 项测试通过。
 - 真实冒烟（`biz-repaid-limit`，core-v1，20 次/180 秒）：10 次调用、158.8 秒、`incomplete`；模型使用 Glob+Read，没有调用新的 Grep 模式。仅增加工具描述不足以改变调查习惯，下一步仍需 Commit 2 的调查指令和 A/B 验证，不能把冒烟结果当作搜索效率改善。
 
+### 2026-11-15 调查策略优化（阶段 2.5 Commit 2）
+
+本次只改调查决策指导，不新增工具、不引入 Planner、不改变模型—工具循环，也不修改 `query/tools/files.py`、`ReadLedger`、预算参数或模型配置。改动范围：
+
+- `DirectAgentRuntime._system_prompt` 增加 6 条紧凑调查策略：先明确要确认的对象与必须覆盖的系统/职责环节；已知文件直接 Read；宽范围关键词用 Grep `files` 找候选、缩小 `path` 后用 `matches`/`context` 定位、最后 Read 核实；跨系统问题沿调用、路由、配置和数据线索确认各系统职责；下一步只增加无关细节时不再扩展；关键对象和环节有源码依据后直接回答并如实说明缺口。
+- `FileCapability.instructions` 补充工具适用场景：已知文件 Read、已知类名/文件名 Glob（`*`/`**`，不支持 `{a,b}`）、宽范围 Grep `output_mode='files'`、候选文件用 `matches`+`context=2` 定位、结论必须 Read；明确 `output_mode` 仅支持 `matches`/`files`，且 Grep 命中不能作为引用依据。
+- `PROMPT_VERSION` 从 1 升到 2；执行设置 `runtimeRevision=core-direct-2`，会话范围包含 `promptVersion`，旧策略会话不会被新运行恢复。
+
+专项回归：新增“策略与工具指导已交付”“Prompt 版本变化使旧会话失效”两项测试；Direct 27 项通过，核心/业务/文件/服务/工作区相关 68 项通过。
+
+真实模型 A/B 设计：同一验证工程、`core-v1`、`glm-5.3-flash`、温度 0.6、40 次调用/300 秒/600,000 字符/131,072 输出 token，单路顺序（供应商单账号并发上限 1）。A 组使用提交 `1559279` 的旧 Prompt + Commit 1 工具；B 组使用本次新 Prompt + 相同工具。第一轮 3 题用于校准 Prompt；第二轮 8 题使用最终 Prompt 与 A 组同题配对。
+
+第一轮（3 题）暴露初始策略的跨系统覆盖退化：`biz-repaid-limit` 未读渠道侧、`native-lifecycle` 未读命令路由层；`v2-strategy-code` 从 28 次调用未完成缩短到 13 次完成。据此补充“问题要求的关键系统/环节不得省略”和“Grep 命中不是引用依据”两条约束，再执行第二轮。
+
+第二轮 8 题同题配对结果（A / B）：
+
+| 题目 | A（旧 Prompt） | B（最终 Prompt） |
+| --- | --- | --- |
+| biz-repaid-limit | completed，15 次调用，251.0 秒，确认引用 32/33，答案 4315 字 | completed，14 次调用，246.7 秒，确认引用 35/35，答案 4858 字 |
+| biz-same-credit | completed，17 次调用，207.1 秒，确认引用 41/43，答案 4633 字 | completed，19 次调用，173.8 秒，确认引用 38/38，答案 5079 字 |
+| v2-strategy-code | incomplete（budget），28 次调用，219.8 秒，确认引用 12/17，答案 3277 字 | completed，20 次调用，148.0 秒，确认引用 18/19，答案 4867 字 |
+| native-frontend | completed，19 次调用，138.0 秒，确认引用 31/43，答案 5422 字 | incomplete（budget），20 次调用，214.4 秒，确认引用 23/30，答案 2776 字 |
+| native-product | completed，14 次调用，129.5 秒，确认引用 22/25，答案 5858 字 | completed，9 次调用，86.8 秒，确认引用 25/25，答案 5544 字 |
+| native-repayment | incomplete（budget），33 次调用，211.1 秒，确认引用 15/21，答案 2436 字 | incomplete（budget），34 次调用，218.7 秒，确认引用 15/19，答案 3272 字 |
+| native-schedule | completed，28 次调用，200.3 秒，确认引用 19/22，答案 5586 字 | completed，16 次调用，219.2 秒，确认引用 15/17，答案 4451 字 |
+| native-lifecycle | incomplete（budget），26 次调用，220.4 秒，确认引用 17/20，答案 3110 字 | incomplete（budget），39 次调用，213.9 秒，确认引用 15/17，答案 3491 字 |
+
+汇总：A 完成 5/8、180 次调用、1577.2 秒、确认引用 189/224；B 完成 5/8、171 次调用、1521.5 秒、确认引用 184/200（确认率 84.4%→92.0%）。
+
+逐题观察：
+
+- 明确改善：`v2-strategy-code` 由 28 次未完成变为 20 次完成（148 秒、18/19）；`native-product` 9 次调用完成（A 14 次、25/25 引用）；`native-schedule` 16 次完成（A 28 次）；`biz-repaid-limit` 14 次完成且 35/35 引用，A 为 3/5 关键文件、B 为 4/5。
+- 互有得失：`biz-same-credit` B 少 33 秒但多 2 次调用；`native-repayment` 两者均未完成，B 的部分答案更完整（3272 对 2436 字）。
+- 明确退化：`native-frontend` A 完成（138 秒、5422 字），B 预算收尾（214.4 秒、2776 字、23/30），B 组 Glob 调用偏多、Read 覆盖不足；`native-lifecycle` B 39 次调用仍预算收尾，关键文件 4/5（A 5/5），确认引用 15/17（A 17/20）。
+
+结论与边界：
+
+- 工程验收通过：策略与工具指导已交付，版本隔离生效，主循环未改；模拟测试只能证明指导已进入 Prompt，不能证明模型在真实问题中遵守。
+- 效果验收**未完全通过**：8 题完成数持平（5/8），调用数 -5.0%、耗时 -3.5%，确认引用率由 84.4% 升到 92.0%；但 `native-frontend` 由完成退化为预算收尾，说明改善有限且不稳定，不能宣称定位效率或自主收敛已有可重复收益。
+- 不把 `Grep(files)` 使用率作为成功标准：`native-product` 在 B 组未调用 Grep、仅用 Glob+Read 完成，属于合理工具选择；反过来，B 组 `native-frontend` 的 Glob 过多也是实际失败 Trace。
+- 真实模型结果只证明该 8 题、该模型、该预算下的表现；单题单次运行且温度 0.6，第一轮 3 题与第二轮其余 5 题运行时刻不同，供应商偶发连接错误/超时后已重试并保留成功运行。
+- 未验证项：core-business-v1 交互、完整 16 题、浏览器人工复核；生产默认仍为 Legacy，不进入 AST。
+- 下一步按既定决策树执行**答案先行检查点**（约 50% 预算处生成结论/依据/缺口草稿，仅在引用可核验时接受），继续堆叠 Prompt 不作为优先方案。
+
 ### 未完成的效果验收
 
 阶段 2 的工程验收（B01—B12）已完成，但**业务知识是否真正改善调查质量尚未验证**：

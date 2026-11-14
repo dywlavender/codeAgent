@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -152,6 +153,44 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual(0, result.usage["modelCalls"])
         self.assertEqual("已停止。", result.answer)
         self.assertEqual("cancelled", result.events[-1]["payload"]["phase"])
+
+    def test_investigation_guidance_and_prompt_version_are_delivered(self):
+        runtime = self.runtime([])
+        prompt = runtime._system_prompt(self.context, self.prepared)
+        for text in (
+            "调查策略：", "并列出问题明确要求覆盖的仓库、系统或职责环节",
+            "Grep 的 files 模式", "缩小 path 用 matches",
+            "Grep 命中（含 context）只是定位线索，不能作为引用依据",
+            "不因问题提到某系统就禁止调查其他授权系统",
+            "也不因一个仓库已能解释部分链路就跳过问题要求的其他系统",
+            "问题要求的关键对象和环节均已有源码依据时直接回答",
+            "工具选择可根据问题灵活调整",
+            "业务知识用于理解术语和业务约定",
+        ):
+            self.assertIn(text, prompt)
+        guidance = dict(self.prepared.instructions)["file"]
+        self.assertIn("Grep(output_mode='files')", guidance)
+        self.assertIn("Grep(output_mode='matches', context=2)", guidance)
+        self.assertIn("Grep 仅支持 matches 与 files 两种 output_mode", guidance)
+        self.assertIn("不支持 {a,b} 花括号", guidance)
+        self.assertIn("不要求每道题依次调用所有工具", guidance)
+        self.assertNotIn("业务补充知识位于", prompt)
+
+    def test_prompt_version_change_invalidates_prompt_scoped_session(self):
+        runtime = self.runtime([])
+        scope = runtime._session_scope(self.context, self.prepared)
+        self.assertEqual(2, scope["promptVersion"])
+        self.assertEqual("core-direct-2", runtime.execution_settings()["runtimeRevision"])
+        store = DirectSessionStore(self.root / "prompt-sessions")
+        store.save("DA-prompt", scope, [HumanMessage("旧策略问题")])
+        self.assertEqual(1, len(store.load("DA-prompt", scope)))
+        with patch("business_code_agent.query.agent.direct.PROMPT_VERSION", 1):
+            old_scope = runtime._session_scope(self.context, self.prepared)
+            old_revision = runtime.execution_settings()["runtimeRevision"]
+        self.assertEqual(1, old_scope["promptVersion"])
+        self.assertEqual("core-direct-1", old_revision)
+        self.assertNotEqual(scope, old_scope)
+        self.assertEqual([], store.load("DA-prompt", old_scope))
 
     def test_session_scope_and_changed_source_invalidate_history(self):
         store = DirectSessionStore(self.root / "sessions")
@@ -587,7 +626,7 @@ class DirectRuntimeTest(unittest.TestCase):
         ] + [AIMessage(content="已读取足够文件，给出结论。")]
         runtime = DirectAgentRuntime(
             profile=CORE, model=ToolModel(responses=responses),
-            environment={"BUSINESS_CODE_AGENT_CONTEXT_CHARS": "5000"})
+            environment={"BUSINESS_CODE_AGENT_CONTEXT_CHARS": "5600"})
         result = runtime.ask("读取多个文件后回答", context=self.context,
                              prepared=self.prepared)
         self.assertEqual("completed", result.status)

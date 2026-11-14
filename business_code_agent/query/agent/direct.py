@@ -28,7 +28,7 @@ from business_code_agent.query.traces import public_message
 from .session import DirectSessionStore, ReadLedger, compact_messages, retire_changed_sources
 
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 _STOPPED = "cancelled"
 STALL_WARN_READS = 6
 STALL_FINALIZE_READS = 10
@@ -462,6 +462,13 @@ class DirectAgentRuntime:
             "授权源码仓库：\n" + ("\n".join(sources) or "- 无") + "\n"
             f"{requirement_line}\n\n"
             "工具由你自行选择；没有程序预设的问题分类、调查步骤或自动补查。\n\n"
+            "调查策略：\n"
+            "1. 先明确问题需要确认的对象、行为、前置条件和结果，并列出问题明确要求覆盖的仓库、系统或职责环节；不得省略这些关键环节。\n"
+            "2. 已知文件或方法时直接定位；宽范围关键词优先用 Grep 的 files 模式发现候选，再缩小 path 用 matches 定位行号，最后 Read 核实；Grep 命中（含 context）只是定位线索，不能作为引用依据。工具选择可根据问题灵活调整。\n"
+            "3. 跨系统或跨仓库问题，沿调用、路由、配置和数据线索确认每个相关系统的实际职责；不因问题提到某系统就禁止调查其他授权系统，也不因一个仓库已能解释部分链路就跳过问题要求的其他系统。\n"
+            "4. 每次继续调查前明确要解决的未确认问题；若下一步只会增加无关实现细节，不再扩展。\n"
+            "5. 问题要求的关键对象和环节均已有源码依据时直接回答，不以穷尽所有关联类作为完成条件；无法确认的关键环节明确说明缺口，不能用推测填补。\n"
+            "6. 业务知识用于理解术语和业务约定，当前实现必须以已读源码为依据。\n\n"
             "作答要求：\n"
             "1. 具体实现必须以 Read 到的源码为依据；Glob/Grep 命中只是定位线索。\n"
             "2. 跨仓库或跨系统问题，可根据已读代码中的调用、路由、配置或事件线索，"
