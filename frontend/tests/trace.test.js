@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { tracePath, traceTimeline } from "../src/lib/trace.js";
+import { tracePath, traceStopReason, traceTimeline } from "../src/lib/trace.js";
 
 test("trace joins tool inputs and full outputs while retaining model and scheduling order", () => {
   const output = "源码原文\n".repeat(4000);
@@ -37,4 +37,11 @@ test("historical events and failures remain inspectable with an explicit project
   assert.equal(items[0].kind, "error");
   assert.equal(items[0].data.error, "fixture failure");
   assert.equal(tracePath("alpha", "alpha-RUN-1"), "/api/projects/alpha/query/alpha-RUN-1/trace");
+});
+
+test("trace stop reason falls back to the direct runtime usage location", () => {
+  assert.equal(traceStopReason({ stopReason: "no_progress", run: { usage: { stopReason: "budget" } } }), "no_progress");
+  assert.equal(traceStopReason({ run: { usage: { stopReason: "budget" } } }), "budget");
+  assert.equal(traceStopReason({ usage: { stopReason: "context" } }), "context");
+  assert.equal(traceStopReason(null), "");
 });

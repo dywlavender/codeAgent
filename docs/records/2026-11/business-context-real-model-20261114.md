@@ -179,6 +179,10 @@ Trace 显示模型没有进入答题：Business 后 33 次调用几乎都在重�
 
 结论：收尾机制保证限制停止不会无答案或伪报完成；在 600k 上下文下，证据压缩/恢复问题已被消除，当前一致的主要问题是缺少“证据足够”判断，模型持续扩展调查到预算预留点。8 题子集不是完整 16 题对照，阶段 2 效果仍未验收。
 
+## Trace stopReason 位置修复（2026-11-14）
+
+`RunTraceArchive.finish` 现在把 `usage.stopReason` 同步到顶层 `stopReason`；前端 `traceStopReason` 先读顶层，再回退 `run.usage.stopReason`，因此新 Direct Trace 和历史 Direct Trace 都能显示“达到调查预算”或“连续无新增证据”。新增后端 `test_archive_finish_promotes_usage_stop_reason` 与前端 `trace stop reason falls back to the direct runtime usage location` 回归。相关测试：后端 17 项（Trace + core query）、前端 19 项及构建通过。
+
 ## 结论
 
 - 真实模型下 `core-business-v1` 主链可用，业务资料确实被按需读取，上下文/会话/Trace 均正常记录。
@@ -188,5 +192,5 @@ Trace 显示模型没有进入答题：Business 后 33 次调用几乎都在重�
 - A/B 试点暴露出长调查不收敛的运行时缺陷：达到调用/时长上限后仍无答案且可能记为正常完成。预算与停滞收尾已修复并验证：`native-lifecycle` 两版都从“无答案”变为带部分答案的 `incomplete`，限制停止不再伪报 `completed`。
 - 收尾只在限制临近或连续 10 次无新增证据后触发，宽泛问题仍会调查数分钟并只给出部分答案；正常问答耗时是否可接受、是否需要更早的“证据足够即收尾”判断，需单独评估，当前不做生产默认承诺。
 - 8 题预算收紧对照（40 次/300 秒/600k 字符）共 16 次运行：7 次 `completed`、9 次 `incomplete`（全部 `budget`），无重复读取、恢复或缺口；Business 4/8、Core 3/8 完成，调用与耗时略低，但只有 8 题配对，不能证明业务知识收益。收尾保证不再无答案或伪报完成，当前共同瓶颈仍是缺少充分性判断。
-- 供应商账号并发上限为 1：3 路和 2 路均大量返回 `429 code 3008`，本轮最终单路执行。`TraceDrawer` 读取 `trace.stopReason`，而 Direct 归档在 `trace.run.usage.stopReason`；截断路径和无行号引用也仍常见，这两项是待修 P1。
+- 供应商账号并发上限为 1：3 路和 2 路均大量返回 `429 code 3008`，本轮最终单路执行。Trace 的 `stopReason` 读取位置已修复（归档写顶层，前端兼容 `run.usage`）；截断路径和无行号引用仍常见，引用解析待修。
 - 本轮只完成 8 题子集，完整 16 题对照、浏览器人工复核和关键阶段覆盖统计仍未完成；阶段 2 效果验收尚未通过，生产默认仍为 Legacy。

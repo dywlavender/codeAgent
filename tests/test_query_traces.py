@@ -15,6 +15,7 @@ from business_code_agent.api.server import make_server
 from business_code_agent.platform.projects import ProjectRegistry
 from business_code_agent.query.langchain_agent import LangChainRuntime
 from business_code_agent.query.service import QueryRuntimeError, QueryService
+from business_code_agent.query.traces import RunTraceArchive
 from business_code_agent.storage.schema import connect
 
 
@@ -74,6 +75,17 @@ class QueryTraceTest(unittest.TestCase):
         self.assertGreaterEqual(trace["calls"][0]["durationMs"], 0)
         shutil.rmtree(service.workspace_manager.root)
         self.assertEqual(trace["calls"], self.service().get_trace(run_id)["calls"])
+
+    def test_archive_finish_promotes_usage_stop_reason(self):
+        workspace = self.root / "workspace"
+        workspace.mkdir()
+        archive = RunTraceArchive(self.root / "query-traces", "RUN-stop", project_id="alpha")
+        archive.start({"runId": "RUN-stop", "status": "running"}, workspace)
+        archive.finish(status="incomplete", answer="部分答案",
+                       usage={"stopReason": "budget"}, completedAt="now", durationMs=12)
+        value = json.loads(archive.path.read_text())
+        self.assertEqual("budget", value["stopReason"])
+        self.assertEqual("budget", value["run"]["usage"]["stopReason"])
 
     def test_failed_model_call_is_archived_with_request_and_error(self):
         service = self.service(model=FailingModel(responses=[]))

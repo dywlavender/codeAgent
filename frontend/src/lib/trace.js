@@ -31,6 +31,8 @@ export function traceTimeline(trace) {
 
 export const traceStatus = (status) => ({ ...RUN_STATUS_LABEL, completed: "已完成", error: "失败", success: "已完成", interrupted: "未完成", skipped: "已跳过" }[status] || status || "");
 
+export const traceStopReason = (trace) => trace?.stopReason || trace?.run?.usage?.stopReason || trace?.usage?.stopReason || "";
+
 export function tracePath(projectId, runId) {
   return `/api/projects/${encodeURIComponent(projectId)}/query/${encodeURIComponent(runId)}/trace`;
 }

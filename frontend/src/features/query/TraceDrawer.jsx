@@ -3,7 +3,7 @@ import { Alert, Button, Drawer, Empty, Segmented, Spin, Tabs } from "antd";
 import { DownloadSimple, ArrowClockwise } from "@phosphor-icons/react";
 import { request } from "../../lib/api.js";
 import { isActiveRun } from "../../lib/query-state.js";
-import { tracePath, traceStatus, traceTimeline } from "../../lib/trace.js";
+import { tracePath, traceStatus, traceStopReason, traceTimeline } from "../../lib/trace.js";
 import "./trace.css";
 
 const FILTERS = [{ label: "全部", value: "all" }, { label: "模型", value: "model" },
@@ -41,6 +41,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
   }, [projectId, runId, revision]);
   const timeline = useMemo(() => trace ? traceTimeline(trace) : [], [trace]);
   const execution = trace?.run.execution;
+  const stopReason = trace ? traceStopReason(trace) : "";
   const visible = timeline.filter((item) => filter === "all" || filter === item.kind);
   const active = visible.find((item) => item.id === selected) || visible.find((item) => item.kind === "model") || visible[0];
   function download() {
@@ -57,7 +58,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
     {trace && <>
       <div className="trace-summary"><p>{trace.run.question}</p><div>
         <span>{traceStatus(trace.run.status)}</span><span>{trace.calls.length} 次模型请求</span>
-        {["budget", "context", "no_progress"].includes(trace.stopReason) && <span>{trace.stopReason === "context" ? "上下文预算不足" : trace.stopReason === "no_progress" ? "连续无新增证据" : "达到调查预算"}</span>}
+        {["budget", "context", "no_progress"].includes(stopReason) && <span>{stopReason === "context" ? "上下文预算不足" : stopReason === "no_progress" ? "连续无新增证据" : "达到调查预算"}</span>}
         {execution?.profileId && <span>{execution.profileId}</span>}
         {(execution?.model || trace.settings?.requestedModel) && <span>{execution?.model || trace.settings.requestedModel}</span>}
         <span>{timeline.filter((item) => item.kind === "tool" && item.status !== "skipped").length} 次工具调用</span>

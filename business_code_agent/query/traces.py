@@ -79,6 +79,9 @@ class RunTraceArchive:
         self.refresh()
         self.value["run"].update(run)
         self.value["status"] = run["status"]
+        stop_reason = run.get("stopReason") or (run.get("usage") or {}).get("stopReason")
+        if stop_reason:
+            self.value["stopReason"] = stop_reason
         self.write()
 
     def write(self):
