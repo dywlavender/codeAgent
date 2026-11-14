@@ -13,7 +13,11 @@ from langchain_core.tools import tool
 
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.agent.direct import DirectAgentRuntime, verify_answer
-from business_code_agent.query.agent.session import DirectSessionStore, retire_changed_sources
+from business_code_agent.query.agent.session import (
+    DirectSessionStore,
+    compact_messages,
+    retire_changed_sources,
+)
 from business_code_agent.query.capabilities import FileCapability, prepare_capabilities
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.materials import MaterialManifest
@@ -248,6 +252,114 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual(1, calls[-1]["attempt"])
         self.assertEqual("completed", calls[-1]["status"])
         self.assertEqual(1, len(calls[-1]["responses"]))
+
+    def test_repeated_identical_read_is_cached_without_reopening_content(self):
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{
+                "id": "read-1", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+            }]),
+            AIMessage(content="", tool_calls=[{
+                "id": "read-2", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+            }]),
+            AIMessage(content="重复读取已阻止，入口为 repos/channel/Channel.java:3。"),
+        ])
+        result = DirectAgentRuntime(profile=CORE, model=model, environment={}).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(1, result.usage["cachedReads"])
+        reads = [event["payload"] for event in result.events
+                 if event["eventType"] == "tool" and event["payload"]["name"] == "Read"
+                 and event["payload"]["status"] == "completed"]
+        self.assertEqual(2, len(reads))
+        self.assertIn("applyWithdraw", reads[0]["output"])
+        cached = json.loads(reads[1]["output"])
+        self.assertTrue(cached["cached"])
+        self.assertIn("不要重复读取", cached["note"])
+        self.assertNotIn("applyWithdraw", reads[1]["output"])
+        self.assertTrue(result.usage["verification"]["references"][0]["confirmed"])
+
+    def test_overlapping_read_is_cached_when_the_range_is_fully_covered(self):
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{
+                "id": "read-1", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 4},
+            }]),
+            AIMessage(content="", tool_calls=[{
+                "id": "read-2", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 2, "limit": 2},
+            }]),
+            AIMessage(content="重复区间已缓存，入口为 repos/channel/Channel.java:2。"),
+        ])
+        result = DirectAgentRuntime(profile=CORE, model=model, environment={}).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(1, result.usage["cachedReads"])
+        second = [event["payload"] for event in result.events
+                  if event["eventType"] == "tool" and event["payload"]["name"] == "Read"
+                  and event["payload"]["status"] == "completed"][-1]
+        self.assertTrue(json.loads(second["output"])["cached"])
+
+    def test_new_read_range_is_not_blocked_by_the_cache(self):
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{
+                "id": "read-1", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 2},
+            }]),
+            AIMessage(content="", tool_calls=[{
+                "id": "read-2", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 3, "limit": 2},
+            }]),
+            AIMessage(content="新读取区间包含 repos/channel/Channel.java:3。"),
+        ])
+        result = DirectAgentRuntime(profile=CORE, model=model, environment={}).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(0, result.usage["cachedReads"])
+        second = [event["payload"] for event in result.events
+                  if event["eventType"] == "tool" and event["payload"]["name"] == "Read"
+                  and event["payload"]["status"] == "completed"][-1]
+        self.assertIn("applyWithdraw", second["output"])
+
+    def test_compaction_retires_reads_with_path_and_range_metadata(self):
+        messages = [HumanMessage("问题")]
+        for index in range(4):
+            messages.append(AIMessage(content="", tool_calls=[{
+                "id": f"read-{index}", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+            }]))
+            messages.append(ToolMessage(
+                content=json.dumps({
+                    "path": "repos/channel/Channel.java", "lineStart": 1, "lineEnd": 3,
+                    "totalLines": 4, "content": "x" * 1000,
+                }), name="Read", tool_call_id=f"read-{index}", status="success"))
+        compacted = compact_messages(messages, 500)
+        retired = [message for message in compacted
+                   if isinstance(message, ToolMessage)
+                   and str(message.content).startswith("[历史读取已移除]")]
+        self.assertTrue(retired)
+        self.assertIn("Channel.java:1-3", retired[0].content)
+        self.assertLess(len(retired[0].content), 200)
+
+    def test_context_budget_accounts_for_the_system_prompt(self):
+        for index in range(4):
+            (self.root / "sources" / "channel" / f"Big{index}.java").write_text(
+                ("x" * 200 + "\n") * 6, encoding="utf-8")
+        responses = [
+            AIMessage(content="", tool_calls=[{
+                "id": f"read-{index}", "name": "Read",
+                "args": {"path": f"repos/channel/Big{index}.java"},
+            }])
+            for index in range(4)
+        ] + [AIMessage(content="已读取足够文件，给出结论。")]
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=responses),
+            environment={"BUSINESS_CODE_AGENT_CONTEXT_CHARS": "5000"})
+        result = runtime.ask("读取多个文件后回答", context=self.context,
+                             prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(5, result.usage["modelCalls"])
 
     def test_direct_module_does_not_import_legacy_agent_or_codeintel(self):
         code = (

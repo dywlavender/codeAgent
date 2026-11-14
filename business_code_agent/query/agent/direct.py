@@ -25,7 +25,7 @@ from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from business_code_agent.query.traces import public_message
-from .session import DirectSessionStore, compact_messages, retire_changed_sources
+from .session import DirectSessionStore, ReadLedger, compact_messages, retire_changed_sources
 
 
 PROMPT_VERSION = 1
@@ -127,6 +127,7 @@ class DirectAgentRuntime:
         token_usage: dict[str, int] = {}
         reported_models: set[str] = set()
         tool_calls = 0
+        cached_reads = 0
         stop_reason = None
 
         def emit(kind, **payload):
@@ -151,6 +152,7 @@ class DirectAgentRuntime:
                 "outputTokens": token_usage.get("output_tokens"),
                 "reportedModels": sorted(reported_models),
                 "toolCalls": tool_calls,
+                "cachedReads": cached_reads,
                 "semanticProof": False,
             }
 
@@ -172,6 +174,7 @@ class DirectAgentRuntime:
         chat = self.chat_model()
         bound = chat.bind_tools(list(prepared.tools))
         tool_map = {tool.name: tool for tool in prepared.tools}
+        ledger = ReadLedger()
         char_limit = int(self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"))
 
         def record_usage(message):
@@ -241,8 +244,9 @@ class DirectAgentRuntime:
                     return stopped("budget")
                 if self.max_calls is not None and calls >= self.max_calls:
                     return stopped("budget")
-                bounded = compact_messages(messages, char_limit)
-                if len(system_prompt) + sum(len(str(message.content)) for message in bounded) > char_limit:
+                content_budget = max(1, char_limit - len(system_prompt))
+                bounded = compact_messages(messages, content_budget)
+                if sum(len(str(message.content)) for message in bounded) > content_budget:
                     raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
                 calls += 1
                 emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮）")
@@ -286,12 +290,20 @@ class DirectAgentRuntime:
                         output = json.dumps({"error": f"未注册工具：{name}", "errorType": "UnknownTool"},
                                             ensure_ascii=False)
                     else:
-                        try:
-                            value = tool.invoke(arguments)
-                            output = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-                        except Exception as exc:
-                            output = json.dumps({"error": str(exc), "errorType": type(exc).__name__},
-                                                ensure_ascii=False)
+                        cached = ledger.cached(arguments) if name == "Read" else None
+                        if cached is not None:
+                            cached_reads += 1
+                            output = json.dumps(cached, ensure_ascii=False)
+                        else:
+                            try:
+                                value = tool.invoke(arguments)
+                                output = (value if isinstance(value, str)
+                                          else json.dumps(value, ensure_ascii=False))
+                                if name == "Read":
+                                    ledger.record(output)
+                            except Exception as exc:
+                                output = json.dumps({"error": str(exc), "errorType": type(exc).__name__},
+                                                    ensure_ascii=False)
                     try:
                         failed = bool(json.loads(output).get("error"))
                     except (TypeError, ValueError):
