@@ -209,6 +209,51 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual(["repos/channel/Channel.java:15-25", "repos/channel/Channel.java"],
                          result["unconfirmed"])
 
+    def test_citation_resolves_unambiguous_truncated_paths(self):
+        def read(path, start, end):
+            return ToolMessage(content=json.dumps({
+                "path": path, "lineStart": start, "lineEnd": end, "content": "源码"}),
+                name="Read", tool_call_id=f"read-{path}-{start}")
+
+        actual = ("repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/"
+                  "portfolio/loanaccount/domain/LoanStatus.java")
+        processor = ("repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/"
+                     "portfolio/loanaccount/domain/transactionprocessor/"
+                     "AbstractLoanRepaymentScheduleTransactionProcessor.java")
+        messages = [read(actual, 20, 40),
+                    read(processor, 80, 95),
+                    read("repos/a/domain/Foo.java", 1, 5),
+                    read("repos/b/domain/Foo.java", 1, 5)]
+        result = verify_answer(
+            "见 `fineract-core/.../loanaccount/domain/LoanStatus.java:24-37`；"
+            "另见 `.../domain/LoanStatus.java:24`；"
+            "文件名 `Abstract...Processor.java:85`；"
+            "歧义 `.../domain/Foo.java:1`。", messages)
+        references = result["references"]
+        self.assertEqual(actual, references[0]["matchedPath"])
+        self.assertTrue(references[0]["confirmed"])
+        self.assertEqual(actual, references[1]["matchedPath"])
+        self.assertTrue(references[1]["confirmed"])
+        self.assertEqual(processor, references[2]["matchedPath"])
+        self.assertTrue(references[2]["confirmed"])
+        self.assertIsNone(references[3]["matchedPath"])
+        self.assertFalse(references[3]["fileRead"])
+
+    def test_citation_parser_respects_extension_boundaries(self):
+        result = verify_answer(
+            "`repos/channel/Channel.class` `repos/channel/Channel.json` "
+            "`repos/channel/Channel.tsx` `repos/channel/Channel.cs` "
+            "`repos/channel/Channel.c` `repos/channel/Channel.js` "
+            "`repos/channel/Channel.ts`", [])
+        self.assertEqual([
+            "repos/channel/Channel.json",
+            "repos/channel/Channel.tsx",
+            "repos/channel/Channel.cs",
+            "repos/channel/Channel.c",
+            "repos/channel/Channel.js",
+            "repos/channel/Channel.ts",
+        ], [reference["path"] for reference in result["references"]])
+
     def test_failed_model_call_keeps_request_and_tool_definitions(self):
         calls = []
         runtime = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=[]), environment={})

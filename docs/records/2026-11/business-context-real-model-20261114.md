@@ -175,13 +175,24 @@ Trace 显示模型没有进入答题：Business 后 33 次调用几乎都在重�
 
 汇总：Business 4/8 完成、Core 3/8 完成；Business 合计 166 次调用/1511.6 秒，Core 196 次/1691.4 秒。Business 在 2 题完成、Core 在 1 题完成、2 题两版都完成、3 题两版都未完成；样本只有 8 题，不能据此宣称业务知识收益。
 
-引用核验：Business 167/197 条确认，Core 133/164 条确认；未确认项主要来自截断路径（如 `fineract-core/.../`）、缺少行号或路径未匹配到已读文件，不能直接归为模型编造。该批也没有出现 `LimitService.c` 一类扩展名误匹配的稳定样本。
+引用核验（运行时旧解析）：Business 167/197 条确认，Core 133/164；未确认项主要来自截断路径、缺少行号或未读取文件。按修复后的解析离线复算，同一批答案变为 Business 177/192、Core 141/160（合计 300/361 → 318/352），并删除了 `LoanTermVariationsMapper.c`、`loansService.c`、`dataObject.type.c` 这类把方法名误当 `.c` 文件的解析结果；仍有少量无行号或未读取文件无法确认。
 
 结论：收尾机制保证限制停止不会无答案或伪报完成；在 600k 上下文下，证据压缩/恢复问题已被消除，当前一致的主要问题是缺少“证据足够”判断，模型持续扩展调查到预算预留点。8 题子集不是完整 16 题对照，阶段 2 效果仍未验收。
 
 ## Trace stopReason 位置修复（2026-11-14）
 
 `RunTraceArchive.finish` 现在把 `usage.stopReason` 同步到顶层 `stopReason`；前端 `traceStopReason` 先读顶层，再回退 `run.usage.stopReason`，因此新 Direct Trace 和历史 Direct Trace 都能显示“达到调查预算”或“连续无新增证据”。新增后端 `test_archive_finish_promotes_usage_stop_reason` 与前端 `trace stop reason falls back to the direct runtime usage location` 回归。相关测试：后端 17 项（Trace + core query）、前端 19 项及构建通过。
+
+## 引用解析修复（2026-11-14）
+
+`verify_answer` 的路径解析做了两项修正：
+
+- 截断路径：支持 `fineract-core/.../loanaccount/.../LoanStatus.java`、`.../domain/LoanStatus.java` 和 `Abstract...Processor.java` 等形式；只在唯一匹配到本轮已读文件时解析，多个候选不猜测。
+- 短扩展名：扩展名后增加边界，`.class` 不再被识别为 `.c`，`.json`/`.tsx`/`.cs` 也不会被 `.js`/`.ts`/`.c` 前缀截断；合法的 `.c` 文件仍保留。
+
+新增两项 Direct 回归：截断路径唯一/歧义解析、扩展名边界；核心和直接相关 41 项测试通过。
+
+对同一批 8 题 16 次运行的答案和已读消息做离线复算（不重新调用模型）：引用总数 361→352（移除 9 条扩展名误匹配等无效引用），确认数 300→318；Business 167/197→177/192，Core 133/164→141/160。仍有一条 `fineract-progressive-loan/.../ProgressiveLoanScheduleGenerator.java` 未解析，因为该文件不在本轮已读列表，属于正确未确认；其余未确认主要是有意省略行号。
 
 ## 结论
 
@@ -192,5 +203,5 @@ Trace 显示模型没有进入答题：Business 后 33 次调用几乎都在重�
 - A/B 试点暴露出长调查不收敛的运行时缺陷：达到调用/时长上限后仍无答案且可能记为正常完成。预算与停滞收尾已修复并验证：`native-lifecycle` 两版都从“无答案”变为带部分答案的 `incomplete`，限制停止不再伪报 `completed`。
 - 收尾只在限制临近或连续 10 次无新增证据后触发，宽泛问题仍会调查数分钟并只给出部分答案；正常问答耗时是否可接受、是否需要更早的“证据足够即收尾”判断，需单独评估，当前不做生产默认承诺。
 - 8 题预算收紧对照（40 次/300 秒/600k 字符）共 16 次运行：7 次 `completed`、9 次 `incomplete`（全部 `budget`），无重复读取、恢复或缺口；Business 4/8、Core 3/8 完成，调用与耗时略低，但只有 8 题配对，不能证明业务知识收益。收尾保证不再无答案或伪报完成，当前共同瓶颈仍是缺少充分性判断。
-- 供应商账号并发上限为 1：3 路和 2 路均大量返回 `429 code 3008`，本轮最终单路执行。Trace 的 `stopReason` 读取位置已修复（归档写顶层，前端兼容 `run.usage`）；截断路径和无行号引用仍常见，引用解析待修。
+- 供应商账号并发上限为 1：3 路和 2 路均大量返回 `429 code 3008`，本轮最终单路执行。Trace 的 `stopReason` 读取位置已修复（归档写顶层，前端兼容 `run.usage`）；引用解析的截断路径和 `.c` 前缀误匹配也已修复，离线复算确认引用 300/361→318/352，剩余未确认主要是有意省略行号或未读取文件。
 - 本轮只完成 8 题子集，完整 16 题对照、浏览器人工复核和关键阶段覆盖统计仍未完成；阶段 2 效果验收尚未通过，生产默认仍为 Legacy。

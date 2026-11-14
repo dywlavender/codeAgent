@@ -437,7 +437,7 @@
 - 9 次未完成的最后一次调用均为不带工具的收尾答题，答案 2041–4392 字；7 次完成由模型自行结束，答案 2721–6934 字。
 - 收尾机制保证限制停止不再无答案或伪报完成，但模型仍会持续调查到预算预留点；当前共同瓶颈是缺少“证据足够”判断，而不是证据恢复。
 
-P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层，`TraceDrawer` 通过 `traceStopReason` 兼容旧的 `run.usage` 位置；引用解析对截断路径和短扩展名仍需修正。
+P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层，`TraceDrawer` 通过 `traceStopReason` 兼容旧的 `run.usage` 位置；引用解析支持截断路径（含 `Abstract...Processor.java`）并修正短扩展名边界（`.class` 不再匹配 `.c`），仅在唯一匹配到已读文件时解析。对 8 题 16 次运行的答案离线复算：引用 361→352、确认 300→318；核心/直接相关 41 项回归通过。
 
 ### 未完成的效果验收
 
