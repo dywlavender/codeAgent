@@ -30,6 +30,21 @@ from .session import DirectSessionStore, ReadLedger, compact_messages, retire_ch
 
 PROMPT_VERSION = 1
 _STOPPED = "cancelled"
+STALL_WARN_READS = 6
+STALL_FINALIZE_READS = 10
+FINALIZE_RESERVED_CALLS = 2
+FINALIZE_RESERVED_SECONDS = 200.0
+STALL_NOTICE = (
+    "\n\n调查提醒：最近连续多次 Read 没有新增证据。不要继续重复读取同一区间；"
+    "请基于已读内容直接作答，未确认的部分明确说明。")
+FINALIZE_NOTICE = (
+    "\n\n调查已到达收尾点。现在不要再调用工具，只能基于本轮已读取的源码作答。\n"
+    "要求：1. 先给结论，再给源码依据；2. 只引用已读文件与行区间；"
+    "3. 未读取或无法确认的内容列为缺口，不要编造。")
+FINAL_ANSWER_REQUEST = (
+    "立即输出最终答案。不要描述你接下来准备读取什么，也不要调用工具。"
+    "请按“结论—源码依据—未确认缺口”组织；没有依据的内容明确列为缺口。"
+    "答案控制在 1000 字以内。")
 _CITATION = re.compile(
     r"([A-Za-z0-9_./-]+\.(?:java|kt|scala|groovy|py|go|rs|cs|c|h|cpp|hpp|js|jsx|ts|tsx|"
     r"vue|html|xml|sql|yml|yaml|properties|json|toml|gradle|md|txt))(?::(\d+)(?:-(\d+))?)?"
@@ -73,6 +88,8 @@ class DirectAgentRuntime:
             "answerMode": self.profile.answer_mode,
             "workflowMode": self.profile.investigation,
             "outputTokens": self.environment.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096"),
+            "finalOutputTokens": self.environment.get(
+                "BUSINESS_CODE_AGENT_FINAL_OUTPUT_TOKENS", "3072"),
             "thinking": self.environment.get("BUSINESS_CODE_MODEL_ENABLE_THINKING"),
             "temperature": self.environment.get("BUSINESS_CODE_MODEL_TEMPERATURE", ".2"),
             "contextChars": self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"),
@@ -80,7 +97,7 @@ class DirectAgentRuntime:
             "maxRetries": 0,
         }
 
-    def chat_model(self):
+    def chat_model(self, *, timeout=None, max_tokens=None):
         if self.model is not None:
             return self.model
         env = self.environment
@@ -101,9 +118,9 @@ class DirectAgentRuntime:
             api_key=env["BUSINESS_CODE_MODEL_API_KEY"],
             base_url=env.get("BUSINESS_CODE_MODEL_BASE_URL"),
             temperature=float(env.get("BUSINESS_CODE_MODEL_TEMPERATURE", ".2")),
-            timeout=float(env.get("BUSINESS_CODE_MODEL_TIMEOUT", "120")),
+            timeout=float(timeout or env.get("BUSINESS_CODE_MODEL_TIMEOUT", "120")),
             max_retries=0,
-            max_tokens=int(env.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096")),
+            max_tokens=int(max_tokens or env.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096")),
             use_responses_api=False,
             extra_body=extra,
         )
@@ -130,6 +147,8 @@ class DirectAgentRuntime:
         cached_reads = 0
         recovered_reads = 0
         evidence_gaps = 0
+        stalled_reads = 0
+        peak_stalled_reads = 0
         stop_reason = None
 
         def emit(kind, **payload):
@@ -157,6 +176,8 @@ class DirectAgentRuntime:
                 "cachedReads": cached_reads,
                 "recoveredReads": recovered_reads,
                 "evidenceGaps": evidence_gaps,
+                "stalledReads": stalled_reads,
+                "peakStalledReads": peak_stalled_reads,
                 "semanticProof": False,
             }
 
@@ -169,6 +190,24 @@ class DirectAgentRuntime:
             emit("status", phase="incomplete", label="调查未完成（达到显式限制）")
             return final_result("本次运行达到显式指定的调查限制，调查未完成；已有调用轨迹已保存。",
                                 status="incomplete")
+
+        def finish(answer, status, reason):
+            nonlocal stop_reason
+            stop_reason = reason
+            verification = verify_answer(answer, messages)
+            emit("text", id="answer", text=answer, mode="replace")
+            if status == "completed":
+                emit("status", phase="completed", label="已完成")
+            else:
+                label = "预算用尽" if reason == "budget" else "连续无新增证据"
+                emit("status", phase="incomplete", label=f"调查未完成（{label}），已保留部分答案")
+            if not cancel_check or not cancel_check():
+                store.save(session, scope, messages)
+            result_usage = usage()
+            result_usage["verification"] = verification
+            result_usage["references"] = verification["references"]
+            result_usage["stopReason"] = reason
+            return RuntimeResult(answer, session, events, result_usage, status=status)
 
         store = DirectSessionStore(context.project.data_root / "query-sessions" / "core")
         scope = self._session_scope(context, prepared)
@@ -195,21 +234,21 @@ class DirectAgentRuntime:
             if call_callback:
                 call_callback({**entry})
 
-        def begin_call(request_messages, attempt):
+        def begin_call(request_messages, attempt, tools=None):
             entry = {
                 "attempt": attempt,
                 "phase": "investigation",
                 "startedAt": _now(),
                 "elapsedMs": round((time.monotonic() - started) * 1000, 3),
                 "messages": [public_message(message) for message in request_messages],
-                "tools": tool_definitions,
+                "tools": tool_definitions if tools is None else tools,
                 "status": "running",
                 "inputTextChars": sum(len(str(message.content)) for message in request_messages),
             }
             record_call(entry)
             return entry
 
-        def finish_call(entry, call_started, *, response=None, status=None, error=None):
+        def finish_call(entry, call_started, *, response=None, status=None, error=None, phase=None):
             entry["status"] = status or ("failed" if error else "completed")
             entry["completedAt"] = _now()
             entry["durationMs"] = round((time.monotonic() - call_started) * 1000, 3)
@@ -219,7 +258,9 @@ class DirectAgentRuntime:
             if response is not None:
                 entry["responses"] = [public_message(response)]
                 entry["usage"] = [getattr(response, "usage_metadata", None)]
-                if not getattr(response, "tool_calls", None):
+                if phase:
+                    entry["phase"] = phase
+                elif not getattr(response, "tool_calls", None):
                     entry["phase"] = "answer"
             record_call(entry)
 
@@ -249,18 +290,59 @@ class DirectAgentRuntime:
                     return stopped("budget")
                 if self.max_calls is not None and calls >= self.max_calls:
                     return stopped("budget")
-                content_budget = max(1, char_limit - len(system_prompt))
+                finalize_reason = None
+                remaining_calls = (None if self.max_calls is None
+                                   else self.max_calls - calls)
+                remaining_seconds = (None if self.max_seconds is None
+                                     else self.max_seconds - (time.monotonic() - started))
+                finalize_reserve = (min(FINALIZE_RESERVED_SECONDS, self.max_seconds * 0.4)
+                                    if self.max_seconds is not None else FINALIZE_RESERVED_SECONDS)
+                if remaining_calls is not None and remaining_calls <= FINALIZE_RESERVED_CALLS:
+                    finalize_reason = "budget"
+                elif (remaining_seconds is not None
+                      and remaining_seconds <= finalize_reserve):
+                    finalize_reason = "budget"
+                elif stalled_reads >= STALL_FINALIZE_READS:
+                    finalize_reason = "no_progress"
+                prompt = system_prompt
+                invoker = bound
+                finalize_label = ""
+                final_message = None
+                if finalize_reason:
+                    finalize_label = "预算用尽" if finalize_reason == "budget" else "连续无新增证据"
+                    index = ledger.index()
+                    prompt = system_prompt + FINALIZE_NOTICE
+                    if index:
+                        prompt += "\n\n已读证据索引（仅用于引用，不要重复读取）：\n" + index
+                    final_message = HumanMessage(FINAL_ANSWER_REQUEST)
+                    invoker = self.chat_model(
+                        timeout=max(60.0, finalize_reserve),
+                        max_tokens=int(self.environment.get(
+                            "BUSINESS_CODE_AGENT_FINAL_OUTPUT_TOKENS", "3072")))
+                elif stalled_reads >= STALL_WARN_READS:
+                    prompt = system_prompt + STALL_NOTICE
+                tail_chars = len(final_message.content) if final_message is not None else 0
+                content_budget = max(1, char_limit - len(prompt) - tail_chars)
                 bounded = compact_messages(messages, content_budget)
                 ledger.observe(bounded)
-                if sum(len(str(message.content)) for message in bounded) > content_budget:
+                if (sum(len(str(message.content)) for message in bounded) + tail_chars
+                        > content_budget):
                     raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
                 calls += 1
-                emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮）")
-                request_messages = [SystemMessage(system_prompt), *bounded]
+                if finalize_reason:
+                    emit("status", phase="thinking", label=f"正在整理答案（{finalize_label}）")
+                elif stalled_reads >= STALL_WARN_READS:
+                    emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮，连续无新增证据）")
+                else:
+                    emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮）")
+                request_messages = [SystemMessage(prompt), *bounded]
+                if final_message is not None:
+                    request_messages.append(final_message)
                 call_started = time.monotonic()
-                call_entry = begin_call(request_messages, calls)
+                call_entry = begin_call(request_messages, calls,
+                                        tools=[] if finalize_reason else None)
                 try:
-                    response = await controlled(bound.ainvoke(request_messages))
+                    response = await controlled(invoker.ainvoke(request_messages))
                 except _Stopped as exc:
                     reason = str(exc) or _STOPPED
                     finish_call(call_entry, call_started,
@@ -268,21 +350,33 @@ class DirectAgentRuntime:
                     return stopped(reason)
                 except Exception as exc:
                     finish_call(call_entry, call_started, error=exc)
+                    if finalize_reason:
+                        return finish(
+                            "本次运行达到显式指定的调查限制，调查未完成；已有调用轨迹已保存。",
+                            "incomplete", finalize_reason)
                     raise
                 record_usage(response)
                 messages.append(response)
-                finish_call(call_entry, call_started, response=response)
+                finish_call(call_entry, call_started, response=response,
+                            phase="answer" if finalize_reason else None)
                 emit("model", attempt=calls, messageCount=len(messages),
                      toolCalls=[call.get("name") for call in (response.tool_calls or [])],
                      outputChars=len(str(response.text or "")),
                      inputTokens=token_usage.get("input_tokens"),
                      outputTokens=token_usage.get("output_tokens"))
+                if finalize_reason:
+                    final_text = str(response.text or "").strip()
+                    if final_text:
+                        final = (f"（调查未完成：{finalize_label}，"
+                                 f"以下为基于已读证据整理的部分答案）\n\n{final_text}")
+                    else:
+                        final = "本次运行达到显式指定的调查限制，调查未完成；已有调用轨迹已保存。"
+                    return finish(final, "incomplete", finalize_reason)
                 pending_calls = response.tool_calls or []
                 if not pending_calls:
                     final = str(response.text or "").strip()
                     if not final:
                         raise RuntimeErrorBase("模型没有返回最终答案")
-                    stop_reason = None
                     break
                 for call in pending_calls:
                     if cancel_check and cancel_check():
@@ -301,6 +395,8 @@ class DirectAgentRuntime:
                         cached = ledger.cached(arguments) if name == "Read" else None
                         if cached is not None:
                             cached_reads += 1
+                            stalled_reads += 1
+                            peak_stalled_reads = max(peak_stalled_reads, stalled_reads)
                             if cached.get("recovered"):
                                 recovered_reads += 1
                             if cached.get("evidenceGap"):
@@ -313,6 +409,7 @@ class DirectAgentRuntime:
                                           else json.dumps(value, ensure_ascii=False))
                                 if name == "Read":
                                     ledger.record(output)
+                                    stalled_reads = 0
                             except Exception as exc:
                                 output = json.dumps({"error": str(exc), "errorType": type(exc).__name__},
                                                     ensure_ascii=False)
@@ -329,16 +426,7 @@ class DirectAgentRuntime:
         except _Stopped as exc:
             return stopped(str(exc) or _STOPPED)
 
-        verification = verify_answer(final, messages)
-        emit("text", id="answer", text=final, mode="replace")
-        emit("status", phase="completed", label="已完成")
-        if not cancel_check or not cancel_check():
-            store.save(session, scope, messages)
-        result_usage = usage()
-        result_usage["verification"] = verification
-        result_usage["references"] = verification["references"]
-        result_usage["stopReason"] = None
-        return RuntimeResult(final, session, events, result_usage, status="completed")
+        return finish(final, "completed", None)
 
     def _session_scope(self, context: RunContext, prepared: PreparedCapabilities) -> dict:
         settings = self.execution_settings()

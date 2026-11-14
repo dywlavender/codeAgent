@@ -270,19 +270,27 @@ class CoreQueryServiceTest(unittest.TestCase):
             "SELECT count(*) FROM query_run WHERE status='completed'").fetchone()[0])
 
     def test_investigation_limit_is_persisted_as_incomplete(self):
-        service, runtime = self.service([AIMessage(content="", tool_calls=[{
-            "id": "read", "name": "Read",
-            "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
-        }])])
-        runtime.max_calls = 1
+        service, runtime = self.service([
+            AIMessage(content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
+            }]),
+            AIMessage(content="预算内部分答案：repos/channel/Channel.java:2。"),
+        ])
+        runtime.max_calls = 3
         events = []
         result = service.query("提款入口在哪里？", event_callback=events.append)
         self.assertEqual("incomplete", result["status"])
         self.assertEqual("budget", result["usage"]["stopReason"])
-        run = self.db.execute("SELECT status FROM query_run").fetchone()
+        self.assertIn("预算用尽", result["answer"])
+        self.assertIn("预算内部分答案", result["answer"])
+        run = self.db.execute("SELECT status,answer FROM query_run").fetchone()
         self.assertEqual("incomplete", run["status"])
+        self.assertIn("预算内部分答案", run["answer"])
         trace = service.get_trace(result["runId"])
         self.assertEqual("incomplete", trace["status"])
+        self.assertEqual([], trace["calls"][-1]["tools"])
+        self.assertEqual("answer", trace["calls"][-1]["phase"])
         self.assertIn("incomplete",
                       [event["payload"].get("phase") for event in events])
 

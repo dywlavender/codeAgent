@@ -57,7 +57,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
     {trace && <>
       <div className="trace-summary"><p>{trace.run.question}</p><div>
         <span>{traceStatus(trace.run.status)}</span><span>{trace.calls.length} 次模型请求</span>
-        {["budget", "context"].includes(trace.stopReason) && <span>{trace.stopReason === "context" ? "上下文预算不足" : "达到调查预算"}</span>}
+        {["budget", "context", "no_progress"].includes(trace.stopReason) && <span>{trace.stopReason === "context" ? "上下文预算不足" : trace.stopReason === "no_progress" ? "连续无新增证据" : "达到调查预算"}</span>}
         {execution?.profileId && <span>{execution.profileId}</span>}
         {(execution?.model || trace.settings?.requestedModel) && <span>{execution?.model || trace.settings.requestedModel}</span>}
         <span>{timeline.filter((item) => item.kind === "tool" && item.status !== "skipped").length} 次工具调用</span>

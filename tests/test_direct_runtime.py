@@ -355,6 +355,7 @@ class DirectRuntimeTest(unittest.TestCase):
         })
         ledger = ReadLedger()
         ledger.record(output)
+        self.assertIn("repos/channel/Channel.java: 1-3", ledger.index())
         visible = ToolMessage(content=output, name="Read", tool_call_id="read", status="success")
         ledger.observe([visible])
         visible_cached = ledger.cached({"path": "repos/channel/Channel.java", "offset": 1, "limit": 3})
@@ -447,6 +448,86 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual("incomplete", result.status)
         self.assertEqual("budget", result.usage["stopReason"])
         self.assertEqual("incomplete", calls[-1]["status"])
+
+    def test_stalled_repeated_reads_trigger_a_final_answer(self):
+        repeated = {
+            "id": "read", "name": "Read",
+            "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+        }
+        responses = [AIMessage(content="", tool_calls=[{**repeated, "id": f"read-{index}"}])
+                     for index in range(11)]
+        responses.append(AIMessage(content="提款入口见 repos/channel/Channel.java:2。部分答案。"))
+        calls = []
+        result = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                    environment={}).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared,
+            call_callback=calls.append)
+        self.assertEqual("incomplete", result.status)
+        self.assertEqual("no_progress", result.usage["stopReason"])
+        self.assertEqual(12, result.usage["modelCalls"])
+        self.assertEqual(10, result.usage["stalledReads"])
+        self.assertIn("连续无新增证据", result.answer)
+        self.assertIn("部分答案", result.answer)
+        self.assertTrue(result.usage["verification"]["references"][0]["confirmed"])
+        self.assertEqual([], calls[-1]["tools"])
+        self.assertEqual("answer", calls[-1]["phase"])
+        self.assertIn("已读证据索引", calls[-1]["messages"][0]["content"])
+        self.assertIn("repos/channel/Channel.java", calls[-1]["messages"][0]["content"])
+        self.assertEqual("human", calls[-1]["messages"][-1]["role"])
+        self.assertIn("立即输出最终答案", calls[-1]["messages"][-1]["content"])
+
+    def test_stall_warning_does_not_force_an_incomplete_answer(self):
+        repeated = {
+            "id": "read", "name": "Read",
+            "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+        }
+        responses = [AIMessage(content="", tool_calls=[{**repeated, "id": f"read-{index}"}])
+                     for index in range(7)]
+        responses.append(AIMessage(content="已确认入口为 repos/channel/Channel.java:2。"))
+        calls = []
+        result = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                    environment={}).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared,
+            call_callback=calls.append)
+        self.assertEqual("completed", result.status)
+        self.assertIsNone(result.usage["stopReason"])
+        self.assertIn("调查提醒", calls[-1]["messages"][0]["content"])
+        self.assertNotEqual([], calls[-1]["tools"])
+
+    def test_budget_finalization_reserves_a_tool_free_answer_call(self):
+        calls = []
+        responses = [
+            AIMessage(content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+            }]),
+            AIMessage(content="预算内答案：repos/channel/Channel.java:2。"),
+        ]
+        result = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                    environment={}, max_calls=3).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared,
+            call_callback=calls.append)
+        self.assertEqual("incomplete", result.status)
+        self.assertEqual("budget", result.usage["stopReason"])
+        self.assertEqual(2, result.usage["modelCalls"])
+        self.assertIn("预算用尽", result.answer)
+        self.assertEqual([], calls[-1]["tools"])
+        self.assertTrue(result.usage["verification"]["references"][0]["confirmed"])
+
+    def test_empty_finalization_falls_back_to_the_incomplete_notice(self):
+        responses = [
+            AIMessage(content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 3},
+            }]),
+            AIMessage(content=""),
+        ]
+        result = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                    environment={}, max_calls=3).ask(
+            "入口在哪里？", context=self.context, prepared=self.prepared)
+        self.assertEqual("incomplete", result.status)
+        self.assertEqual("budget", result.usage["stopReason"])
+        self.assertIn("调查未完成", result.answer)
 
     def test_context_budget_accounts_for_the_system_prompt(self):
         for index in range(4):

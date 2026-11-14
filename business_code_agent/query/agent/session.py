@@ -163,6 +163,16 @@ class ReadLedger:
         entry["segments"].append({"start": start, "end": end, "data": dict(data)})
         self._active[key] = _merge_ranges([*self._active.get(key, []), (start, end)])
 
+    def index(self, max_chars=4000) -> str:
+        """Return a compact path/range index of evidence already delivered this run."""
+        lines = [f"- {entry['path']}: "
+                 + ", ".join(f"{start}-{end}" for start, end in entry["ranges"])
+                 for entry in sorted(self._reads.values(), key=lambda item: item["path"])]
+        text = "\n".join(lines)
+        if len(text) > max_chars:
+            text = text[:max_chars].rsplit("\n", 1)[0] + "\n- （其余已读区间已省略）"
+        return text
+
 
 def _retired_tool_content(message) -> str:
     content = str(message.content)
