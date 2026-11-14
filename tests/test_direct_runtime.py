@@ -15,6 +15,7 @@ from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.agent.direct import DirectAgentRuntime, verify_answer
 from business_code_agent.query.agent.session import (
     DirectSessionStore,
+    ReadLedger,
     compact_messages,
     retire_changed_sources,
 )
@@ -167,6 +168,11 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual([], store.load("LC-abc", {"project": "A"}))
         retired = retire_changed_sources(messages, self.prepared.files)
         self.assertIn("已废弃", retired[1].content)
+        recovered = ToolMessage(
+            content=json.dumps({**read, "cached": True, "recovered": True}),
+            name="Read", tool_call_id="recovered", status="success")
+        self.assertIn("已废弃", retire_changed_sources(
+            [HumanMessage("旧问题"), recovered], self.prepared.files)[1].content)
 
     def test_extra_provider_registers_tool_without_changing_direct_loop(self):
         prepared = prepare_capabilities(self.context, providers=[FileCapability(), ExtraProvider()])
@@ -341,6 +347,106 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertTrue(retired)
         self.assertIn("Channel.java:1-3", retired[0].content)
         self.assertLess(len(retired[0].content), 200)
+
+    def test_cached_read_recovers_compacted_evidence_then_reports_a_gap(self):
+        output = json.dumps({
+            "path": "repos/channel/Channel.java", "lineStart": 1, "lineEnd": 3,
+            "totalLines": 4, "content": "1: class Main {\n2: void applyWithdraw() {}\n3: }",
+        })
+        ledger = ReadLedger()
+        ledger.record(output)
+        visible = ToolMessage(content=output, name="Read", tool_call_id="read", status="success")
+        ledger.observe([visible])
+        visible_cached = ledger.cached({"path": "repos/channel/Channel.java", "offset": 1, "limit": 3})
+        self.assertTrue(visible_cached["contentInContext"])
+        self.assertNotIn("content", visible_cached)
+
+        ledger.observe([])
+        recovered = ledger.cached({"path": "repos/channel/Channel.java", "offset": 1, "limit": 3})
+        self.assertTrue(recovered["recovered"])
+        self.assertIn("applyWithdraw", recovered["content"])
+
+        ledger.observe([])
+        recovered_again = ledger.cached({"path": "repos/channel/Channel.java", "offset": 1, "limit": 3})
+        self.assertTrue(recovered_again["recovered"])
+
+        ledger.observe([])
+        gap = ledger.cached({"path": "repos/channel/Channel.java", "offset": 1, "limit": 3})
+        self.assertTrue(gap["evidenceGap"])
+        self.assertNotIn("content", gap)
+        self.assertIn("无法复核", gap["note"])
+
+    def test_recovery_is_capped_across_files(self):
+        ledger = ReadLedger()
+        results = []
+        for index in range(9):
+            path = f"repos/channel/File{index}.java"
+            ledger.record(json.dumps({"path": path, "lineStart": 1, "lineEnd": 1,
+                                      "content": "1: x"}))
+            ledger.observe([])
+            results.append(ledger.cached({"path": path, "offset": 1, "limit": 1}))
+        self.assertEqual(8, sum(1 for result in results if result.get("recovered")))
+        self.assertTrue(results[-1]["evidenceGap"])
+
+    def test_runtime_recovers_compacted_read_evidence(self):
+        marker = "RETENTION_RULE"
+        for name in ("Important", "Big0", "Big1", "Big2"):
+            lines = ["x" * 250 for _ in range(14)]
+            if name == "Important":
+                lines[2] = f"{marker} " + "y" * 200
+            (self.root / "sources" / "channel" / f"{name}.java").write_text(
+                "\n".join(lines) + "\n", encoding="utf-8")
+        responses = [AIMessage(content="", tool_calls=[{
+            "id": f"read-{name}", "name": "Read",
+            "args": {"path": f"repos/channel/{name}.java"},
+        }]) for name in ("Important", "Big0", "Big1", "Big2")]
+        responses.append(AIMessage(content="", tool_calls=[{
+            "id": "re-read", "name": "Read",
+            "args": {"path": "repos/channel/Important.java"},
+        }]))
+        responses.append(AIMessage(content="额度恢复规则见 repos/channel/Important.java:3。"))
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=responses),
+            environment={"BUSINESS_CODE_AGENT_CONTEXT_CHARS": "14000"})
+        result = runtime.ask("读取多个文件后回答", context=self.context,
+                             prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(1, result.usage["recoveredReads"])
+        reads = [json.loads(event["payload"]["output"]) for event in result.events
+                 if event["eventType"] == "tool" and event["payload"]["name"] == "Read"
+                 and event["payload"]["status"] == "completed"]
+        self.assertEqual(5, len(reads))
+        self.assertFalse(reads[0].get("recovered"))
+        self.assertTrue(reads[-1]["recovered"])
+        self.assertIn(marker, reads[-1]["content"])
+        self.assertTrue(result.usage["verification"]["references"][-1]["confirmed"])
+
+    def test_investigation_limit_returns_incomplete_instead_of_completed(self):
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{
+                "id": "read", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java"},
+            }]),
+            AIMessage(content="不应执行"),
+        ])
+        runtime = DirectAgentRuntime(profile=CORE, model=model, environment={}, max_calls=1)
+        result = runtime.ask("读取", context=self.context, prepared=self.prepared)
+        self.assertEqual("incomplete", result.status)
+        self.assertEqual("budget", result.usage["stopReason"])
+        self.assertEqual(1, result.usage["modelCalls"])
+        self.assertEqual("incomplete", result.events[-1]["payload"]["phase"])
+        self.assertIn("调查未完成", result.answer)
+
+    def test_time_limit_marks_the_inflight_call_incomplete(self):
+        calls = []
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=[AIMessage(content="慢答案。")], sleep=1),
+            environment={}, max_seconds=0.2)
+        result = runtime.ask("等待", context=self.context, prepared=self.prepared,
+                             call_callback=calls.append)
+        self.assertEqual("incomplete", result.status)
+        self.assertEqual("budget", result.usage["stopReason"])
+        self.assertEqual("incomplete", calls[-1]["status"])
 
     def test_context_budget_accounts_for_the_system_prompt(self):
         for index in range(4):

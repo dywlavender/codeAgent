@@ -80,7 +80,7 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
       setRunDetail(detail);
       setConversationId(data.conversationId || detail.conversationId || conversationId);
       updateTurn(turnId, (turn) => ({
-        status: data.status === "cancelled" ? "cancelled" : "success",
+        status: ["cancelled", "incomplete"].includes(data.status) ? data.status : "success",
         result: data,
         detail,
         events: data.events || turn.events || [],

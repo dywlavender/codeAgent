@@ -37,6 +37,11 @@ QUERY_MODE_LABELS = {
     "combined": "组合资料", "none": "无主干", "backbone": "有主干", "ast": "AST",
     "core": "零索引核心",
 }
+_TERMINAL_STATUS_LABELS = {"cancelled": "已停止", "incomplete": "调查未完成（达到显式限制）"}
+
+
+def _final_status(status: str) -> str:
+    return status if status in {"completed", *_TERMINAL_STATUS_LABELS} else "completed"
 
 
 class QueryRuntimeError(RuntimeErrorBase):
@@ -363,10 +368,12 @@ class QueryService:
 
         session_id = result.runtime_session_id or conversation["runtime_session_id"]
         completed_at = _now()
-        final_status = "cancelled" if result.status == "cancelled" else "completed"
-        if final_status == "cancelled":
+        final_status = _final_status(result.status)
+        terminal_label = _TERMINAL_STATUS_LABELS.get(final_status)
+        if terminal_label and not any(
+                (event.get("payload") or {}).get("phase") == final_status for event in emitted):
             on_event({"sequence": len(emitted) + 1, "eventType": "status",
-                      "payload": {"phase": "cancelled", "label": "已停止"}})
+                      "payload": {"phase": final_status, "label": terminal_label}})
         duration = round((time.monotonic() - started_clock) * 1000, 3)
         usage = {**result.usage, "traceArchive": str(archive.path)}
         archive.finish(status=final_status, answer=result.answer, usage=usage,
@@ -574,10 +581,12 @@ class QueryService:
                 on_event(event)
         session_id = result.runtime_session_id or conversation["runtime_session_id"]
         completed_at = _now()
-        final_status = "cancelled" if result.status == "cancelled" else "completed"
-        if final_status == "cancelled":
+        final_status = _final_status(result.status)
+        terminal_label = _TERMINAL_STATUS_LABELS.get(final_status)
+        if terminal_label and not any(
+                (event.get("payload") or {}).get("phase") == final_status for event in emitted):
             on_event({"sequence": len(emitted) + 1, "eventType": "status",
-                      "payload": {"phase": "cancelled", "label": "已停止"}})
+                      "payload": {"phase": final_status, "label": terminal_label}})
         duration = round((time.monotonic() - started_clock) * 1000, 3)
         usage = {**result.usage, "traceArchive": str(archive.path)}
         archive.finish(status=final_status, answer=result.answer, usage=usage,

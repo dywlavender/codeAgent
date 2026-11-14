@@ -128,6 +128,8 @@ class DirectAgentRuntime:
         reported_models: set[str] = set()
         tool_calls = 0
         cached_reads = 0
+        recovered_reads = 0
+        evidence_gaps = 0
         stop_reason = None
 
         def emit(kind, **payload):
@@ -153,6 +155,8 @@ class DirectAgentRuntime:
                 "reportedModels": sorted(reported_models),
                 "toolCalls": tool_calls,
                 "cachedReads": cached_reads,
+                "recoveredReads": recovered_reads,
+                "evidenceGaps": evidence_gaps,
                 "semanticProof": False,
             }
 
@@ -162,8 +166,9 @@ class DirectAgentRuntime:
             if reason == _STOPPED:
                 emit("status", phase="cancelled", label="已停止")
                 return final_result("已停止。", status="cancelled")
-            emit("status", phase="completed", label="已完成")
-            return final_result("本次运行达到显式指定的调查限制，已有调用轨迹已保存。")
+            emit("status", phase="incomplete", label="调查未完成（达到显式限制）")
+            return final_result("本次运行达到显式指定的调查限制，调查未完成；已有调用轨迹已保存。",
+                                status="incomplete")
 
         store = DirectSessionStore(context.project.data_root / "query-sessions" / "core")
         scope = self._session_scope(context, prepared)
@@ -246,6 +251,7 @@ class DirectAgentRuntime:
                     return stopped("budget")
                 content_budget = max(1, char_limit - len(system_prompt))
                 bounded = compact_messages(messages, content_budget)
+                ledger.observe(bounded)
                 if sum(len(str(message.content)) for message in bounded) > content_budget:
                     raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
                 calls += 1
@@ -256,8 +262,10 @@ class DirectAgentRuntime:
                 try:
                     response = await controlled(bound.ainvoke(request_messages))
                 except _Stopped as exc:
-                    finish_call(call_entry, call_started, status="cancelled")
-                    return stopped(str(exc) or _STOPPED)
+                    reason = str(exc) or _STOPPED
+                    finish_call(call_entry, call_started,
+                                status="cancelled" if reason == _STOPPED else "incomplete")
+                    return stopped(reason)
                 except Exception as exc:
                     finish_call(call_entry, call_started, error=exc)
                     raise
@@ -293,6 +301,10 @@ class DirectAgentRuntime:
                         cached = ledger.cached(arguments) if name == "Read" else None
                         if cached is not None:
                             cached_reads += 1
+                            if cached.get("recovered"):
+                                recovered_reads += 1
+                            if cached.get("evidenceGap"):
+                                evidence_gaps += 1
                             output = json.dumps(cached, ensure_ascii=False)
                         else:
                             try:

@@ -50,6 +50,7 @@ export function RecentConversations({ history, query }) {
               {running ? <span className="activity-pulse" />
                 : run.status === "failed" ? <WarningCircle size={12} weight="fill" />
                 : run.status === "cancelled" ? <MinusCircle size={12} />
+                : run.status === "incomplete" ? <WarningCircle size={12} />
                 : <Check size={11} weight="bold" />}
             </span>
             <span className="task-copy">

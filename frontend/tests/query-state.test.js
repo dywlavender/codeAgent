@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isActiveRun, mergeConversations, turnFromRun, watchRun } from "../src/lib/query-state.js";
+import { isActiveRun, mergeConversations, RUN_STATUS_LABEL, turnFromRun, watchRun } from "../src/lib/query-state.js";
 
 test("restored running and cancelling tasks remain loading", () => {
   for (const status of ["running", "cancelling"]) {
@@ -8,6 +8,8 @@ test("restored running and cancelling tasks remain loading", () => {
     assert.equal(turnFromRun({ id: "r", status }).status, "loading");
   }
   assert.equal(turnFromRun({ id: "r", status: "cancelled" }).status, "cancelled");
+  assert.equal(turnFromRun({ id: "r", status: "incomplete" }).status, "incomplete");
+  assert.equal(RUN_STATUS_LABEL.incomplete, "未完成");
   assert.equal(turnFromRun({ id: "r", status: "failed", error: "failure" }).error, "failure");
 });
 

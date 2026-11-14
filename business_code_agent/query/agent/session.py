@@ -10,10 +10,22 @@ from langchain_core.messages import HumanMessage, ToolMessage, messages_from_dic
 
 SESSION_PREFIX = "DA-"
 RETIRED_TOOL_BODY = "[已废弃的历史工具原文；源码可能更新，如结论依赖它请重新 Read。]"
+RECOVERIES_PER_PATH = 2
+RECOVERIES_PER_RUN = 8
 
 
 def _read_key(path) -> str:
     return str(path or "").strip().replace("\\", "/").lstrip("./")
+
+
+def _read_payload(content):
+    try:
+        data = json.loads(content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("error") or not data.get("path"):
+        return None
+    return data
 
 
 def _read_range(arguments) -> tuple[int, int]:
@@ -48,15 +60,34 @@ def _covered(ranges, start, end) -> bool:
 
 
 class ReadLedger:
-    """Remember delivered Read ranges for this run, independent of compaction."""
+    """Remember delivered Read ranges and recover compacted evidence on demand."""
 
     def __init__(self):
         self._reads = {}
+        self._active = {}
+        self._recoveries = {}
+        self._recovered_total = 0
+
+    def observe(self, messages) -> None:
+        """Refresh which delivered Read bodies are still visible in bounded context."""
+        active = {}
+        for message in messages:
+            if not isinstance(message, ToolMessage) or getattr(message, "name", "") != "Read":
+                continue
+            data = _read_payload(message.content)
+            if data is None or not data.get("content"):
+                continue
+            start, end = data.get("lineStart"), data.get("lineEnd")
+            if not isinstance(start, int) or not isinstance(end, int) or end < start:
+                continue
+            active.setdefault(_read_key(data["path"]), []).append((start, end))
+        self._active = {key: _merge_ranges(ranges) for key, ranges in active.items()}
 
     def cached(self, arguments) -> dict | None:
         if str(arguments.get("path") or "").strip() == "":
             return None
-        entry = self._reads.get(_read_key(arguments.get("path")))
+        key = _read_key(arguments.get("path"))
+        entry = self._reads.get(key)
         if entry is None:
             return None
         start, end = _read_range(arguments)
@@ -65,29 +96,72 @@ class ReadLedger:
             end = min(end, total)
         if end < start or not _covered(entry["ranges"], start, end):
             return None
+        if _covered(self._active.get(key, []), start, end):
+            return {
+                "path": entry["path"], "lineStart": start, "lineEnd": end,
+                "totalLines": total, "cached": True, "contentInContext": True,
+                "note": "该区间本轮已读取且原文仍在当前上下文中；请直接引用上文，不要重复读取。",
+            }
+        recovered = self._recover(key, entry, start, end)
+        if recovered is not None:
+            return {**recovered, "cached": True, "recovered": True,
+                    "contentInContext": True,
+                    "note": "该区间原文此前因上下文预算被移除，本次已恢复；"
+                            "请基于该原文作答，不要重复读取同一区间。"}
         return {
             "path": entry["path"], "lineStart": start, "lineEnd": end,
-            "totalLines": total, "cached": True,
-            "note": "该区间本轮已读取，原文可能因上下文预算被移除；不要重复读取同一区间，"
-                    "请基于已有结论回答或读取尚未覆盖的区间。",
+            "totalLines": total, "cached": True, "contentInContext": False,
+            "evidenceGap": True,
+            "note": "该区间原文已因上下文预算移除，且本轮恢复次数已用尽；"
+                    "请基于当前上下文中的结论作答，并在答案中明确说明该区间无法复核。",
         }
 
+    def _recover(self, key, entry, start, end):
+        if (self._recoveries.get(key, 0) >= RECOVERIES_PER_PATH
+                or self._recovered_total >= RECOVERIES_PER_RUN):
+            return None
+        segments = [segment for segment in entry["segments"]
+                    if segment["end"] >= start and segment["start"] <= end]
+        if not segments:
+            return None
+        covered = _merge_ranges((segment["start"], segment["end"]) for segment in segments)
+        if not _covered(covered, start, end):
+            return None
+        covering = next((segment for segment in segments
+                         if segment["start"] <= start and segment["end"] >= end), None)
+        if covering is not None:
+            payload = dict(covering["data"])
+        else:
+            lines = {}
+            for segment in sorted(segments, key=lambda item: item["start"]):
+                for raw in str(segment["data"].get("content") or "").splitlines():
+                    number, separator, text = raw.partition(": ")
+                    if separator and number.isdigit():
+                        lines.setdefault(int(number), text)
+            payload = {
+                **segments[0]["data"], "lineStart": start, "lineEnd": end,
+                "content": "\n".join(f"{number}: {lines[number]}" for number in sorted(lines)
+                                     if start <= number <= end),
+            }
+        self._recoveries[key] = self._recoveries.get(key, 0) + 1
+        self._recovered_total += 1
+        return payload
+
     def record(self, output) -> None:
-        try:
-            data = json.loads(output)
-        except (TypeError, ValueError):
-            return
-        if not isinstance(data, dict) or data.get("error") or not data.get("path"):
+        data = _read_payload(output)
+        if data is None:
             return
         start, end = data.get("lineStart"), data.get("lineEnd")
         if not isinstance(start, int) or not isinstance(end, int) or end < start:
             return
-        path = str(data["path"])
-        entry = self._reads.setdefault(_read_key(path), {"path": path, "ranges": [],
-                                                        "totalLines": data.get("totalLines")})
+        key = _read_key(data["path"])
+        entry = self._reads.setdefault(key, {"path": data["path"], "ranges": [],
+                                             "segments": [], "totalLines": data.get("totalLines")})
         if data.get("totalLines") is not None:
             entry["totalLines"] = data["totalLines"]
         entry["ranges"] = _merge_ranges([*entry["ranges"], (start, end)])
+        entry["segments"].append({"start": start, "end": end, "data": dict(data)})
+        self._active[key] = _merge_ranges([*self._active.get(key, []), (start, end)])
 
 
 def _retired_tool_content(message) -> str:
@@ -102,7 +176,7 @@ def _retired_tool_content(message) -> str:
         if isinstance(data, dict) and data.get("path") and data.get("lineStart") is not None:
             name = str(data["path"]).replace("\\", "/").rsplit("/", 1)[-1]
             return (f"[历史读取已移除] {name}:{data['lineStart']}-{data.get('lineEnd')}；"
-                    "同一区间不会再次返回，勿重复读取。")
+                    "需要原文时可再次 Read 该区间（受控恢复），恢复次数有限。")
     return f"[历史工具结果已移除] {getattr(message, 'name', 'tool')}；勿重复相同调用。"
 
 
@@ -177,7 +251,7 @@ def retire_changed_sources(messages, files):
             stale = True
             try:
                 data = json.loads(content)
-                if isinstance(data, dict) and data.get("cached"):
+                if isinstance(data, dict) and data.get("cached") and not data.get("content"):
                     result.append(message)
                     continue
                 file, _ = files.locate(data["path"])

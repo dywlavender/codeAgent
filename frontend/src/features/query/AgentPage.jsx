@@ -91,7 +91,7 @@ export function TurnBlock({ turn, onTrace }) {
   const progress = useMemo(() => buildProgress(events), [events]);
   const files = useMemo(() => fileEvidence(progress.tools), [progress.tools]);
   const live = turn.status === "loading";
-  const answer = ["success", "cancelled"].includes(turn.status) ? result.answer : progress.text;
+  const answer = ["success", "cancelled", "incomplete"].includes(turn.status) ? result.answer : progress.text;
   const mode = result.mode || turn.mode;
   const legacyMode = mode && mode !== "combined";
   return <article className="turn-block">
@@ -105,6 +105,7 @@ export function TurnBlock({ turn, onTrace }) {
       {turn.status === "error" && <Alert type="error" showIcon title="分析未完成" description={turn.error || result.error || "请稍后重试"} />}
       {turn.status === "stopped" && <p className="stopped-note">已停止接收。后台仍在运行，完成后可从左侧历史查看。</p>}
       {turn.status === "cancelled" && <p className="stopped-note">已停止生成，以上为停止前收到的内容。</p>}
+      {turn.status === "incomplete" && <p className="stopped-note">调查未完成：本轮达到显式调查限制，以上为限制前保存的内容。</p>}
       {turn.status === "disconnected" && <p className="stopped-note">进度连接已断开，后台任务状态待确认。</p>}
       {turn.status === "success" && <Feedback runId={result.runId || turn.id} answer={answer} />}
     </div></div>
@@ -134,7 +135,7 @@ export function Investigation({ progress, files = [], live, status }) {
   const searches = tools.filter((tool) => tool.status !== "skipped" && tool.input?.pattern).length;
   const heading = live ? label
     : status === "success" ? (tools.length ? `已调查 ${tools.length} 步 · 读取 ${files.length} 个文件${searches ? ` · 搜索 ${searches} 次` : ""}` : "已完成回答")
-    : status === "cancelled" ? "已停止" : status === "stopped" ? "后台运行中" : "调查中断";
+    : status === "cancelled" ? "已停止" : status === "incomplete" ? "调查未完成" : status === "stopped" ? "后台运行中" : "调查中断";
   return <div className={`investigation ${live ? "live" : ""}`}>
     <button className="investigation-toggle" onClick={() => setExpanded(!expanded)} aria-label={heading} aria-expanded={expanded}>
       {live ? <span className="activity-pulse" /> : status === "success" ? <Check size={13} weight="bold" /> : <WarningCircle size={13} />}

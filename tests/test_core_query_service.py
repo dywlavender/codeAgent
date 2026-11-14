@@ -269,6 +269,23 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertEqual(4, self.db.execute(
             "SELECT count(*) FROM query_run WHERE status='completed'").fetchone()[0])
 
+    def test_investigation_limit_is_persisted_as_incomplete(self):
+        service, runtime = self.service([AIMessage(content="", tool_calls=[{
+            "id": "read", "name": "Read",
+            "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
+        }])])
+        runtime.max_calls = 1
+        events = []
+        result = service.query("提款入口在哪里？", event_callback=events.append)
+        self.assertEqual("incomplete", result["status"])
+        self.assertEqual("budget", result["usage"]["stopReason"])
+        run = self.db.execute("SELECT status FROM query_run").fetchone()
+        self.assertEqual("incomplete", run["status"])
+        trace = service.get_trace(result["runId"])
+        self.assertEqual("incomplete", trace["status"])
+        self.assertIn("incomplete",
+                      [event["payload"].get("phase") for event in events])
+
     def test_core_cancel_keeps_run_event_and_trace(self):
         ready = threading.Event()
         results, errors = [], []

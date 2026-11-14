@@ -396,7 +396,7 @@ class AgentRuntime(Protocol):
 - RuntimeSettings 是会话核对前解析的公开有效设置；端点须去除认证信息，model_parameters 仅允许非敏感的有效模型参数，深复制/冻结后使用。凭证由组合根单独注入模型连接，不参与此对象。运行中不得再修改设置；其 runtime_revision/system_prompt 随实现或提示变化参与指纹。
 - 生产 RunOptions 两项为 None，无模型调用次数/调查总时长限制。有界评测可明确传正值，max_seconds 从 ask 开始计时，调用额度包含必要的最终答题调用；到限时不能超限再请求模型，保留已有输出/缺口与 `stopReason`。该参数不能改变 Profile 授权，必须与工厂绑定及会话指纹中使用的值相同。
 - 模型连接、上下文容量、单次网络超时由 RuntimeFactory 按已冻结 RuntimeSettings 注入并保存，不在每个工具中重新读 `.env`。取消检查在模型请求前后及工具边界执行，能中断可取消的请求；不能在取消后继续安排新工具。
-- `status=completed` 表示本次执行成功产生回答，不表示业务问题完全解决。`cancelled` 允许空答案；失败通过现有 RuntimeErrorBase 体系抛出，由服务记录 failed，不填造回答。required 预检失败映射 RequiredToolUnavailable/QueryConfigurationError。
+- `status=completed` 表示本次执行成功产生回答，不表示业务问题完全解决。`cancelled` 允许空答案；有界运行达到显式调用次数或总时长限制时返回 `incomplete`（`stopReason=budget`），不得记为 `completed`。失败通过现有 RuntimeErrorBase 体系抛出，由服务记录 failed，不填造回答。required 预检失败映射 RequiredToolUnavailable/QueryConfigurationError。
 - 工具错误先交给模型；底层必需能力整体失效、模型调用失败和持久化失败不能伪装为工具空结果。失败不自动切换到 Legacy。
 
 事件继续使用现有 `eventType/subtype/payload` 信封；新增细节放 payload，不要求改前端。服务分配单调 sequence，Runtime 分配稳定 eventId/toolCallId；流式事件和 RuntimeResult.events 中同 ID 只持久化一次。至少记录 run/context、capability_status、model_request、model_response、tool_use、tool_result、verification、error、stop，并区分 `origin=model` 与 Legacy 的 `origin=workflow`。Direct 不产生程序自动调查工具调用。
@@ -404,6 +404,8 @@ class AgentRuntime(Protocol):
 公开请求/响应、工具 schema、完整实际结果、来源与停止原因持续写工程 Trace。`usage.references` 保存引用与 Evidence ID；`usage.verification` 保存来源检查结果、缺口和 `semanticProof=false`；`usage.execution` 保存 Profile 定义、起始/实际能力状态、资料、会话指纹和运行设置。禁止记录认证头、密钥和模型私有思考。先持久化事件再向客户端发送；客户端断开不删除记录，写入失败不得报告成功。
 
 引用检查只核对已交付原文/行号/版本，不能在校验阶段从磁盘补证据、隐式调用工具或重新进入调查循环。无效引用保留校验失败及未确认提示，不能以通过格式检查宣称语义正确。答案应分别陈述当前实现、需求目标、业务约定及结构线索；冲突分别说明，不让一种证据覆盖另一种。
+
+同一运行内重复 Read 同一已交付区间不重新打开文件：原文仍在当前上下文时返回可引用提示；已被上下文压缩移除时允许有限次恢复原文，恢复额度用尽后返回证据缺口，要求模型基于已有证据作答并声明无法复核。恢复不扩大文件授权，恢复后的原文仍参与来源与行号核验。
 
 ## 9. 会话身份与历史隔离
 

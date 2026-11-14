@@ -4,13 +4,14 @@ export const RUN_STATUS_LABEL = {
   running: "运行中",
   cancelling: "正在停止",
   completed: "已完成",
+  incomplete: "未完成",
   failed: "失败",
   cancelled: "已停止",
 };
 
 export function turnFromRun(run) {
   return { id: run.runId || run.id, question: run.question,
-    status: isActiveRun(run) ? "loading" : run.status === "completed" ? "success" : run.status === "cancelled" ? "cancelled" : "error",
+    status: isActiveRun(run) ? "loading" : run.status === "completed" ? "success" : run.status === "cancelled" ? "cancelled" : run.status === "incomplete" ? "incomplete" : "error",
     error: run.error, result: run, detail: run };
 }
 
