@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.capabilities import FileCapability, prepare_capabilities
@@ -134,6 +136,70 @@ class CoreFileToolsTest(unittest.TestCase):
         insensitive = self.invoke("Grep", pattern="WITHDRAW", path="repos/channel",
                                   case_sensitive=False)
         self.assertTrue(insensitive["matches"])
+
+    def test_grep_files_mode_aggregates_and_paginates(self):
+        hot = self.workspace.path / "repos/channel/src/main/java/Hot.java"
+        hot.write_text("\n".join(["withdraw"] * 9) + "\n", encoding="utf-8")
+        full = self.invoke("Grep", pattern="withdraw", output_mode="files", limit=120)
+        self.assertTrue(full["files"])
+        self.assertFalse(full["truncated"])
+        paths = [item["path"] for item in full["files"]]
+        self.assertEqual(sorted(paths), paths)
+        hot_entry = next(item for item in full["files"] if item["path"].endswith("/Hot.java"))
+        self.assertEqual(9, hot_entry["matches"])
+        self.assertEqual(5, len(hot_entry["sampleLines"]))
+        first = self.invoke("Grep", pattern="withdraw", output_mode="files", limit=2)
+        self.assertEqual(2, len(first["files"]))
+        self.assertTrue(first["truncated"])
+        self.assertEqual(2, first["nextOffset"])
+        seen = [item["path"] for item in first["files"]]
+        offset = first["nextOffset"]
+        while offset is not None:
+            page = self.invoke("Grep", pattern="withdraw", output_mode="files",
+                               limit=2, offset=offset)
+            seen.extend(item["path"] for item in page["files"])
+            offset = page["nextOffset"]
+        self.assertEqual(paths, seen)
+        self.assertEqual(len(seen), len(set(seen)))
+
+    def test_grep_scope_starts_at_subdirectory_and_preserves_authorization(self):
+        scope = "repos/channel/src/main/resources"
+        files = self.invoke("Grep", pattern="withdraw", path=scope, output_mode="files")
+        self.assertTrue(files["files"])
+        self.assertTrue(all(item["path"].startswith(scope + "/") for item in files["files"]))
+        single = self.invoke("Grep", pattern="withdraw", path="repos/channel/web/withdraw.ts")
+        self.assertEqual(["repos/channel/web/withdraw.ts"],
+                         [item["path"] for item in single["matches"]])
+        for path, message in (
+            ("repos/middle", "不在本轮授权"),
+            ("repos/../requirements", ".."),
+            ("/etc/passwd", "绝对路径"),
+        ):
+            with self.subTest(path=path):
+                result = self.invoke("Grep", pattern="withdraw", path=path)
+                self.assertIn(message, result["error"])
+        with patch("business_code_agent.query.tools.files.os.walk", wraps=os.walk) as walk:
+            self.invoke("Grep", pattern="withdraw", path=scope)
+        starts = [str(call.args[0]) for call in walk.call_args_list if call.args]
+        self.assertTrue(any(value.endswith("src/main/resources") for value in starts))
+
+    def test_grep_matches_mode_adds_bounded_context(self):
+        path = "repos/channel/src/main/java/ChannelApplication.java"
+        default = self.invoke("Grep", pattern="checkAmount", path=path)
+        self.assertNotIn("before", default["matches"][0])
+        expanded = self.invoke("Grep", pattern="checkAmount", path=path, context=2)
+        item = expanded["matches"][0]
+        self.assertEqual(3, item["line"])
+        self.assertEqual([1, 2], [row["line"] for row in item["before"]])
+        self.assertEqual([4, 5], [row["line"] for row in item["after"]])
+        self.assertIn("void applyWithdraw", item["before"][1]["text"])
+        oversized = self.invoke("Grep", pattern="checkAmount", path=path, context=99)
+        self.assertEqual(2, len(oversized["matches"][0]["before"]))
+        self.assertEqual(2, len(oversized["matches"][0]["after"]))
+
+    def test_grep_rejects_unknown_output_mode(self):
+        result = self.invoke("Grep", pattern="withdraw", output_mode="content")
+        self.assertIn("output_mode", result["error"])
 
     def test_read_returns_real_content_lines_and_requirements(self):
         read = self.invoke("Read", path="repos/channel/src/main/java/ChannelApplication.java",

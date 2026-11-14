@@ -89,11 +89,39 @@ class CoreFiles:
         raise ValueError("路径不在本轮授权资料范围内；请使用 Glob 返回的路径")
 
     def _walk_files(self, path: str = ""):
-        prefix = str(path or "").strip().strip("/")
+        raw = str(path or "").strip().replace("\\", "/")
+        candidate = PurePosixPath(raw) if raw else None
+        if candidate is not None:
+            if candidate.is_absolute():
+                raise ValueError("只接受授权资料内的相对路径，不接受宿主绝对路径")
+            if ".." in candidate.parts:
+                raise ValueError("路径不能包含 ..")
+        prefix = raw.strip("/")
+        targets = []
         for mount, root in self.roots:
-            if prefix and prefix != mount and not prefix.startswith(mount + "/"):
+            if not prefix or prefix == mount:
+                targets.append((mount, root, Path()))
                 continue
-            for directory, dirs, names in os.walk(root):
+            if not prefix.startswith(mount + "/"):
+                continue
+            relative = Path(*PurePosixPath(prefix[len(mount) + 1:]).parts)
+            if _is_ignored(relative):
+                raise ValueError("路径不在本轮授权资料范围内")
+            target = (root / relative).resolve()
+            if not target.is_relative_to(root):
+                raise ValueError("路径不在本轮授权资料范围内")
+            targets.append((mount, root, relative))
+        if prefix and not targets:
+            raise ValueError("path 不在本轮授权资料范围内")
+        for mount, root, relative_prefix in targets:
+            start = root / relative_prefix
+            if start.is_file():
+                if self._is_source_file(start):
+                    yield start, f"{mount}/{start.relative_to(root).as_posix()}"
+                continue
+            if not start.is_dir():
+                continue
+            for directory, dirs, names in os.walk(start):
                 dirs[:] = sorted(
                     name for name in dirs
                     if name not in CORE_IGNORED_DIRS and not name.startswith(".")
@@ -109,12 +137,13 @@ class CoreFiles:
                         continue
                     if not file.is_file() or not file.resolve().is_relative_to(root):
                         continue
-                    if file.suffix.lower() not in CORE_SOURCE_SUFFIXES and name not in CORE_FILE_NAMES:
+                    if not self._is_source_file(file):
                         continue
-                    display = f"{mount}/{relative.as_posix()}"
-                    if prefix and display != prefix and not display.startswith(prefix + "/"):
-                        continue
-                    yield file, display
+                    yield file, f"{mount}/{relative.as_posix()}"
+
+    @staticmethod
+    def _is_source_file(file: Path) -> bool:
+        return file.suffix.lower() in CORE_SOURCE_SUFFIXES or file.name in CORE_FILE_NAMES
 
     def read(self, path, offset=1, limit=160):
         file, display = self.locate(path)
@@ -171,19 +200,12 @@ class CoreFiles:
             "nextOffset": offset + len(page) if truncated else None,
         }
 
-    def grep(self, pattern, path="", glob="", literal=False, limit=60,
-             case_sensitive=True, whole_word=False, offset=0):
-        prefix = str(path or "").strip().strip("/")
-        if prefix and not any(prefix == mount or prefix.startswith(mount + "/") for mount, _ in self.roots):
-            raise ValueError("path 不在本轮授权资料范围内")
+    def _search_files(self, pattern, path, glob, literal, case_sensitive, whole_word):
         expression = re.escape(pattern) if literal else pattern
         if whole_word:
             expression = r"(?<!\w)(?:" + expression + r")(?!\w)"
         compiled = re.compile(expression, 0 if case_sensitive else re.I)
-        cap = max(1, min(int(limit or 60), 120))
-        skip = max(0, int(offset or 0))
-        found = []
-        for file, display in self._walk_files(prefix):
+        for file, display in self._walk_files(path):
             if glob and not matches(display, glob):
                 continue
             if file.stat().st_size > 2_000_000:
@@ -192,13 +214,54 @@ class CoreFiles:
                 lines = file.read_text(encoding="utf-8-sig").splitlines()
             except (UnicodeError, OSError):
                 continue
+            yield display, lines, compiled
+
+    def grep(self, pattern, path="", glob="", literal=False, limit=60,
+             case_sensitive=True, whole_word=False, offset=0,
+             output_mode="matches", context=0):
+        if output_mode not in {"matches", "files"}:
+            raise ValueError("output_mode 仅支持 matches 或 files")
+        skip = max(0, int(offset or 0))
+        cap = max(1, min(int(limit or 60), 120))
+        if output_mode == "files":
+            found = {}
+            for display, lines, compiled in self._search_files(
+                    pattern, path, glob, literal, case_sensitive, whole_word):
+                hits = [number for number, line in enumerate(lines, 1)
+                        if compiled.search(line)]
+                if hits:
+                    found[display] = {"path": display, "matches": len(hits),
+                                      "sampleLines": hits[:5]}
+            ordered = [found[path] for path in sorted(found)]
+            page = ordered[skip:skip + cap]
+            truncated = skip + len(page) < len(ordered)
+            return {
+                "files": page,
+                "truncated": truncated,
+                "nextOffset": skip + len(page) if truncated else None,
+            }
+        context = max(0, min(int(context or 0), 5))
+        found = []
+        for display, lines, compiled in self._search_files(
+                pattern, path, glob, literal, case_sensitive, whole_word):
             for number, line in enumerate(lines, 1):
                 if not compiled.search(line):
                     continue
                 if skip:
                     skip -= 1
                     continue
-                found.append({"path": display, "line": number, "text": line[:600]})
+                item = {"path": display, "line": number, "text": line[:600]}
+                if context:
+                    item["before"] = [
+                        {"line": row, "text": lines[row - 1][:600]}
+                        for row in range(max(1, number - context), number)
+                    ]
+                    item["after"] = [
+                        {"line": row, "text": lines[row - 1][:600]}
+                        for row in range(number + 1,
+                                         min(len(lines), number + context) + 1)
+                    ]
+                found.append(item)
                 if len(found) >= cap:
                     return {"matches": found, "truncated": True,
                             "nextOffset": int(offset or 0) + len(found)}
@@ -226,9 +289,9 @@ class CoreFiles:
         @tool
         def Grep(pattern: str, path: str = "", glob: str = "", literal: bool = False,
                  limit: int = 60, case_sensitive: bool = True, whole_word: bool = False,
-                 offset: int = 0) -> str:
-            """按原文行检索本轮授权资料，默认区分大小写；命中只是线索，结论须 Read。"""
+                 offset: int = 0, output_mode: str = "matches", context: int = 0) -> str:
+            """按原文检索本轮授权资料，默认区分大小写。宽范围先用 output_mode='files' 看候选文件与命中行数；确认文件后用 output_mode='matches'，context=2 可带命中行前后两行。命中只是线索，结论须 Read。"""
             return result(self.grep, pattern, path, glob, literal, limit,
-                          case_sensitive, whole_word, offset)
+                          case_sensitive, whole_word, offset, output_mode, context)
 
         return [Read, Glob, Grep]

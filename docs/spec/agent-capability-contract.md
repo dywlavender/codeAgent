@@ -333,11 +333,11 @@ Evidence 的封装前/后共用同一类型：提供者必须显式令 `id=None,
 | --- | --- | --- |
 | Read | `path: str, offset: int=1, limit: int=160` | 真实 lineStart/lineEnd/totalLines、原文证据；截断后 `continuation={path, offset}` |
 | Glob | `pattern: str, limit: int=100, kind: files或directories=files, offset: int=0` | 按虚拟路径排序的 paths；`**` 跨零层/多层；分页 offset 与截断标记 |
-| Grep | `pattern: str, path: str="", glob: str="", literal: bool=False, limit: int=60, case_sensitive: bool=True, whole_word: bool=False, offset: int=0` | 匹配 path/line/text、跳过原因、分页位置；关键结论再 Read |
+| Grep | `pattern: str, path: str="", glob: str="", literal: bool=False, limit: int=60, case_sensitive: bool=True, whole_word: bool=False, offset: int=0, output_mode: matches或files=matches, context: int=0` | matches：path/line/text，`context` 最多 5 行前后文；files：按文件聚合 path/matches/sampleLines（最多 5 个行号），按虚拟路径排序并分页；关键结论再 Read |
 
-Read 行号从 1 开始，每次最多 240 行，文件超过 2,000,000 字节返回明确限制，不悄悄读取整份文件。Glob 每页最多 200 项，Grep 每页最多 120 项/每行展示最多 600 字符；分页 offset 是稳定排序结果的零基偏移，资料变更后必须重新定位。单次结果另受字符上限约束并记录实际限制，不能静默丢弃正文。非法正则/越界参数返回 invalid_input，无效路径返回 denied 或 unavailable，不用 shell 拼接命令。
+Read 行号从 1 开始，每次最多 240 行，文件超过 2,000,000 字节返回明确限制，不悄悄读取整份文件。Glob 每页最多 200 项；Grep 的 matches 每页最多 120 条命中，files 每页最多 120 个文件，每行文本最多 600 字符；`context` 和 `sampleLines` 均最多 5。分页 offset 是稳定排序结果的零基偏移：matches 模式按命中项计数，files 模式按文件计数，资料变更后必须重新定位。单次结果另受字符上限约束并记录实际限制，不能静默丢弃正文。非法正则、未知 `output_mode`、越界参数返回 invalid_input，无效路径返回 denied 或 unavailable，不用 shell 拼接命令。
 
-Grep 默认 `path=""` 仅搜索所有授权根，而不是宿主磁盘或整个 workspace。Glob 的目录结果同样不能暴露未授权根。Glob/Grep 输出只作为定位线索，首批 core 通过 Read 产生可核对的原文证据。
+Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录或文件时直接从该授权位置开始遍历，不再扫描整个仓库后过滤。`path=""` 仅搜索所有授权根，而不是宿主磁盘或整个 workspace。绝对路径、`..` 逃逸、未授权根和忽略目录继续拒绝，多仓库授权规则不变。Glob 的目录结果同样不能暴露未授权根。Glob/Grep 输出只作为定位线索，首批 core 通过 Read 产生可核对的原文证据。
 
 ### 7.3 后续能力的最小对接面
 
