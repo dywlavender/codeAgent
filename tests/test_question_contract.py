@@ -22,10 +22,12 @@ from business_code_agent.query.agent.question_contract import (
 QUESTION = "订单取消后库存如何回补，由哪个服务处理，失败时怎么重试？"
 FULL_EXTRACTION = [
     {"requirement": "订单取消后库存如何回补",
-     "quote": "订单取消后库存如何回补", "kind": "process"},
+     "quote": "订单取消后库存如何回补", "kind": "process",
+     "segmentIds": ["S1"]},
     {"requirement": "由哪个服务处理", "quote": "由哪个服务处理",
-     "kind": "relationship"},
-    {"requirement": "失败时怎么重试", "quote": "失败时怎么重试", "kind": "behavior"},
+     "kind": "relationship", "segmentIds": ["S2"]},
+    {"requirement": "失败时怎么重试", "quote": "失败时怎么重试",
+     "kind": "behavior", "segmentIds": ["S3"]},
 ]
 
 
@@ -422,7 +424,7 @@ class QuestionContractSnapshotTests(unittest.TestCase):
         contract.add_discovered("取消消息由订单服务发出", source="order/CancelService.java:42",
                                 source_kind="source_code")
 
-        self.assertEqual(snapshot["version"], 2)
+        self.assertEqual(snapshot["version"], 3)
         self.assertEqual(snapshot["originalQuestion"], QUESTION)
         self.assertEqual(snapshot["revision"], 1)
         self.assertEqual(snapshot["extractionStatus"], "ok")
@@ -461,6 +463,20 @@ class QuestionContractSnapshotTests(unittest.TestCase):
         self.assertEqual(contract.prompt_view(),
                          "调查契约（用户明确要求的目标不可删除）：\n"
                          f"- Q0 [other] {QUESTION}")
+
+    def test_snapshot_exposes_segment_mapping(self):
+        contract = QuestionContract.create("渠道调用中台吗，中台调用渠道吗？", [
+            {"requirement": "渠道调用中台吗", "segmentIds": ["S1"]},
+        ])
+        snapshot = contract.to_dict()
+
+        self.assertEqual(snapshot["segments"], [
+            {"id": "S1", "text": "渠道调用中台吗"},
+            {"id": "S2", "text": "中台调用渠道吗"},
+        ])
+        self.assertEqual(snapshot["missingSegmentIds"], ["S2"])
+        self.assertEqual(snapshot["missingQuestionSegments"], ["中台调用渠道吗"])
+        self.assertEqual(snapshot["objectives"][1]["segmentIds"], ["S1"])
 
 
 class QuestionSegmentationTests(unittest.TestCase):
@@ -508,9 +524,11 @@ class QuestionCoverageTests(unittest.TestCase):
         question = "状态定义和流转校验分别在代码哪里实现？"
         contract = QuestionContract.create(question, [
             {"requirement": "状态定义在代码哪里实现",
-             "quote": "状态定义和流转校验分别在代码哪里实现"},
+             "quote": "状态定义和流转校验分别在代码哪里实现",
+             "segmentIds": ["S1"]},
             {"requirement": "流转校验在代码哪里实现",
-             "quote": "状态定义和流转校验分别在代码哪里实现"},
+             "quote": "状态定义和流转校验分别在代码哪里实现",
+             "segmentIds": ["S1"]},
         ])
         self.assertEqual(contract.coverage_status, "verified")
 
@@ -518,9 +536,11 @@ class QuestionCoverageTests(unittest.TestCase):
         question = "状态定义和流转校验分别在代码哪里实现？"
         contract = QuestionContract.create(question, [
             {"requirement": "指出账户状态定义在代码中的实现位置",
-             "quote": "状态定义和流转校验分别在代码哪里实现"},
+             "quote": "状态定义和流转校验分别在代码哪里实现",
+             "segmentIds": ["S1"]},
             {"requirement": "指出状态流转校验在代码中的实现位置",
-             "quote": "状态定义和流转校验分别在代码哪里实现"},
+             "quote": "状态定义和流转校验分别在代码哪里实现",
+             "segmentIds": ["S1"]},
         ])
         self.assertEqual(contract.coverage_status, "verified")
 
@@ -528,7 +548,8 @@ class QuestionCoverageTests(unittest.TestCase):
         question = "状态定义和流转校验分别在代码哪里实现？"
         contract = QuestionContract.create(question, [
             {"requirement": "指出账户状态定义在代码中的实现位置",
-             "quote": "状态定义和流转校验分别在代码哪里实现"},
+             "quote": "状态定义和流转校验分别在代码哪里实现",
+             "segmentIds": ["S1"]},
         ])
         self.assertEqual(contract.coverage_status, "partial")
         self.assertIn("状态定义和流转校验分别在代码哪里实现",
@@ -538,10 +559,11 @@ class QuestionCoverageTests(unittest.TestCase):
         question = "贷款产品如何定义利率、期限与还款安排？"
         full = QuestionContract.create(question, [
             {"requirement": "贷款产品如何定义利率、期限与还款安排",
-             "quote": question},
+             "quote": question, "segmentIds": ["S1"]},
         ])
         partial = QuestionContract.create(question, [
-            {"requirement": "贷款产品如何定义利率", "quote": question},
+            {"requirement": "贷款产品如何定义利率", "quote": question,
+             "segmentIds": ["S1"]},
         ])
         self.assertEqual(full.coverage_status, "verified")
         self.assertEqual(partial.coverage_status, "partial")
@@ -569,21 +591,31 @@ class QuestionCoverageTests(unittest.TestCase):
     def test_similar_asks_verify_only_when_both_are_extracted(self):
         question = "贷款利率如何设置，贷款期限如何设置？"
         contract = QuestionContract.create(question, [
-            {"requirement": "贷款利率如何设置"},
-            {"requirement": "贷款期限如何设置"},
+            {"requirement": "贷款利率如何设置", "segmentIds": ["S1"]},
+            {"requirement": "贷款期限如何设置", "segmentIds": ["S2"]},
         ])
 
         self.assertEqual(contract.coverage_status, "verified")
         self.assertTrue(contract.structural_coverage_verified)
 
+    def test_unmapped_extra_goal_prevents_ok_status(self):
+        contract = QuestionContract.create(QUESTION, [
+            *FULL_EXTRACTION,
+            {"requirement": "库存如何回补", "quote": "订单取消后库存如何回补"},
+        ])
+
+        self.assertEqual(contract.coverage_status, "verified")
+        self.assertEqual(contract.extraction_status, "partial")
+        self.assertFalse(contract.structural_coverage_verified)
+
     def test_distributive_ask_needs_each_parallel_object(self):
         question = "两次投递各自走到哪一步？"
         one = QuestionContract.create(question, [
-            {"requirement": "第一次投递走到哪一步"},
+            {"requirement": "第一次投递走到哪一步", "segmentIds": ["S1"]},
         ])
         both = QuestionContract.create(question, [
-            {"requirement": "第一次投递走到哪一步"},
-            {"requirement": "第二次投递走到哪一步"},
+            {"requirement": "第一次投递走到哪一步", "segmentIds": ["S1"]},
+            {"requirement": "第二次投递走到哪一步", "segmentIds": ["S1"]},
         ])
 
         self.assertEqual(one.coverage_status, "partial")
@@ -592,7 +624,8 @@ class QuestionCoverageTests(unittest.TestCase):
     def test_conditional_wording_does_not_break_coverage(self):
         question = "如果只能改一处代码，改哪里收益最大？"
         contract = QuestionContract.create(question, [
-            {"requirement": "在只能改一处代码的约束下确定收益最大的改动位置"},
+            {"requirement": "在只能改一处代码的约束下确定收益最大的改动位置",
+             "segmentIds": ["S1"]},
         ])
 
         self.assertEqual(contract.coverage_status, "verified")
@@ -600,10 +633,55 @@ class QuestionCoverageTests(unittest.TestCase):
     def test_temporal_connective_does_not_break_coverage(self):
         question = "企业占用 25 万、预占 3 万，此时申请把总授信降到 28 万整，会置位吗？"
         contract = QuestionContract.create(question, [
-            {"requirement": "企业占用 25 万、预占 3 万时，申请把总授信降到 28 万整，是否会置位"},
+            {"requirement": "企业占用 25 万、预占 3 万时，申请把总授信降到 28 万整，是否会置位",
+             "segmentIds": ["S1"]},
         ])
 
         self.assertEqual(contract.coverage_status, "verified")
+
+    def test_reversed_call_direction_is_not_covered_by_the_other_ask(self):
+        question = "渠道调用中台吗，中台调用渠道吗？"
+        forward = QuestionContract.create(question, [
+            {"requirement": "渠道调用中台吗", "segmentIds": ["S1"]}])
+        backward = QuestionContract.create(question, [
+            {"requirement": "中台调用渠道吗", "segmentIds": ["S2"]}])
+        both = QuestionContract.create(question, [
+            {"requirement": "渠道调用中台吗", "segmentIds": ["S1"]},
+            {"requirement": "中台调用渠道吗", "segmentIds": ["S2"]},
+        ])
+
+        self.assertEqual(forward.missing_segment_ids, ("S2",))
+        self.assertEqual(backward.missing_segment_ids, ("S1",))
+        self.assertEqual(both.coverage_status, "verified")
+        self.assertEqual(both.missing_segment_ids, ())
+
+    def test_reversed_sync_direction_is_not_covered(self):
+        question = "中台向渠道同步吗，渠道向中台同步吗？"
+        contract = QuestionContract.create(question, [
+            {"requirement": "中台向渠道同步吗", "segmentIds": ["S1"]}])
+
+        self.assertEqual(contract.missing_segment_ids, ("S2",))
+
+    def test_explicit_mapping_cannot_cover_a_reversed_segment(self):
+        question = "渠道调用中台吗，中台调用渠道吗？"
+        contract = QuestionContract.create(question, [
+            {"requirement": "渠道调用中台吗", "segmentIds": ["S1", "S2"]},
+        ])
+
+        self.assertEqual(contract.missing_segment_ids, ("S2",))
+
+    def test_reversed_direction_inside_a_compound_ask_is_missing(self):
+        question = "渠道调用中台和中台调用渠道吗？"
+        one = QuestionContract.create(question, [
+            {"requirement": "渠道调用中台", "segmentIds": ["S1"]},
+        ])
+        both = QuestionContract.create(question, [
+            {"requirement": "渠道调用中台", "segmentIds": ["S1"]},
+            {"requirement": "中台调用渠道吗", "segmentIds": ["S1"]},
+        ])
+
+        self.assertEqual(one.coverage_status, "partial")
+        self.assertEqual(both.coverage_status, "verified")
 
     def test_hallucinated_objective_is_not_accepted_as_user_goal(self):
         text = json.dumps({"objectives": [
@@ -618,9 +696,10 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(contract.missing_segments,
                          ("订单取消后库存如何回补", "由哪个服务处理", "失败时怎么重试"))
 
-    def test_invalid_model_quote_falls_back_to_derived_grounding(self):
+    def test_invalid_model_quote_falls_back_to_segment_grounding(self):
         text = json.dumps({"objectives": [
-            {"requirement": "库存如何回补", "quote": "原问题中不存在这句话"},
+            {"requirement": "库存如何回补", "quote": "原问题中不存在这句话",
+             "segmentIds": ["S1"]},
         ]})
         contract = parse_contract_response(text, QUESTION)
 
@@ -628,13 +707,23 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(len(contract), 2)
         self.assertTrue(contract.objective("Q1").question_quote_derived)
         self.assertEqual(contract.objective("Q1").question_quote,
-                         "库存如何回补")
+                         "订单取消后库存如何回补")
+
+    def test_unmapped_objective_with_invalid_quote_is_ungrounded(self):
+        text = json.dumps({"objectives": [
+            {"requirement": "库存如何回补", "quote": "原问题中不存在这句话"},
+        ]})
+        contract = parse_contract_response(text, QUESTION)
+
+        self.assertEqual(contract.ungrounded_count, 1)
+        self.assertEqual(len(contract), 1)
+        self.assertEqual(contract.extraction_status, "partial")
 
     def test_model_goals_without_quotes_are_grounded_from_the_question(self):
         text = json.dumps({"objectives": [
-            {"requirement": "订单取消后库存如何回补"},
-            {"requirement": "由哪个服务处理"},
-            {"requirement": "失败时怎么重试"},
+            {"requirement": "订单取消后库存如何回补", "segmentIds": ["S1"]},
+            {"requirement": "由哪个服务处理", "segmentIds": ["S2"]},
+            {"requirement": "失败时怎么重试", "segmentIds": ["S3"]},
         ]})
         contract = parse_contract_response(text, QUESTION)
 
@@ -649,8 +738,8 @@ class QuestionCoverageTests(unittest.TestCase):
     def test_paraphrased_field_goal_derives_quote_from_matching_segment(self):
         question = "当前渠道接口能直接支持吗？依据哪些字段？"
         text = json.dumps({"objectives": [
-            {"requirement": "判断当前渠道接口能否直接支持"},
-            {"requirement": "明确支持该区分所依据的字段"},
+            {"requirement": "判断当前渠道接口能否直接支持", "segmentIds": ["S1"]},
+            {"requirement": "明确支持该区分所依据的字段", "segmentIds": ["S2"]},
         ]})
         contract = parse_contract_response(text, question)
 
@@ -709,7 +798,7 @@ class ContractParseTests(unittest.TestCase):
         text = json.dumps({"objectives": [
             None, 42, {}, {"requirement": "  "},
             {"requirement": "由哪个服务处理", "quote": "由哪个服务处理",
-             "kind": "not-a-kind"},
+             "segmentIds": ["S2"], "kind": "not-a-kind"},
         ]})
         contract = parse_contract_response(text, QUESTION)
 
@@ -738,8 +827,29 @@ class ContractParseTests(unittest.TestCase):
     def test_extraction_prompt_stays_short_and_json_only(self):
         self.assertLess(len(CONTRACT_EXTRACTION_PROMPT), 500)
         self.assertIn("只输出 JSON", CONTRACT_EXTRACTION_PROMPT)
+        self.assertIn("segmentIds", CONTRACT_EXTRACTION_PROMPT)
         for tool_name in ("Read", "Glob", "Grep"):
             self.assertNotIn(tool_name, CONTRACT_EXTRACTION_PROMPT)
+
+    def test_extraction_input_contains_numbered_segments(self):
+        class CapturingModel:
+            def __init__(self):
+                self.messages = None
+
+            def invoke(self, messages):
+                self.messages = messages
+                return AIMessage(content=json.dumps({"objectives": [
+                    {"requirement": "由哪个服务处理", "segmentIds": ["S2"]},
+                ]}))
+
+        model = CapturingModel()
+        contract = extract_question_contract(model, QUESTION)
+
+        content = model.messages[-1].content
+        self.assertIn("S1: 订单取消后库存如何回补", content)
+        self.assertIn("S2: 由哪个服务处理", content)
+        self.assertIn("S3: 失败时怎么重试", content)
+        self.assertEqual(contract.objective("Q1").segment_ids, ("S2",))
 
 
 class ContractExtractionTests(unittest.TestCase):

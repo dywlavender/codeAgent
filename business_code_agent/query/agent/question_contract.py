@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import json
 import re
 from dataclasses import dataclass, replace
@@ -13,13 +12,16 @@ EXTRACTION_STATUSES = ("ok", "partial", "fallback", "error")
 COVERAGE_STATUSES = ("verified", "partial", "unverified")
 MAX_OBJECTIVES = 12
 MAX_EXTRACTED = 6
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
+_BIGRAM_COVERAGE_MIN = 0.6
 
 CONTRACT_EXTRACTION_PROMPT = (
     "你是问题目标提取器。只提取用户原问题中明确要求回答的目标，不要补充文件、类名或实现细节。"
-    "原问题中的每个分句或并列要求分别输出一个目标，不要合并，也不要遗漏。"
+    "输入会给出带编号的分句。每个目标必须返回 segmentIds，列出它覆盖的分句编号；"
+    "一个目标只覆盖一个分句，只有确实同时覆盖多个分句的复合目标才能列出多个编号。"
     "只输出 JSON，不要解释：{\"objectives\":[{\"requirement\":\"目标原文\","
-    "\"kind\":\"process|behavior|relationship|data|constraint|other\"}]}。"
+    "\"kind\":\"process|behavior|relationship|data|constraint|other\","
+    "\"segmentIds\":[\"S1\"]}]}。"
     "目标 1-6 个；每个目标必须是原问题明确要求的对象、行为、关系或约束；不要输出泛化调查步骤。"
 )
 
@@ -51,6 +53,15 @@ _COMPOUND_SPLIT = re.compile(r"[、]|和|与|及|或")
 
 
 @dataclass(frozen=True)
+class QuestionSegment:
+    id: str
+    text: str
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "text": self.text}
+
+
+@dataclass(frozen=True)
 class QuestionObjective:
     id: str
     requirement: str
@@ -62,6 +73,7 @@ class QuestionObjective:
     notes: tuple[str, ...] = ()
     question_quote: str | None = None
     question_quote_derived: bool = False
+    segment_ids: tuple[str, ...] = ()
     parent_id: str | None = None
     blocking: bool = False
     necessity: str | None = None
@@ -78,6 +90,7 @@ class QuestionObjective:
             "notes": list(self.notes),
             "questionQuote": self.question_quote,
             "questionQuoteDerived": self.question_quote_derived,
+            "segmentIds": list(self.segment_ids),
             "parentObjectiveId": self.parent_id,
             "blocking": self.blocking,
             "necessity": self.necessity,
@@ -89,8 +102,8 @@ class QuestionContract:
 
     def __init__(self, original_question, objectives, *, revision=1,
                  extraction_status="partial", coverage_status="unverified",
-                 missing_segments=(), truncated=False, truncated_count=0,
-                 ungrounded_count=0):
+                 segments=None, missing_segment_ids=(), truncated=False,
+                 truncated_count=0, ungrounded_count=0):
         self.original_question = _question_text(original_question)
         if not self.original_question:
             raise ValueError("原始问题不能为空")
@@ -104,8 +117,10 @@ class QuestionContract:
             raise ValueError("问题契约版本必须为正整数")
         self._extraction_status = extraction_status
         self._coverage_status = coverage_status
-        self._missing_segments = tuple(
-            text for value in missing_segments if (text := _text(value)))
+        self._segments = (tuple(segments) if segments is not None
+                          else question_segment_entries(self.original_question))
+        self._missing_segment_ids = tuple(
+            value for value in missing_segment_ids if _text(value))
         self._truncated = bool(truncated)
         self._truncated_count = int(truncated_count)
         self._ungrounded_count = int(ungrounded_count)
@@ -119,6 +134,7 @@ class QuestionContract:
         question = _question_text(original_question)
         if not question:
             raise ValueError("原始问题不能为空")
+        segments = question_segment_entries(question)
         items = list(extracted)
         objectives = [QuestionObjective(
             id="Q0", requirement=question, origin="user", required=True, kind="other",
@@ -127,25 +143,29 @@ class QuestionContract:
         truncated_count = 0
         ungrounded_count = 0
         for item in items:
-            requirement, kind, quote = _extracted_item(item)
+            requirement, kind, quote, raw_segment_ids = _extracted_item(item)
             if not requirement:
                 continue
             attempted += 1
             if any(_normalize(requirement) == _normalize(obj.requirement)
                    for obj in objectives):
                 continue
+            segment_ids = _normalize_segment_ids(raw_segment_ids, segments)
+            if raw_segment_ids and not segment_ids:
+                ungrounded_count += 1
+                continue
             quote_was_provided = quote is not None
             derived = False
             if quote_was_provided:
                 quote = _valid_quote(quote, question)
                 if quote is None or not _quote_supports_requirement(requirement, quote):
-                    quote = _locate_quote(requirement, question)
+                    quote = _segment_quote(segment_ids, segments)
                     derived = quote is not None
                 if quote is None:
                     ungrounded_count += 1
                     continue
             else:
-                quote = _locate_quote(requirement, question)
+                quote = _segment_quote(segment_ids, segments)
                 derived = quote is not None
                 if quote is None and require_quotes:
                     ungrounded_count += 1
@@ -156,32 +176,37 @@ class QuestionContract:
             objectives.append(QuestionObjective(
                 id=f"Q{len(objectives)}", requirement=requirement, origin="user",
                 required=True, kind=kind, question_quote=quote,
-                question_quote_derived=derived))
+                question_quote_derived=derived, segment_ids=segment_ids))
         extracted_objectives = [obj for obj in objectives if obj.id != "Q0"]
-        coverage_status, missing_segments = assess_question_coverage(
+        coverage_status, missing_segment_ids = assess_question_coverage(
             question, extracted_objectives)
         truncated = truncated_count > 0
         if truncated:
             coverage_status = "partial"
         if any(obj.question_quote is None for obj in extracted_objectives):
-            coverage_status = "unverified" if not missing_segments else "partial"
+            coverage_status = ("unverified" if not missing_segment_ids
+                               else "partial")
+        all_mapped = all(
+            obj.segment_ids for obj in extracted_objectives
+            if obj.source_kind != "user_followup")
         if not extracted_objectives:
             status = "partial" if attempted and ungrounded_count else "fallback"
         else:
             status = ("ok" if coverage_status == "verified" and not truncated
-                      and not ungrounded_count else "partial")
+                      and not ungrounded_count and all_mapped else "partial")
         return cls(
             question, objectives, revision=revision, extraction_status=status,
-            coverage_status=coverage_status, missing_segments=missing_segments,
-            truncated=truncated, truncated_count=truncated_count,
-            ungrounded_count=ungrounded_count)
+            coverage_status=coverage_status, segments=segments,
+            missing_segment_ids=missing_segment_ids, truncated=truncated,
+            truncated_count=truncated_count, ungrounded_count=ungrounded_count)
 
     @classmethod
     def fallback(cls, original_question, reason="empty"):
         question = _question_text(original_question)
         if not question:
             raise ValueError("原始问题不能为空")
-        segments = question_segments(question)
+        segments = question_segment_entries(question)
+        missing_segment_ids = tuple(segment.id for segment in segments)
         return cls(
             question,
             [QuestionObjective(id="Q0", requirement=question, origin="user",
@@ -189,7 +214,7 @@ class QuestionContract:
                                notes=(f"目标提取回退：{reason}",))],
             extraction_status="error" if reason == "error" else "fallback",
             coverage_status="partial" if segments else "unverified",
-            missing_segments=segments,
+            segments=segments, missing_segment_ids=missing_segment_ids,
         )
 
     @property
@@ -205,8 +230,18 @@ class QuestionContract:
         return self._coverage_status
 
     @property
+    def segments(self):
+        return self._segments
+
+    @property
+    def missing_segment_ids(self):
+        return self._missing_segment_ids
+
+    @property
     def missing_segments(self):
-        return self._missing_segments
+        by_id = {segment.id: segment.text for segment in self._segments}
+        return tuple(by_id[segment_id] for segment_id in self._missing_segment_ids
+                     if segment_id in by_id)
 
     @property
     def truncated(self):
@@ -324,6 +359,23 @@ class QuestionContract:
             raise ValueError("问题契约至少需要一个目标")
         if len(self._objectives) > MAX_OBJECTIVES:
             raise ValueError("调查目标数量超过上限")
+        segment_ids = set()
+        for segment in self._segments:
+            if (not isinstance(segment, QuestionSegment) or not segment.id
+                    or not _text(segment.text)):
+                raise ValueError("问题分句必须包含编号和内容")
+            if segment.id in segment_ids:
+                raise ValueError("问题分句编号必须唯一")
+            segment_ids.add(segment.id)
+        missing_ids = set()
+        for segment_id in self._missing_segment_ids:
+            if segment_id not in segment_ids:
+                raise ValueError("缺失分句编号不存在")
+            if segment_id in missing_ids:
+                raise ValueError("缺失分句编号重复")
+            missing_ids.add(segment_id)
+        if self._coverage_status == "verified" and missing_ids:
+            raise ValueError("覆盖状态为 verified 时不能存在缺失分句")
         ids = set()
         normalized = set()
         by_id = {}
@@ -338,6 +390,10 @@ class QuestionContract:
                 raise ValueError("目标缺少内容或来源")
             if obj.kind not in OBJECTIVE_KINDS:
                 raise ValueError(f"未知的目标类型：{obj.kind}")
+            if len(set(obj.segment_ids)) != len(obj.segment_ids):
+                raise ValueError("目标分句编号重复")
+            if any(segment_id not in segment_ids for segment_id in obj.segment_ids):
+                raise ValueError("目标引用了不存在的问题分句")
             if obj.origin == "user" and not obj.required:
                 raise ValueError("用户原始目标必须为必答")
             if obj.origin == "discovered":
@@ -345,6 +401,8 @@ class QuestionContract:
                     raise ValueError("派生目标缺少有效依据")
                 if obj.required:
                     raise ValueError("派生目标不能成为用户必答目标")
+                if obj.segment_ids:
+                    raise ValueError("派生目标不能映射原问题分句")
             if obj.origin == "user" and obj.blocking:
                 raise ValueError("用户目标不能标记为派生阻断关系")
             if obj.blocking and (not obj.parent_id or not obj.necessity):
@@ -363,6 +421,8 @@ class QuestionContract:
             raise ValueError("问题契约缺少不可删除的原始问题目标")
         if root.requirement != self.original_question:
             raise ValueError("原始问题目标不得被修改")
+        if root.segment_ids:
+            raise ValueError("原始问题目标不能映射单个分句")
         for obj in self._objectives:
             if obj.blocking and obj.parent_id not in by_id:
                 raise ValueError("阻断性目标的父目标不存在")
@@ -386,6 +446,10 @@ class QuestionContract:
                    and obj.source_kind != "user_followup"
                    for obj in self._objectives):
                 raise ValueError("提取状态为 ok 时用户目标必须带有原问题依据")
+            if any(obj.origin == "user" and obj.id != "Q0"
+                   and obj.source_kind != "user_followup" and not obj.segment_ids
+                   for obj in self._objectives):
+                raise ValueError("提取状态为 ok 时用户目标必须映射原问题分句")
 
     def prompt_view(self):
         lines = ["调查契约（用户明确要求的目标不可删除）："]
@@ -413,7 +477,9 @@ class QuestionContract:
             "revision": self._revision,
             "extractionStatus": self._extraction_status,
             "coverageStatus": self._coverage_status,
-            "missingQuestionSegments": list(self._missing_segments),
+            "segments": [segment.to_dict() for segment in self._segments],
+            "missingSegmentIds": list(self._missing_segment_ids),
+            "missingQuestionSegments": list(self.missing_segments),
             "truncated": self._truncated,
             "truncatedCount": self._truncated_count,
             "ungroundedCount": self._ungrounded_count,
@@ -445,13 +511,17 @@ def question_segments(question):
     return tuple(segments)
 
 
+def question_segment_entries(question):
+    return tuple(QuestionSegment(id=f"S{index}", text=text)
+                 for index, text in enumerate(question_segments(question), 1))
+
+
 def assess_question_coverage(question, objectives):
-    segments = question_segments(question)
+    segments = question_segment_entries(question)
     if not segments:
         return "unverified", ()
-    requirements = [obj.requirement for obj in objectives]
-    missing = tuple(segment for segment in segments
-                    if not _segment_covered(segment, requirements))
+    missing = tuple(segment.id for segment in segments
+                    if not _segment_covered(segment, objectives))
     if missing:
         return "partial", missing
     return "verified", ()
@@ -465,16 +535,20 @@ def _has_requirement_cue(text):
     return any(stripped.startswith(cue) for cue in _IMPERATIVE_CUES)
 
 
-def _segment_covered(segment, requirements):
-    text = _segment_coverage_text(segment)
+def _segment_covered(segment, objectives):
+    mapped = [obj.requirement for obj in objectives
+              if segment.id in obj.segment_ids]
+    if not mapped:
+        return False
+    text = _segment_coverage_text(segment.text)
     parts = _coverage_parts(text)
-    if _parts_covered(parts, requirements):
+    if _parts_covered(parts, mapped):
         return True
     count = _distributive_count(text)
     if count > 1:
         stripped = _strip_distributive(text)
         stripped_parts = _coverage_parts(stripped)
-        coverers = [requirement for requirement in requirements
+        coverers = [requirement for requirement in mapped
                     if _parts_covered(stripped_parts, [requirement])]
         if len(coverers) >= count:
             return True
@@ -489,14 +563,32 @@ def _parts_covered(parts, requirements):
 
 def _part_covered(candidate, requirement):
     target = _distinctive(candidate)
-    return bool(target) and target <= _distinctive(requirement)
+    if not target or not target <= _distinctive(requirement):
+        return False
+    target_bigrams = _distinctive_bigrams(candidate)
+    if not target_bigrams:
+        return True
+    requirement_bigrams = _distinctive_bigrams(requirement)
+    return (len(target_bigrams & requirement_bigrams) / len(target_bigrams)
+            >= _BIGRAM_COVERAGE_MIN)
 
 
-def _distinctive(text):
+def _normalized_content(text):
     value = _content(text)
     for cue in _CONDITIONAL_CUES:
         value = value.replace(cue, "")
-    return {char for char in value if char not in _NON_CONTENT_CHARS}
+    return "".join(char for char in value if char not in _NON_CONTENT_CHARS)
+
+
+def _distinctive(text):
+    return set(_normalized_content(text))
+
+
+def _distinctive_bigrams(text):
+    value = _normalized_content(text)
+    if len(value) <= 1:
+        return {value} if value else set()
+    return {value[index:index + 2] for index in range(len(value) - 1)}
 
 
 def _segment_coverage_text(segment):
@@ -505,6 +597,26 @@ def _segment_coverage_text(segment):
     kept = [clause for clause in clauses if not _SCENE_CONTEXT.match(clause)]
     text = "，".join(kept) if kept else str(segment or "")
     return _LEADING_LATIN.sub("", text).strip()
+
+
+def _normalize_segment_ids(values, segments):
+    valid = {segment.id for segment in segments}
+    normalized = []
+    for value in values:
+        text = _text(value).upper()
+        candidate = f"S{text}" if text.isdigit() else text
+        if candidate in valid and candidate not in normalized:
+            normalized.append(candidate)
+    return tuple(normalized)
+
+
+def _segment_quote(segment_ids, segments):
+    by_id = {segment.id: segment for segment in segments}
+    for segment_id in segment_ids:
+        segment = by_id.get(segment_id)
+        if segment is not None:
+            return segment.text
+    return None
 
 
 def _distributive_count(text):
@@ -551,36 +663,6 @@ def _valid_quote(quote, question):
     return quote
 
 
-def _locate_quote(requirement, question):
-    partial = None
-    for segment in question_segments(question):
-        text = _segment_coverage_text(segment)
-        if len(_content(text)) < 4:
-            continue
-        if _part_covered(text, requirement):
-            return text
-        if partial is None and any(_part_covered(part, requirement)
-                                   for part in _coverage_parts(text)):
-            partial = text
-    if partial is not None:
-        return partial
-    return _contiguous_quote(requirement, question)
-
-
-def _contiguous_quote(requirement, question):
-    required_text = _content(requirement)
-    question_text = _content(question)
-    if len(required_text) < 4 or len(question_text) < 4:
-        return None
-    block = difflib.SequenceMatcher(
-        None, required_text, question_text, autojunk=False).find_longest_match(
-            0, len(required_text), 0, len(question_text))
-    minimum = max(4, int(len(required_text) * 0.15))
-    if block.size < minimum:
-        return None
-    return question_text[block.b:block.b + block.size]
-
-
 def _quote_supports_requirement(requirement, quote):
     requirement_text = _content(requirement)
     if not requirement_text:
@@ -598,13 +680,29 @@ def _quote_supports_requirement(requirement, quote):
 
 def _extracted_item(item):
     if isinstance(item, str):
-        return _text(item), "other", None
+        return _text(item), "other", None, ()
     if not isinstance(item, dict):
-        return "", "other", None
+        return "", "other", None, ()
     requirement = _text(item.get("requirement"))
     kind = str(item.get("kind") or "other").strip().lower()
     quote = _text(item.get("quote")) or None
-    return requirement, kind if kind in OBJECTIVE_KINDS else "other", quote
+    raw_segment_ids = item.get("segmentIds")
+    if raw_segment_ids is None:
+        raw_segment_ids = item.get("segment_ids")
+    if raw_segment_ids is None:
+        raw_segment_ids = item.get("segments")
+    if isinstance(raw_segment_ids, (str, int)):
+        raw_segment_ids = [raw_segment_ids]
+    if not isinstance(raw_segment_ids, (list, tuple, set)):
+        raw_segment_ids = ()
+    return (requirement, kind if kind in OBJECTIVE_KINDS else "other", quote,
+            tuple(raw_segment_ids))
+
+
+def _segment_context(question):
+    segments = question_segment_entries(question)
+    lines = [f"{segment.id}: {segment.text}" for segment in segments]
+    return (f"原问题：{question}\n\n带编号分句：\n" + "\n".join(lines))
 
 
 def _json_object(text):
@@ -634,8 +732,9 @@ def extract_question_contract(model, original_question):
     from langchain_core.messages import HumanMessage, SystemMessage
 
     try:
-        response = model.invoke([SystemMessage(CONTRACT_EXTRACTION_PROMPT),
-                                 HumanMessage(original_question)])
+        response = model.invoke([
+            SystemMessage(CONTRACT_EXTRACTION_PROMPT),
+            HumanMessage(_segment_context(original_question))])
     except Exception:
         return QuestionContract.fallback(original_question, "error")
     return parse_contract_response(str(getattr(response, "text", "") or ""),
@@ -646,8 +745,9 @@ async def aextract_question_contract(model, original_question):
     from langchain_core.messages import HumanMessage, SystemMessage
 
     try:
-        response = await model.ainvoke([SystemMessage(CONTRACT_EXTRACTION_PROMPT),
-                                        HumanMessage(original_question)])
+        response = await model.ainvoke([
+            SystemMessage(CONTRACT_EXTRACTION_PROMPT),
+            HumanMessage(_segment_context(original_question))])
     except Exception:
         return QuestionContract.fallback(original_question, "error")
     return parse_contract_response(str(getattr(response, "text", "") or ""),
