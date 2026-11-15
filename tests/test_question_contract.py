@@ -66,7 +66,7 @@ class QuestionContractCreateTests(unittest.TestCase):
         self.assertEqual(contract.extraction_status, "ok")
         self.assertEqual(contract.coverage_status, "verified")
         self.assertEqual(contract.missing_segments, ())
-        self.assertTrue(contract.targets_verified)
+        self.assertTrue(contract.structural_coverage_verified)
 
     def test_long_original_question_is_preserved(self):
         question = "订单" * 400
@@ -121,7 +121,7 @@ class QuestionContractCreateTests(unittest.TestCase):
         self.assertEqual(contract.truncated_count, 2)
         self.assertEqual(contract.extraction_status, "partial")
         self.assertNotEqual(contract.coverage_status, "verified")
-        self.assertFalse(contract.targets_verified)
+        self.assertFalse(contract.structural_coverage_verified)
 
     def test_empty_question_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -137,7 +137,7 @@ class QuestionContractCreateTests(unittest.TestCase):
         self.assertIn("目标提取回退：parse", contract.objective("Q0").notes)
         self.assertEqual(contract.coverage_status, "partial")
         self.assertEqual(len(contract.missing_segments), 3)
-        self.assertFalse(contract.targets_verified)
+        self.assertFalse(contract.structural_coverage_verified)
         self.assertEqual(QuestionContract.fallback(QUESTION, "error").extraction_status,
                          "error")
 
@@ -502,7 +502,7 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(contract.coverage_status, "partial")
         self.assertEqual(contract.missing_segments,
                          ("由哪个服务处理", "失败时怎么重试"))
-        self.assertFalse(contract.targets_verified)
+        self.assertFalse(contract.structural_coverage_verified)
 
     def test_compound_ask_can_be_covered_by_two_objectives(self):
         question = "状态定义和流转校验分别在代码哪里实现？"
@@ -546,6 +546,65 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(full.coverage_status, "verified")
         self.assertEqual(partial.coverage_status, "partial")
 
+    def test_similar_but_different_asks_need_separate_objectives(self):
+        cases = (
+            ("贷款利率如何设置，贷款期限如何设置？",
+             "贷款利率如何设置", "贷款期限如何设置"),
+            ("渠道系统如何处理，中台系统如何处理？",
+             "渠道系统如何处理", "中台系统如何处理"),
+            ("是否会重复扣款，是否会重复放款？",
+             "是否会重复扣款", "是否会重复放款"),
+            ("贷款审批失败如何回滚，贷款审批成功如何回滚？",
+             "贷款审批失败如何回滚", "贷款审批成功如何回滚"),
+        )
+        for question, extracted, missing_segment in cases:
+            with self.subTest(question=question):
+                contract = QuestionContract.create(
+                    question, [{"requirement": extracted}])
+
+                self.assertEqual(contract.coverage_status, "partial")
+                self.assertIn(missing_segment, contract.missing_segments)
+                self.assertFalse(contract.structural_coverage_verified)
+
+    def test_similar_asks_verify_only_when_both_are_extracted(self):
+        question = "贷款利率如何设置，贷款期限如何设置？"
+        contract = QuestionContract.create(question, [
+            {"requirement": "贷款利率如何设置"},
+            {"requirement": "贷款期限如何设置"},
+        ])
+
+        self.assertEqual(contract.coverage_status, "verified")
+        self.assertTrue(contract.structural_coverage_verified)
+
+    def test_distributive_ask_needs_each_parallel_object(self):
+        question = "两次投递各自走到哪一步？"
+        one = QuestionContract.create(question, [
+            {"requirement": "第一次投递走到哪一步"},
+        ])
+        both = QuestionContract.create(question, [
+            {"requirement": "第一次投递走到哪一步"},
+            {"requirement": "第二次投递走到哪一步"},
+        ])
+
+        self.assertEqual(one.coverage_status, "partial")
+        self.assertEqual(both.coverage_status, "verified")
+
+    def test_conditional_wording_does_not_break_coverage(self):
+        question = "如果只能改一处代码，改哪里收益最大？"
+        contract = QuestionContract.create(question, [
+            {"requirement": "在只能改一处代码的约束下确定收益最大的改动位置"},
+        ])
+
+        self.assertEqual(contract.coverage_status, "verified")
+
+    def test_temporal_connective_does_not_break_coverage(self):
+        question = "企业占用 25 万、预占 3 万，此时申请把总授信降到 28 万整，会置位吗？"
+        contract = QuestionContract.create(question, [
+            {"requirement": "企业占用 25 万、预占 3 万时，申请把总授信降到 28 万整，是否会置位"},
+        ])
+
+        self.assertEqual(contract.coverage_status, "verified")
+
     def test_hallucinated_objective_is_not_accepted_as_user_goal(self):
         text = json.dumps({"objectives": [
             {"requirement": "必须检查数据库连接池",
@@ -569,7 +628,7 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(len(contract), 2)
         self.assertTrue(contract.objective("Q1").question_quote_derived)
         self.assertEqual(contract.objective("Q1").question_quote,
-                         "订单取消后库存如何回补")
+                         "库存如何回补")
 
     def test_model_goals_without_quotes_are_grounded_from_the_question(self):
         text = json.dumps({"objectives": [
@@ -582,7 +641,7 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(contract.extraction_status, "ok")
         self.assertEqual(contract.coverage_status, "verified")
         self.assertEqual(contract.ungrounded_count, 0)
-        self.assertTrue(contract.targets_verified)
+        self.assertTrue(contract.structural_coverage_verified)
         self.assertTrue(all(obj.question_quote_derived
                             for obj in contract.objectives[1:]))
         self.assertEqual(contract.objective("Q2").question_quote, "由哪个服务处理")
@@ -609,7 +668,7 @@ class QuestionCoverageTests(unittest.TestCase):
         self.assertEqual(len(contract), 1)
         self.assertEqual(contract.ungrounded_count, 1)
         self.assertEqual(contract.extraction_status, "partial")
-        self.assertFalse(contract.targets_verified)
+        self.assertFalse(contract.structural_coverage_verified)
 
 
 class ContractParseTests(unittest.TestCase):
@@ -638,7 +697,7 @@ class ContractParseTests(unittest.TestCase):
             self.assertEqual(contract.extraction_status, "fallback")
             self.assertEqual(len(contract), 1)
             self.assertEqual(contract.objective("Q0").requirement, QUESTION)
-            self.assertFalse(contract.targets_verified)
+            self.assertFalse(contract.structural_coverage_verified)
 
     def test_empty_objectives_falls_back(self):
         contract = parse_contract_response("{\"objectives\":[]}", QUESTION)
@@ -674,7 +733,7 @@ class ContractParseTests(unittest.TestCase):
         self.assertEqual(contract.truncated_count, 2)
         self.assertEqual(contract.extraction_status, "partial")
         self.assertNotEqual(contract.coverage_status, "verified")
-        self.assertFalse(contract.targets_verified)
+        self.assertFalse(contract.structural_coverage_verified)
 
     def test_extraction_prompt_stays_short_and_json_only(self):
         self.assertLess(len(CONTRACT_EXTRACTION_PROMPT), 500)

@@ -14,10 +14,10 @@ COVERAGE_STATUSES = ("verified", "partial", "unverified")
 MAX_OBJECTIVES = 12
 MAX_EXTRACTED = 6
 CONTRACT_VERSION = 2
-COVERAGE_THRESHOLD = 0.6
 
 CONTRACT_EXTRACTION_PROMPT = (
     "你是问题目标提取器。只提取用户原问题中明确要求回答的目标，不要补充文件、类名或实现细节。"
+    "原问题中的每个分句或并列要求分别输出一个目标，不要合并，也不要遗漏。"
     "只输出 JSON，不要解释：{\"objectives\":[{\"requirement\":\"目标原文\","
     "\"kind\":\"process|behavior|relationship|data|constraint|other\"}]}。"
     "目标 1-6 个；每个目标必须是原问题明确要求的对象、行为、关系或约束；不要输出泛化调查步骤。"
@@ -32,7 +32,20 @@ _INTERROGATIVE_CUES = (
 )
 _IMPERATIVE_CUES = ("请", "说明", "给出", "解释", "梳理", "列出", "追到")
 _LEADING_CONNECTORS = re.compile(r"^(以及|并|同时|然后|再|另外|此外|最后)")
-_STOP_CHARS = set("的了呢吗在是和与及或把被将对于中上下里时后前等这那其分别为以所")
+_CONDITIONAL_CUES = ("如果", "假如", "倘若", "要是")
+_STOP_CHARS = set("的了呢吗在是和与及或把被将对于中上下里时后前等这那其分别为以所此")
+_NON_CONTENT_CHARS = set(_STOP_CHARS)
+for _cue in _INTERROGATIVE_CUES + _IMPERATIVE_CUES:
+    _NON_CONTENT_CHARS.update(_cue)
+_SCENE_CONTEXT = re.compile(
+    r"^(?:在当前|在本|基于当前)[^，,]*(?:项目|代码|工程|实现)[^，,]*$")
+_LEADING_LATIN = re.compile(
+    r"^[A-Za-z][A-Za-z0-9._-]*(?:\s+[A-Za-z][A-Za-z0-9._-]*)+(?=\s*[\u4e00-\u9fff])")
+_DISTRIBUTIVE = re.compile(
+    r"(?P<count>[一二两三四五六七八九十]|\d{1,2})(?P<measure>次|个|张|笔|条|种|类|项)"
+    r"(?P<object>[^，,。？?；;]{0,12}?)(?P<dist>各自|分别|各)")
+_CHINESE_NUMBERS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+                    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 _CONTENT_PATTERN = re.compile(r"[^0-9a-z\u4e00-\u9fff]+")
 _COMPOUND_SPLIT = re.compile(r"[、]|和|与|及|或")
 
@@ -220,7 +233,8 @@ class QuestionContract:
         return tuple(obj for obj in self._objectives if obj.blocking)
 
     @property
-    def targets_verified(self):
+    def structural_coverage_verified(self):
+        """原问题明确要求已被目标结构覆盖；不代表语义正确或答案完整。"""
         return (self._extraction_status == "ok"
                 and self._coverage_status == "verified"
                 and not self._truncated and not self._ungrounded_count)
@@ -437,7 +451,7 @@ def assess_question_coverage(question, objectives):
         return "unverified", ()
     requirements = [obj.requirement for obj in objectives]
     missing = tuple(segment for segment in segments
-                    if _requirement_coverage(segment, requirements) < COVERAGE_THRESHOLD)
+                    if not _segment_covered(segment, requirements))
     if missing:
         return "partial", missing
     return "verified", ()
@@ -451,10 +465,62 @@ def _has_requirement_cue(text):
     return any(stripped.startswith(cue) for cue in _IMPERATIVE_CUES)
 
 
-def _requirement_coverage(candidate, requirements):
-    parts = _coverage_parts(candidate)
-    coverages = [_part_coverage(part, requirements) for part in parts]
-    return min(coverages) if coverages else 1.0
+def _segment_covered(segment, requirements):
+    text = _segment_coverage_text(segment)
+    parts = _coverage_parts(text)
+    if _parts_covered(parts, requirements):
+        return True
+    count = _distributive_count(text)
+    if count > 1:
+        stripped = _strip_distributive(text)
+        stripped_parts = _coverage_parts(stripped)
+        coverers = [requirement for requirement in requirements
+                    if _parts_covered(stripped_parts, [requirement])]
+        if len(coverers) >= count:
+            return True
+    return False
+
+
+def _parts_covered(parts, requirements):
+    return all(
+        any(_part_covered(part, requirement) for requirement in requirements)
+        for part in parts)
+
+
+def _part_covered(candidate, requirement):
+    target = _distinctive(candidate)
+    return bool(target) and target <= _distinctive(requirement)
+
+
+def _distinctive(text):
+    value = _content(text)
+    for cue in _CONDITIONAL_CUES:
+        value = value.replace(cue, "")
+    return {char for char in value if char not in _NON_CONTENT_CHARS}
+
+
+def _segment_coverage_text(segment):
+    clauses = [clause.strip() for clause in _CLAUSE_SPLIT.split(str(segment or ""))
+               if clause.strip()]
+    kept = [clause for clause in clauses if not _SCENE_CONTEXT.match(clause)]
+    text = "，".join(kept) if kept else str(segment or "")
+    return _LEADING_LATIN.sub("", text).strip()
+
+
+def _distributive_count(text):
+    match = _DISTRIBUTIVE.search(str(text or ""))
+    if not match:
+        return 0
+    raw = match.group("count")
+    return int(raw) if raw.isdigit() else _CHINESE_NUMBERS.get(raw, 0)
+
+
+def _strip_distributive(text):
+    value = str(text or "")
+    match = _DISTRIBUTIVE.search(value)
+    if not match:
+        return value
+    return value[:match.start()] + match.group("object") + value[match.end():]
 
 
 def _coverage_parts(candidate):
@@ -463,20 +529,6 @@ def _coverage_parts(candidate):
     if 1 < len(parts) <= 8:
         return parts
     return [candidate]
-
-
-def _part_coverage(candidate, requirements):
-    target = _unigrams(candidate)
-    if not target:
-        return 1.0
-    if not requirements:
-        return 0.0
-    covered = set().union(*(_unigrams(requirement) for requirement in requirements))
-    return len(target & covered) / len(target)
-
-
-def _unigrams(text):
-    return {char for char in _content(text) if char not in _STOP_CHARS}
 
 
 def _bigrams(text):
@@ -500,18 +552,18 @@ def _valid_quote(quote, question):
 
 
 def _locate_quote(requirement, question):
-    best_quote = None
-    best_coverage = 0.0
+    partial = None
     for segment in question_segments(question):
-        for part in _coverage_parts(segment):
-            if len(_content(part)) < 4:
-                continue
-            coverage = _part_coverage(part, [requirement])
-            if coverage > best_coverage:
-                best_quote = part
-                best_coverage = coverage
-    if best_coverage >= COVERAGE_THRESHOLD:
-        return best_quote
+        text = _segment_coverage_text(segment)
+        if len(_content(text)) < 4:
+            continue
+        if _part_covered(text, requirement):
+            return text
+        if partial is None and any(_part_covered(part, requirement)
+                                   for part in _coverage_parts(text)):
+            partial = text
+    if partial is not None:
+        return partial
     return _contiguous_quote(requirement, question)
 
 
