@@ -32,6 +32,15 @@ test("direct runtime calls become inspectable model steps", () => {
   assert.equal(items[1].data.responses[0].content, "回答 2");
 });
 
+test("checkpoint calls are labelled separately from investigation and answer", () => {
+  const items = traceTimeline({ calls: [
+    { attempt: 1, phase: "investigation", elapsedMs: 1, status: "completed" },
+    { attempt: 2, phase: "checkpoint", elapsedMs: 2, status: "completed" },
+    { attempt: 3, phase: "answer", elapsedMs: 3, status: "completed" },
+  ], runtimeEvents: [] });
+  assert.deepEqual(items.map((item) => item.subtitle), ["调查", "调查检查点", "整理答案"]);
+});
+
 test("historical events and failures remain inspectable with an explicit project route", () => {
   const items = traceTimeline({ calls: [], events: [{ eventType: "error", payload: { error: "fixture failure" } }] });
   assert.equal(items[0].kind, "error");

@@ -3,7 +3,8 @@ import { RUN_STATUS_LABEL } from "./query-state.js";
 export function traceTimeline(trace) {
   const items = (trace.calls || []).map((call) => ({
     id: `model:${call.attempt}`, kind: "model", title: `模型调用 ${call.attempt}`,
-    subtitle: call.phase === "answer" ? "整理答案" : "调查", status: call.status,
+    subtitle: call.phase === "answer" ? "整理答案"
+      : call.phase === "checkpoint" ? "调查检查点" : "调查", status: call.status,
     elapsedMs: call.elapsedMs ?? null, data: call,
   }));
   const tools = new Map();

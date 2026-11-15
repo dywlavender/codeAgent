@@ -443,7 +443,7 @@ P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层�
 
 对 8 题 16 次运行按修复后的引用解析做离线测算：318 条确认引用中，44.3% 来自调用进度 50% 之后首次读取的文件，15.7% 来自 75% 之后；全部引用证据到齐的中位时刻为 96% 调用进度，到齐后约 57 秒结束。直接硬停止会截断约四成最终引用证据，因此不采用“已读足够/无新增即停”。
 
-下一步只做实验性“答案先行检查点”：在约 50% 调查预算处生成“结论—已确认依据—剩余缺口”草稿，有明确结论且引用可核验时接受，否则剩余预算只补列出的缺口；检查点在 `DirectAgentRuntime` 内完成，不新增规划器或协调器。验证方案为 8 题两版本的 A（当前）/B（仅 Prompt）/C（检查点 + 缺口定向补读）对照，比较完成率、调用/耗时、确认引用和人工复核覆盖；通过前不改生产默认，不进入 AST。
+下一步只做实验性“答案先行检查点”：在约 50% 调查预算处生成“结论—已确认依据—剩余缺口”草稿，有明确结论且引用可核验时接受，否则剩余预算只补列出的缺口；检查点在 `DirectAgentRuntime` 内完成，不新增规划器或协调器。验证方案为 8 题两版本的 A（当前）/B（仅 Prompt）/C（检查点 + 缺口定向补读）对照，比较完成率、调用/耗时、确认引用和人工复核覆盖；通过前不改生产默认，不进入 AST。2026-11-15 调整为先用 3 道退化题做 A/B 两方案两重复，结果见下节。
 
 ### 2026-11-14 搜索工具升级（阶段 2.5 Commit 1）
 
@@ -495,6 +495,47 @@ P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层�
 - 真实模型结果只证明该 8 题、该模型、该预算下的表现；单题单次运行且温度 0.6，第一轮 3 题与第二轮其余 5 题运行时刻不同，供应商偶发连接错误/超时后已重试并保留成功运行。
 - 未验证项：core-business-v1 交互、完整 16 题、浏览器人工复核；生产默认仍为 Legacy，不进入 AST。
 - 下一步按既定决策树执行**答案先行检查点**（约 50% 预算处生成结论/依据/缺口草稿，仅在引用可核验时接受），继续堆叠 Prompt 不作为优先方案。
+
+### 2026-11-15 调查覆盖管理与 Answer Checkpoint（阶段 2.5 Commit 3）
+
+#### 退化 Trace 诊断（Commit 3.1）
+
+新增离线脚本 `scripts/evaluation/trace_diagnosis.py`，只读取既有 `RunTraceArchive`，不调用模型、不修改工程工作区。诊断报告见[Direct 调查 Trace 诊断](../../records/2026-11/direct-trace-diagnosis-20261115.md)。
+
+- `native-frontend`：B 组在轮次 8 前已读 8/8 关键文件，轮次 14 起转向 `fineract-repo`，轮次 16–19 的搜索没有产生新的答案证据，轮次 20 预算收尾；A 组在轮次 19 完成。退化点是“证据足够后继续扩展”，不是关键文件未找到。
+- `native-lifecycle`：B 组只读 4/6 关键文件（缺 `CommandWrapperBuilder`、`CommandHandlerProvider`），轮次 28 起扩展到渠道、中台和前端，轮次 39 收尾；A 组 6/6 并在轮次 19 后少量跨系统读取。退化点是“关键环节遗漏 + 无关扩展”。
+- `v2-strategy-code`：B 组轮次 9 前读齐 5/5 关键文件，轮次 20 完成；A 组 5/5 但轮次 28 仍未完成。该题是正向案例。
+
+结论：三题的失败/成功都不能用“搜索工具是否存在”解释，主要差异是**何时认为问题要求的关键环节已有证据、以及下一步是否还能改变结论**。这支持做阶段性检查点，而不是继续增加搜索工具或固定停止阈值。
+
+#### 检查点实现（Commit 3.2 / 3.3）
+
+- 开关：`BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED`，默认关闭；`CHECKPOINT_VERSION=1`。开启时 `runtimeRevision=core-direct-2-checkpoint-1`，会话范围包含 `checkpoint`/`checkpointVersion`，开关变化不会复用历史会话。
+- 触发：只在正常调查预算约一半时执行一次（调用预算扣除 2 次收尾保留，时间预算扣除最多 200 秒或 40% 收尾保留）；必须已有至少一次有效 Read；预算/停滞收尾已触发时跳过；检查点请求计入调用与时间预算，只发一次无工具请求。
+- 输出：模型只返回 JSON，包含 `draftAnswer`、`aspects`（confirmed/partial/missing + claim + evidence）和 `gaps`（required/optional + reason + nextAction）。程序用既有 `verify_answer` 核验 evidence 的路径、行号和 Read 交付区间；无法核验的 confirmed 降级为 partial。
+- 下一轮提示：只列已确认、部分确认和 **required** 缺口；optional 缺口只报数量，不列出，避免模型为可选项继续扩展；没有 required 缺口时提示直接作答并说明未确认项。提示以 HumanMessage 注入，不是工具权限或强制结束。
+- 兼容：解析失败或检查点异常时回退原 Direct 调查；取消时检查点请求随 `controlled` 停止；上下文不足时跳过检查点；`ReadLedger` 缓存/恢复逻辑不变；`incomplete` 预算收尾保留。
+- Trace：检查点作为独立模型调用 `phase=checkpoint`，记录 `checkpoint` 摘要、已核验 aspects 与 draftAnswer；`usage` 增加 `checkpointCalls` 与 `checkpoint`；前端 Trace 将检查点标为“调查检查点”。
+
+测试：Direct 34 项、核心服务 12 项（含检查点 Trace）、相关后端 131 项、前端 20 项通过。
+
+#### 三题两方案两重复 A/B
+
+A=当前代码检查点关闭，B=相同代码/工具/Prompt 开启检查点；`glm-5.3-flash`、温度 0.6、40 次/300 秒/600k 字符/131,072 输出 token，单路顺序；每题每组 2 次。完整数据与逐题观察见[Answer Checkpoint 三题真实模型 A/B](../../records/2026-11/answer-checkpoint-ab-20261115.md)。
+
+| 指标 | A（关闭） | B（开启） |
+| --- | --- | --- |
+| 完成 | 2/6 | 1/6 |
+| 模型调用 | 155 | 118（-23.9%） |
+| 耗时 | 1243.6s | 1293.4s（+4.0%） |
+| 确认引用 | 101/137（73.7%） | 72/94（76.6%） |
+| 关键文件 Read | 33/38 | 31/38 |
+
+- 正向：`v2-strategy-code` B 组一次 14 次调用完成、关键文件 5/5、确认引用 14/14，检查点后不再调用工具；检查点作为进度整理器有可观察价值。
+- 退化：`native-lifecycle` 两次重复关键文件 4/6→3/6，均缺 `CommandWrapperBuilder`、`LoanApplicationApprovalCommandHandler`、`CommandHandlerProvider`，引用确认降至 4/12、5/11；`native-frontend` 完成 1/2→0/2。检查点合计耗时 355.8 秒，约占 B 组总耗时 27.5%，没有转化为时间收益。
+- 根因：检查点能整理已确认结论，但 `missing/partial` 与 `required/optional` 缺少稳定映射。`native-lifecycle` 把 `logCommandSource` 命令路由降为 optional，把 `LOAN_CREATED` 触发点列为 required；`v2-strategy-code` 第二次把授权仓库中不存在的产品配置列为 required，检查点后继续 11 次工具调用仍未解决。
+- 结论：属于接近情形 B、并带 C 部分特征的实验结果。**不验收自动结束，不进入 8 题扩展**；检查点默认关闭，生产默认仍为 Legacy。人工浏览未发现与源码直接冲突的新错误断言，但关键证据遗漏本身已构成 P0 退化；本轮未做逐条语义复核。
+- 下一步：先改进缺口识别（`missing` aspect 必须对应 required gap 或说明不属于原问题；授权仓库中不存在的配置不得列为 required；required 缺口绑定原问题环节），再以同一 3 题、同一预算复验；关键文件覆盖和完成率同时不退化后，才考虑 8 题扩展。
 
 ### 未完成的效果验收
 
