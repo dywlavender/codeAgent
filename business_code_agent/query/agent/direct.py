@@ -29,11 +29,27 @@ from .session import DirectSessionStore, ReadLedger, compact_messages, retire_ch
 
 
 PROMPT_VERSION = 2
+CHECKPOINT_VERSION = 1
+CHECKPOINT_ENABLED_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED"
 _STOPPED = "cancelled"
 STALL_WARN_READS = 6
 STALL_FINALIZE_READS = 10
 FINALIZE_RESERVED_CALLS = 2
 FINALIZE_RESERVED_SECONDS = 200.0
+CHECKPOINT_NOTICE = (
+    "\n\n调查进展检查点：现在暂停调查，基于本轮已 Read 到的源码整理阶段性结论。"
+    "不要调用工具，只输出一个 JSON 对象，不要代码围栏。\n"
+    "JSON 结构：{\"draftAnswer\":\"当前可给出的主要结论\","
+    "\"aspects\":[{\"question\":\"待确认事项\",\"status\":\"confirmed|partial|missing\","
+    "\"claim\":\"结论\",\"evidence\":[\"repos/.../File.java:42-50\"]}],"
+    "\"gaps\":[{\"question\":\"缺口\",\"importance\":\"required|optional\","
+    "\"reason\":\"为什么影响回答\",\"nextAction\":\"下一步核实动作\"}]}\n"
+    "要求：confirmed 必须给出已 Read 的路径和行号；没有可核验证据时用 partial 或 missing；"
+    "aspects 要覆盖用户问题要求确认的主要环节；gaps 只列会影响回答的关键缺口。"
+)
+CHECKPOINT_REQUEST = (
+    "现在执行调查进展检查点。只输出上述 JSON 对象，不要输出 JSON 以外的文字。")
+
 STALL_NOTICE = (
     "\n\n调查提醒：最近连续多次 Read 没有新增证据。不要继续重复读取同一区间；"
     "请基于已读内容直接作答，未确认的部分明确说明。")
@@ -78,10 +94,18 @@ class DirectAgentRuntime:
             raise ValueError("max_seconds 必须为正数或不设置")
         self.project_id = project_id
 
+    def checkpoint_enabled(self):
+        return self.environment.get(CHECKPOINT_ENABLED_ENV, "false").strip().lower() in {
+            "1", "true", "yes", "on"}
+
     def execution_settings(self):
+        checkpoint = self.checkpoint_enabled()
+        revision = f"core-direct-{PROMPT_VERSION}"
+        if checkpoint:
+            revision += f"-checkpoint-{CHECKPOINT_VERSION}"
         return {
             "agentVersion": 1,
-            "runtimeRevision": f"core-direct-{PROMPT_VERSION}",
+            "runtimeRevision": revision,
             "requestedModel": getattr(self.model, "model_name", None)
             or self.environment.get("BUSINESS_CODE_MODEL_NAME"),
             "maxCalls": self.max_calls,
@@ -96,6 +120,8 @@ class DirectAgentRuntime:
             "contextChars": self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"),
             "networkTimeoutSeconds": self.environment.get("BUSINESS_CODE_MODEL_TIMEOUT", "120"),
             "maxRetries": 0,
+            "checkpointEnabled": checkpoint,
+            "checkpointVersion": CHECKPOINT_VERSION if checkpoint else None,
         }
 
     def chat_model(self, *, timeout=None, max_tokens=None):
@@ -150,6 +176,8 @@ class DirectAgentRuntime:
         evidence_gaps = 0
         stalled_reads = 0
         peak_stalled_reads = 0
+        checkpoint_calls = 0
+        checkpoint_summary = None
         stop_reason = None
 
         def emit(kind, **payload):
@@ -179,6 +207,8 @@ class DirectAgentRuntime:
                 "evidenceGaps": evidence_gaps,
                 "stalledReads": stalled_reads,
                 "peakStalledReads": peak_stalled_reads,
+                "checkpointCalls": checkpoint_calls,
+                "checkpoint": checkpoint_summary,
                 "semanticProof": False,
             }
 
@@ -235,10 +265,10 @@ class DirectAgentRuntime:
             if call_callback:
                 call_callback({**entry})
 
-        def begin_call(request_messages, attempt, tools=None):
+        def begin_call(request_messages, attempt, tools=None, phase="investigation"):
             entry = {
                 "attempt": attempt,
-                "phase": "investigation",
+                "phase": phase,
                 "startedAt": _now(),
                 "elapsedMs": round((time.monotonic() - started) * 1000, 3),
                 "messages": [public_message(message) for message in request_messages],
@@ -283,6 +313,103 @@ class DirectAgentRuntime:
                 elif not pending.cancelled():
                     pending.exception()
 
+        checkpoint_enabled = self.checkpoint_enabled()
+        checkpoint_done = False
+
+        def finalize_state():
+            remaining_calls = (None if self.max_calls is None
+                               else self.max_calls - calls)
+            remaining_seconds = (None if self.max_seconds is None
+                                 else self.max_seconds - (time.monotonic() - started))
+            reserve = (min(FINALIZE_RESERVED_SECONDS, self.max_seconds * 0.4)
+                       if self.max_seconds is not None else FINALIZE_RESERVED_SECONDS)
+            if remaining_calls is not None and remaining_calls <= FINALIZE_RESERVED_CALLS:
+                return "budget", reserve
+            if remaining_seconds is not None and remaining_seconds <= reserve:
+                return "budget", reserve
+            if stalled_reads >= STALL_FINALIZE_READS:
+                return "no_progress", reserve
+            return None, reserve
+
+        def checkpoint_due():
+            if not checkpoint_enabled or checkpoint_done or calls < 1 or not ledger.index():
+                return False
+            return _checkpoint_due(self.max_calls, self.max_seconds, calls,
+                                   time.monotonic() - started)
+
+        async def run_checkpoint():
+            nonlocal calls, checkpoint_calls, checkpoint_summary
+            index = ledger.index()
+            prompt = system_prompt + CHECKPOINT_NOTICE
+            if index:
+                prompt += "\n\n已读证据索引（仅用于引用，不要重复读取）：\n" + index
+            request = HumanMessage(CHECKPOINT_REQUEST)
+            content_budget = max(1, char_limit - len(prompt) - len(request.content))
+            bounded = compact_messages(messages, content_budget)
+            if (sum(len(str(message.content)) for message in bounded)
+                    + len(request.content) > content_budget):
+                checkpoint_summary = {"status": "skipped", "reason": "context"}
+                emit("checkpoint", attempt=calls, status="skipped", reason="context")
+                return None
+            calls += 1
+            checkpoint_calls += 1
+            emit("status", phase="checkpoint", label="正在整理调查进展（检查点）")
+            call_started = time.monotonic()
+            request_messages = [SystemMessage(prompt), *bounded, request]
+            call_entry = begin_call(request_messages, calls, tools=[], phase="checkpoint")
+            try:
+                response = await controlled(chat.ainvoke(request_messages))
+            except _Stopped as exc:
+                reason = str(exc) or _STOPPED
+                finish_call(call_entry, call_started,
+                            status="cancelled" if reason == _STOPPED else "incomplete")
+                raise
+            except Exception as exc:
+                finish_call(call_entry, call_started, error=exc)
+                checkpoint_summary = {"status": "failed", "errorType": type(exc).__name__}
+                emit("checkpoint", attempt=calls, status="failed",
+                     errorType=type(exc).__name__)
+                return None
+            record_usage(response)
+            finish_call(call_entry, call_started, response=response, phase="checkpoint")
+            parsed = _parse_checkpoint(str(response.text or ""))
+            if parsed is None:
+                checkpoint_summary = {"status": "failed", "reason": "parse"}
+                call_entry["checkpoint"] = checkpoint_summary
+                record_call(call_entry)
+                emit("checkpoint", attempt=calls, status="failed", reason="parse")
+                return None
+            _verify_checkpoint(parsed, messages)
+            confirmed = sum(1 for item in parsed["aspects"] if item["status"] == "confirmed")
+            partial = sum(1 for item in parsed["aspects"] if item["status"] == "partial")
+            missing = sum(1 for item in parsed["aspects"] if item["status"] == "missing")
+            required = [gap for gap in parsed["gaps"] if gap["importance"] == "required"]
+            checkpoint_summary = {
+                "status": "completed",
+                "confirmedCount": confirmed,
+                "partialCount": partial,
+                "missingCount": missing,
+                "gapCount": len(parsed["gaps"]),
+                "requiredGapCount": len(required),
+                "gaps": [{"question": gap["question"], "importance": gap["importance"]}
+                         for gap in parsed["gaps"][:8]],
+            }
+            call_entry["checkpoint"] = {
+                **checkpoint_summary,
+                "draftAnswer": parsed["draftAnswer"][:1000],
+                "aspects": [{"question": item["question"], "status": item["status"],
+                             "evidence": item["evidence"],
+                             "verification": item.get("verification")}
+                            for item in parsed["aspects"][:8]],
+            }
+            record_call(call_entry)
+            emit("checkpoint", attempt=calls, status="completed",
+                 confirmedCount=confirmed, partialCount=partial, missingCount=missing,
+                 gapCount=len(parsed["gaps"]), requiredGapCount=len(required))
+            progress = _checkpoint_progress(parsed)
+            messages.append(HumanMessage(progress))
+            return progress
+
         try:
             while True:
                 if cancel_check and cancel_check():
@@ -291,20 +418,11 @@ class DirectAgentRuntime:
                     return stopped("budget")
                 if self.max_calls is not None and calls >= self.max_calls:
                     return stopped("budget")
-                finalize_reason = None
-                remaining_calls = (None if self.max_calls is None
-                                   else self.max_calls - calls)
-                remaining_seconds = (None if self.max_seconds is None
-                                     else self.max_seconds - (time.monotonic() - started))
-                finalize_reserve = (min(FINALIZE_RESERVED_SECONDS, self.max_seconds * 0.4)
-                                    if self.max_seconds is not None else FINALIZE_RESERVED_SECONDS)
-                if remaining_calls is not None and remaining_calls <= FINALIZE_RESERVED_CALLS:
-                    finalize_reason = "budget"
-                elif (remaining_seconds is not None
-                      and remaining_seconds <= finalize_reserve):
-                    finalize_reason = "budget"
-                elif stalled_reads >= STALL_FINALIZE_READS:
-                    finalize_reason = "no_progress"
+                finalize_reason, finalize_reserve = finalize_state()
+                if not finalize_reason and checkpoint_due():
+                    checkpoint_done = True
+                    await run_checkpoint()
+                    finalize_reason, finalize_reserve = finalize_state()
                 prompt = system_prompt
                 invoker = bound
                 finalize_label = ""
@@ -443,6 +561,8 @@ class DirectAgentRuntime:
             "model": settings.get("requestedModel"),
             "contextChars": int(self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000")),
             "promptVersion": PROMPT_VERSION,
+            "checkpoint": settings.get("checkpointEnabled"),
+            "checkpointVersion": settings.get("checkpointVersion"),
         }
 
     def _system_prompt(self, context: RunContext, prepared: PreparedCapabilities) -> str:
@@ -481,6 +601,127 @@ class DirectAgentRuntime:
             "6. 只使用已注册工具，不修改文件，不访问未授权目录。\n\n"
             f"{guidance}"
         )
+
+
+def _checkpoint_due(max_calls, max_seconds, calls, elapsed):
+    call_half = None
+    time_half = None
+    if max_calls is not None:
+        normal_calls = max(1, max_calls - FINALIZE_RESERVED_CALLS)
+        call_half = normal_calls / 2.0
+    if max_seconds is not None:
+        reserve = min(FINALIZE_RESERVED_SECONDS, max_seconds * 0.4)
+        normal_seconds = max(1.0, max_seconds - reserve)
+        time_half = normal_seconds / 2.0
+    if call_half is None and time_half is None:
+        call_half, time_half = 10.0, 120.0
+    return ((call_half is not None and calls >= call_half)
+            or (time_half is not None and elapsed >= time_half))
+
+
+def _parse_checkpoint(text):
+    value = str(text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value)
+        value = re.sub(r"\s*```$", "", value)
+    start, end = value.find("{"), value.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(value[start:end + 1])
+    except (TypeError, ValueError):
+        return None
+    return _normalize_checkpoint(data) if isinstance(data, dict) else None
+
+
+def _normalize_checkpoint(data):
+    aspects = []
+    for item in (data.get("aspects") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "partial").strip().lower()
+        if status not in {"confirmed", "partial", "missing"}:
+            status = "partial"
+        evidence = [str(value).strip()[:300] for value in (item.get("evidence") or [])
+                    if str(value).strip()][:5]
+        aspects.append({
+            "question": str(item.get("question") or "").strip()[:300],
+            "status": status,
+            "claim": str(item.get("claim") or "").strip()[:800],
+            "evidence": evidence,
+        })
+    gaps = []
+    for item in (data.get("gaps") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        importance = str(item.get("importance") or "required").strip().lower()
+        if importance not in {"required", "optional"}:
+            importance = "required"
+        gaps.append({
+            "question": str(item.get("question") or "").strip()[:300],
+            "importance": importance,
+            "reason": str(item.get("reason") or "").strip()[:500],
+            "nextAction": str(item.get("nextAction") or "").strip()[:500],
+        })
+    return {
+        "draftAnswer": str(data.get("draftAnswer") or "").strip()[:2000],
+        "aspects": aspects,
+        "gaps": gaps,
+    }
+
+
+def _verify_checkpoint(checkpoint, messages):
+    for aspect in checkpoint["aspects"]:
+        if aspect["status"] != "confirmed":
+            continue
+        if not aspect["evidence"]:
+            aspect["status"] = "partial"
+            aspect["verification"] = "no_evidence"
+            continue
+        references = verify_answer("\n".join(aspect["evidence"]), messages)["references"]
+        if references and all(reference["confirmed"] for reference in references):
+            aspect["verification"] = "citation_verified"
+        else:
+            aspect["status"] = "partial"
+            aspect["verification"] = "citation_unverified"
+    return checkpoint
+
+
+def _checkpoint_progress(checkpoint):
+    lines = ["[调查进展检查点] 程序已核对引用；未通过核验的结论只能视为部分确认。"]
+    confirmed = [item for item in checkpoint["aspects"] if item["status"] == "confirmed"]
+    partial = [item for item in checkpoint["aspects"] if item["status"] == "partial"]
+    missing = [item for item in checkpoint["aspects"] if item["status"] == "missing"]
+    if confirmed:
+        lines.append("已确认：")
+        for item in confirmed[:6]:
+            evidence = "；".join(item["evidence"][:2])
+            lines.append(f"- {item['question'] or item['claim']}：{item['claim']}"
+                         + (f"（{evidence}）" if evidence else ""))
+    if partial:
+        lines.append("部分确认（不影响回答时可在答案中说明，不必为此扩展调查）：")
+        for item in partial[:6]:
+            lines.append(f"- {item['question'] or item['claim']}：{item['claim']}")
+    if missing:
+        lines.append("尚未确认：")
+        for item in missing[:4]:
+            lines.append(f"- {item['question'] or item['claim']}")
+    required = [gap for gap in checkpoint["gaps"] if gap["importance"] == "required"]
+    optional = [gap for gap in checkpoint["gaps"] if gap["importance"] == "optional"]
+    if required:
+        lines.append("关键缺口（下一步只补查这些，补齐后立即作答）：")
+        for gap in required[:6]:
+            line = f"- {gap['question']}：{gap['reason']}"
+            if gap["nextAction"]:
+                line += f"；建议：{gap['nextAction']}"
+            lines.append(line)
+    else:
+        lines.append("没有必须补齐的关键缺口；若已确认结论足以回答，请直接作答，"
+                     "未确认项在答案中说明。")
+    if optional:
+        lines.append(f"另有 {len(optional)} 个可选缺口，不影响回答，不必继续调查。")
+    lines.append("除非已有结论与源码矛盾，不要再扩展无关分支。")
+    return "\n".join(lines)[:2400]
 
 
 def verify_answer(answer: str, messages) -> dict:

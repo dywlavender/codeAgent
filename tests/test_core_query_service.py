@@ -184,6 +184,53 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertIn("repos/channel/Channel.java:2", calls[2]["responses"][0]["content"])
         self.assertEqual("completed", trace["run"]["status"])
 
+    def test_checkpoint_call_and_summary_are_archived_in_run_trace(self):
+        checkpoint = {
+            "draftAnswer": "提款入口在渠道。",
+            "aspects": [{"question": "渠道入口", "status": "confirmed",
+                         "claim": "Channel.withdraw 是入口",
+                         "evidence": ["repos/channel/Channel.java:1-3"]}],
+            "gaps": [{"question": "决策系统", "importance": "required",
+                      "reason": "影响调用链", "nextAction": "Read Decision.java"}],
+        }
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{
+                "id": "r1", "name": "Read",
+                "args": {"path": "repos/channel/Channel.java", "offset": 1, "limit": 5},
+            }]),
+            AIMessage(content="", tool_calls=[{
+                "id": "r2", "name": "Read",
+                "args": {"path": "repos/decision/Decision.java", "offset": 1, "limit": 5},
+            }]),
+            AIMessage(content=json.dumps(checkpoint, ensure_ascii=False)),
+            AIMessage(content="提款入口为 repos/channel/Channel.java:2。"),
+        ])
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=model,
+            environment={"BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED": "true"},
+            max_calls=6)
+        service = QueryService(self.db, db_path=self.db_path,
+                               project_config=self.config, project_id="core-query",
+                               runtime=runtime)
+        result = service.query("提款入口在哪里？")
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("core-direct-2-checkpoint-1",
+                         result["execution"]["settings"]["runtimeRevision"])
+        self.assertTrue(result["execution"]["settings"]["checkpointEnabled"])
+        self.assertEqual(1, result["usage"]["checkpointCalls"])
+        self.assertEqual("completed", result["usage"]["checkpoint"]["status"])
+        trace = service.get_trace(result["runId"])
+        self.assertEqual(["investigation", "investigation", "checkpoint", "answer"],
+                         [call["phase"] for call in trace["calls"]])
+        checkpoint_call = trace["calls"][2]
+        self.assertEqual("completed", checkpoint_call["status"])
+        self.assertEqual([], checkpoint_call["tools"])
+        self.assertEqual(1, checkpoint_call["checkpoint"]["confirmedCount"])
+        self.assertEqual(1, checkpoint_call["checkpoint"]["requiredGapCount"])
+        self.assertIn("tool", [message["role"] for message in checkpoint_call["messages"]])
+        self.assertEqual(1, len(result["usage"]["references"]))
+        self.assertTrue(result["usage"]["references"][0]["confirmed"])
+
     def test_failed_second_model_call_is_kept_in_trace(self):
         FailingSecondCallModel.attempts = 0
         runtime = DirectAgentRuntime(profile=CORE,
