@@ -154,6 +154,83 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertIn("未注册工具", errors[0]["output"])
         self.assertEqual({"Read", "Glob", "Grep"}, {tool.name for tool in self.prepared.tools})
 
+    def test_closure_accepts_explicit_connection_read_in_normal_loop(self):
+        entry = "repos/channel/Channel.java"
+        route = "repos/decision/Route.java"
+        (self.root / "sources/decision/Route.java").write_text(
+            'routes.put("approve", approvalHandler);\n', encoding="utf-8")
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{"name": "Read", "id": "entry", "args": {"path": entry}}]),
+            AIMessage(content="", tool_calls=[
+                {"name": "RecordFindings", "id": "needed", "args": {"relations": [{
+                    "objective_id": "Q0", "relationship": "命令路由", "basis": f"{entry}:3"}]}},
+                {"name": "Read", "id": "route", "args": {"path": route}},
+            ]),
+            AIMessage(content="", tool_calls=[{"name": "RecordFindings", "id": "answer", "args": {
+                "relations": [{"objective_id": "Q0", "relation_id": "R1", "connection": [f"{route}:1"]}],
+                "findings": [{"objective_id": "Q0", "claim": "approve 映射到 approvalHandler。",
+                              "references": [f"{route}:1"]}],
+                "submit": True,
+            }}]),
+            AIMessage(content="", tool_calls=[{"name": "RecordFindings", "id": "followup", "args": {
+                "findings": [{"objective_id": "Q0", "claim": "直接沿用上一轮的证据。",
+                              "references": [f"{route}:1"]}],
+                "submit": True,
+            }}]),
+        ])
+        runtime = DirectAgentRuntime(profile=CORE, model=model,
+                                    environment={"BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED": "true"})
+        first = runtime.ask("命令如何路由？", context=self.context, prepared=self.prepared)
+        closure = first.usage["answerClosure"]
+        self.assertEqual(3, first.usage["modelCalls"])
+        self.assertEqual("supported", closure["registeredCoverage"])
+        self.assertEqual("unknown", closure["questionCoverage"])
+        self.assertFalse(closure["semanticProof"])
+        self.assertIn(f"命令路由的连接依据 `{route}:1`", first.answer)
+        self.assertEqual(["route"], list(closure["evidenceLedger"]["evidence"][1]["read_call_ids"]))
+        followup = runtime.ask("命令如何路由？", context=self.context, prepared=self.prepared,
+                               session_id=first.runtime_session_id)
+        self.assertEqual("unknown", followup.usage["answerClosure"]["registeredCoverage"])
+        self.assertNotIn("直接沿用上一轮的证据", followup.answer)
+
+    def test_closure_cannot_cite_read_from_same_tool_batch(self):
+        path = "repos/channel/Channel.java"
+        runtime = DirectAgentRuntime(profile=CORE, environment={"BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED": "true"},
+                                    model=ToolModel(responses=[AIMessage(content="", tool_calls=[
+            {"name": "Read", "id": "not-delivered", "args": {"path": path}},
+            {"name": "RecordFindings", "id": "finish", "args": {"submit": True, "findings": [{
+                "objective_id": "Q0", "claim": "尚未收到文件却确认实现。", "references": [f"{path}:3"]}]}},
+        ])]))
+        result = runtime.ask("源码实现是什么？", context=self.context, prepared=self.prepared)
+        self.assertEqual("unknown", result.usage["answerClosure"]["registeredCoverage"])
+        self.assertEqual([], result.usage["answerClosure"]["evidenceLedger"]["evidence"])
+        self.assertNotIn("尚未收到文件却确认实现", result.answer)
+
+    def test_closure_allows_one_revision_when_valid_and_unsupported_steps_are_combined(self):
+        path = "repos/channel/Channel.java"
+        model = ToolModel(responses=[
+            AIMessage(content="", tool_calls=[{"name": "Read", "id": "read", "args": {"path": path}}]),
+            AIMessage(content="", tool_calls=[{"name": "RecordFindings", "id": "draft", "args": {
+                "submit": True, "findings": [{"objective_id": "Q0", "claim": "入口和下游已经核实。",
+                                               "references": [f"{path}:3", f"{path}:100"]}],
+            }}]),
+            AIMessage(content="", tool_calls=[{"name": "RecordFindings", "id": "revised", "args": {
+                "submit": True, "findings": [{"objective_id": "Q0", "claim": "入口方法是 applyWithdraw。",
+                                               "references": [f"{path}:3"], "gap": "下游尚未核实。"}],
+            }}]),
+        ])
+        result = DirectAgentRuntime(profile=CORE, model=model,
+                                    environment={"BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED": "true"}).ask(
+            "入口与下游怎么连接？", context=self.context, prepared=self.prepared)
+        self.assertEqual(3, result.usage["modelCalls"])
+        self.assertTrue(result.usage["answerClosure"]["revisionRequested"])
+        draft = next(event["payload"] for event in result.events if event["eventType"] == "tool"
+                     and event["payload"]["id"] == "draft" and event["payload"]["status"] == "completed")
+        self.assertEqual("revise", json.loads(draft["output"])["submission"])
+        self.assertIn("入口方法是 applyWithdraw", result.answer)
+        self.assertIn("下游尚未核实", result.answer)
+        self.assertNotIn("入口和下游已经核实", result.answer)
+
     def test_cancellation_prevents_model_and_tool_execution(self):
         result = DirectAgentRuntime(profile=CORE, model=ExplodingModel(responses=[]),
                                     environment={}).ask(
@@ -846,6 +923,101 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertTrue(reads[-1]["recovered"])
         self.assertIn(marker, reads[-1]["content"])
         self.assertTrue(result.usage["verification"]["references"][-1]["confirmed"])
+
+    def test_token_compaction_records_evidence_hints_and_requires_original_for_citation(self):
+        important = "repos/channel/Important.java"
+        recent = "repos/channel/Recent.java"
+        for name, count in (("Important", 6), ("Middle", 20), ("Recent", 6)):
+            lines = ["x" * 240] * count
+            lines[0] = f"{name} content " + lines[0][20:]
+            if name == "Important":
+                lines[:2] = ["void approve() { router.dispatch(APPROVE); }",
+                             "routes.put(APPROVE, new ApprovalHandler());"]
+            (self.root / "sources/channel" / f"{name}.java").write_text("\n".join(lines), encoding="utf-8")
+        question = "审批命令怎样路由？"
+        claim = "APPROVE 命令经路由表交给 ApprovalHandler"
+        environment = {"BUSINESS_CODE_AGENT_CONTEXT_TOKENS": "4500", "BUSINESS_CODE_AGENT_OUTPUT_TOKENS": "512",
+                       "BUSINESS_CODE_AGENT_FINAL_OUTPUT_TOKENS": "512"}
+        for recover in (False, True):
+            with self.subTest(recover=recover):
+                reads = [AIMessage(content="", tool_calls=[{"name": "Read", "id": name,
+                         "args": {"path": f"repos/channel/{name}.java"}}])
+                         for name in ("Important", "Middle", "Recent")]
+                summary = AIMessage(content=json.dumps({"confirmedFindings": [
+                    {"claim": claim, "evidence": [f"{important}:1-2"]},
+                    {"claim": "未见原文也声称验证", "evidence": ["repos/channel/Unseen.java:1"]},
+                ], "pendingQuestions": ["命令如何到达审批处理器？"], "nextFocus": "沿命令注册点调查"}, ensure_ascii=False),
+                    usage_metadata={"input_tokens": 500, "output_tokens": 80, "total_tokens": 580})
+                response = AIMessage(content=f"{claim}，见 {important}:1-2。")
+                resumed = [AIMessage(content="", tool_calls=[{"name": "Read", "id": "again",
+                            "args": {"path": important, "limit": 2}}])] if recover else []
+                model = ToolModel(responses=[*reads, summary, *resumed, response])
+                runtime = DirectAgentRuntime(profile=CORE, model=model, environment=environment)
+                calls = []
+                result = runtime.ask(question, context=self.context, prepared=self.prepared, call_callback=calls.append)
+                manager = result.usage["contextManager"]
+                self.assertEqual("completed", result.status)
+                self.assertEqual(1, manager["summaryCalls"])
+                self.assertEqual(500, result.usage["inputTokens"])
+                self.assertEqual(int(recover), result.usage["recoveredReads"])
+                self.assertEqual(recover, result.usage["verification"]["references"][0]["confirmed"])
+                self.assertEqual([{"claim": claim, "evidence": [f"{important}:1-2"]}],
+                                 manager["memory"]["confirmedFindings"])
+                compacted = [call for call in calls if call["phase"] == "compaction" and call["status"] == "completed"]
+                self.assertEqual(1, len(compacted))
+                self.assertEqual([], compacted[0]["tools"])
+                self.assertIn("routes.put(APPROVE, new ApprovalHandler())", compacted[0]["messages"][1]["content"])
+                self.assertTrue(all(call["contextBudget"]["estimatedInputTokens"] +
+                                    call["contextBudget"]["reservedOutputTokens"] <= 4500 for call in calls))
+                final_request = calls[-1]["messages"]
+                self.assertIn(question, [m["content"] for m in final_request if m["role"] == "human"])
+                self.assertIn("命令如何到达审批处理器", final_request[0]["content"])
+                self.assertTrue(any(recent in str(m["content"]) for m in final_request if m["role"] == "tool"))
+
+        store = DirectSessionStore(self.project.data_root / "query-sessions" / "core")
+        scope = runtime._session_scope(self.context, self.prepared)
+        history, memory = store.load_context(result.runtime_session_id, scope)
+        self.assertEqual(manager["memory"], memory)
+        self.assertTrue(history)
+        self.assertEqual(([], {}), store.load_context(result.runtime_session_id, {**scope, "contextTokens": 4600}))
+
+        followup = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=[AIMessage(content="继续调查。")]),
+                                     environment=environment)
+        (self.root / "sources/channel/Important.java").write_text("changed source\n", encoding="utf-8")
+        followup_calls = []
+        next_turn = followup.ask("继续核对入口", context=self.context, prepared=self.prepared,
+                                 session_id=result.runtime_session_id, call_callback=followup_calls.append)
+        self.assertEqual([], next_turn.usage["contextManager"]["memory"]["confirmedFindings"])
+        self.assertNotIn(claim, followup_calls[0]["messages"][0]["content"])
+
+    def test_token_context_trims_older_search_before_discarding_read_evidence(self):
+        repository = self.root / "sources/channel"
+        (repository / "Search.java").write_text(("match " + "x" * 430 + "\n") * 18, encoding="utf-8")
+        (repository / "Recent.java").write_text(("y" * 200 + "\n") * 20, encoding="utf-8")
+        source = "repos/channel/Channel.java"
+        responses = [AIMessage(content="", tool_calls=[{
+            "id": key, "name": name, "args": arguments,
+        }]) for key, name, arguments in (
+            ("source", "Read", {"path": source}),
+            ("search", "Grep", {"pattern": "match", "path": "repos/channel/Search.java"}),
+            ("recent", "Read", {"path": "repos/channel/Recent.java"}),
+        )]
+        responses.append(AIMessage(content=f"提款入口见 {source}:3。"))
+        runtime = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                     environment={"BUSINESS_CODE_AGENT_CONTEXT_TOKENS": "12000",
+                                                  "BUSINESS_CODE_AGENT_CONTEXT_CHARS": "13500"})
+        calls = []
+        result = runtime.ask("核对提款入口", context=self.context, prepared=self.prepared, call_callback=calls.append)
+        self.assertEqual(4, result.usage["modelCalls"])
+        self.assertTrue(result.usage["references"][0]["confirmed"])
+        compaction = next(e["payload"] for e in result.events if e["eventType"] == "compaction")
+        self.assertEqual(("pruned", 1, 0), (compaction["status"], compaction["trimmedSearchResults"],
+                                           compaction["removedMessages"]))
+        final_tools = {m["name"]: m["content"] for m in calls[-1]["messages"] if m["role"] == "tool"}
+        self.assertIn("搜索结果已省略", final_tools["Grep"])
+        full_search = next(e["payload"]["output"] for e in result.events if e["eventType"] == "tool"
+                           and e["payload"]["id"] == "search" and e["payload"]["status"] == "completed")
+        self.assertEqual(18, len(json.loads(full_search)["matches"]))
 
     def test_investigation_limit_returns_incomplete_instead_of_completed(self):
         model = ToolModel(responses=[

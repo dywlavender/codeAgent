@@ -184,6 +184,57 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertIn("repos/channel/Channel.java:2", calls[2]["responses"][0]["content"])
         self.assertEqual("completed", trace["run"]["status"])
 
+    def test_closure_withholds_unproven_chain_and_archives_missing_connection(self):
+        question = "审批命令如何路由，状态怎样变化？"
+        channel = "repos/channel/Channel.java"
+        decision = "repos/decision/Decision.java"
+        responses = [
+            AIMessage(content="", tool_calls=[
+                {"name": "RecordFindings", "id": "goals", "args": {"objectives": [
+                    {"requirement": "命令路由", "quote": "审批命令如何路由"},
+                    {"requirement": "状态变化", "quote": "状态"},
+                ]}},
+                {"name": "Read", "id": "entry", "args": {"path": channel}},
+                {"name": "Read", "id": "handler", "args": {"path": decision}},
+            ]),
+            AIMessage(content="所有环节已确认。", tool_calls=[
+                {"name": "RecordFindings", "id": "answer", "args": {
+                    "relations": [{"objective_id": "Q1", "relationship": "入口到审批 Handler 的命令路由",
+                                   "basis": f"{channel}:2"}],
+                    "findings": [
+                        {"objective_id": "Q1", "claim": "已确认完整调用链。",
+                         "references": [f"{channel}:2", f"{decision}:2"]},
+                        {"objective_id": "Q1", "claim": "已找到两个文件中的 withdraw 方法。",
+                         "references": [f"{channel}:2", f"{decision}:2"], "gap": "缺少命令路由实现。"},
+                    ],
+                    "submit": True,
+                }},
+            ]),
+        ]
+        runtime = DirectAgentRuntime(profile=CORE, model=ToolModel(responses=responses),
+                                    environment={"BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED": "true"})
+        service = QueryService(self.db, db_path=self.db_path, project_config=self.config, runtime=runtime)
+        result = service.query(question)
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(2, result["usage"]["modelCalls"])
+        self.assertEqual(0, result["usage"]["checkpointCalls"])
+        self.assertIn("已找到两个文件", result["answer"])
+        self.assertIn("尚未核实连接：入口到审批 Handler 的命令路由", result["answer"])
+        self.assertNotIn("已确认完整调用链", result["answer"])
+        self.assertNotIn("所有环节已确认", result["answer"])
+        closure = result["usage"]["answerClosure"]
+        self.assertEqual(question, closure["questionContract"]["originalQuestion"])
+        self.assertEqual("状态", closure["questionContract"]["objectives"][2]["questionQuote"])
+        self.assertEqual(("partial", "unknown"), (closure["registeredCoverage"], closure["questionCoverage"]))
+        self.assertEqual(["partial", "unknown"], [item["status"] for item in closure["objectives"]])
+        self.assertEqual("partial", closure["evidenceLedger"]["relations"][0]["status"])
+        trace = service.get_trace(result["runId"])
+        self.assertEqual(["entry"], trace["run"]["usage"]["answerClosure"]["evidenceLedger"]["evidence"][0]["read_call_ids"])
+        self.assertEqual({"Read", "Glob", "Grep", "RecordFindings"},
+                         {tool["function"]["name"] for tool in trace["calls"][0]["tools"]})
+        self.assertTrue(all(event["payload"]["origin"] == "model" for event in trace["events"]
+                            if event["eventType"] == "tool"))
+
     def test_checkpoint_call_and_summary_are_archived_in_run_trace(self):
         checkpoint = {
             "draftAnswer": "提款入口在渠道。",

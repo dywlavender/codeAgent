@@ -1,8 +1,7 @@
 """Independent model/tool loop for core-v1.
 
-This runtime deliberately has no coordinator, investigation state, automatic
-re-reads or answer post-processing. The model chooses the registered read-only
-tools until it submits an answer.
+The model chooses the registered read-only tools until it submits an answer.
+Optional answer coverage records never schedule investigation tools.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 
@@ -25,6 +24,8 @@ from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from business_code_agent.query.traces import public_message
+from . import answer_closure
+from . import context_manager
 from .session import (
     CHECKPOINT_RUNTIME_ONLY,
     DirectSessionStore,
@@ -38,6 +39,8 @@ from .session import (
 PROMPT_VERSION = 2
 CHECKPOINT_VERSION = 2
 CHECKPOINT_ENABLED_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED"
+ANSWER_CLOSURE_ENABLED_ENV = "BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED"
+CONTEXT_TOKENS_ENV = "BUSINESS_CODE_AGENT_CONTEXT_TOKENS"
 CHECKPOINT_TIMEOUT_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_TIMEOUT"
 CHECKPOINT_OUTPUT_TOKENS_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_OUTPUT_TOKENS"
 CHECKPOINT_CONTEXT_CHARS_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_CONTEXT_CHARS"
@@ -108,6 +111,16 @@ class DirectAgentRuntime:
         return self.environment.get(CHECKPOINT_ENABLED_ENV, "false").strip().lower() in {
             "1", "true", "yes", "on"}
 
+    def answer_closure_enabled(self):
+        return self.environment.get(ANSWER_CLOSURE_ENABLED_ENV, "false").strip().lower() in {
+            "1", "true", "yes", "on"}
+
+    def context_tokens(self):
+        value = int(self.environment.get(CONTEXT_TOKENS_ENV) or 0)
+        if value < 0:
+            raise ValueError(f"{CONTEXT_TOKENS_ENV} 必须为正数或留空")
+        return value or None
+
     def checkpoint_limits(self, elapsed):
         timeout = float(self.environment.get(
             CHECKPOINT_TIMEOUT_ENV, str(CHECKPOINT_DEFAULT_TIMEOUT)))
@@ -124,7 +137,7 @@ class DirectAgentRuntime:
         revision = f"core-direct-{PROMPT_VERSION}"
         if checkpoint:
             revision += f"-checkpoint-{CHECKPOINT_VERSION}"
-        return {
+        settings = {
             "agentVersion": 1,
             "runtimeRevision": revision,
             "requestedModel": getattr(self.model, "model_name", None)
@@ -150,6 +163,13 @@ class DirectAgentRuntime:
             "checkpointContextChars": self.environment.get(
                 CHECKPOINT_CONTEXT_CHARS_ENV, str(CHECKPOINT_DEFAULT_CONTEXT_CHARS)),
         }
+        if self.answer_closure_enabled():
+            settings.update(runtimeRevision=f"{revision}-closure-{answer_closure.VERSION}",
+                            answerClosureVersion=answer_closure.VERSION, runtimeTools=[answer_closure.TOOL_NAME])
+        if token_limit := self.context_tokens():
+            settings.update(runtimeRevision=f"{settings['runtimeRevision']}-context-{context_manager.VERSION}",
+                            contextTokens=token_limit, contextVersion=context_manager.VERSION)
+        return settings
 
     def chat_model(self, *, timeout=None, max_tokens=None):
         if self.model is not None:
@@ -206,6 +226,10 @@ class DirectAgentRuntime:
         checkpoint_calls = 0
         checkpoint_summary = None
         stop_reason = None
+        closure = (answer_closure.AnswerClosure(question, context.materials)
+                   if self.answer_closure_enabled() else None)
+        managed = None
+        delivered = []
 
         def emit(kind, **payload):
             event = {"sequence": len(events) + 1, "eventType": kind, "payload": payload,
@@ -223,7 +247,7 @@ class DirectAgentRuntime:
             )
 
         def usage():
-            return {
+            result = {
                 "modelCalls": calls,
                 "inputTokens": token_usage.get("input_tokens"),
                 "outputTokens": token_usage.get("output_tokens"),
@@ -238,6 +262,12 @@ class DirectAgentRuntime:
                 "checkpoint": checkpoint_summary,
                 "semanticProof": False,
             }
+            if closure:
+                result["answerClosure"] = closure.snapshot()
+            if managed:
+                result["contextManager"] = {"compactions": managed.compactions, "summaryCalls": managed.summary_calls,
+                                            "memory": managed.snapshot()}
+            return result
 
         def stopped(reason):
             nonlocal stop_reason
@@ -252,7 +282,7 @@ class DirectAgentRuntime:
         def finish(answer, status, reason):
             nonlocal stop_reason
             stop_reason = reason
-            verification = verify_answer(answer, messages)
+            verification = verify_answer(answer, delivered if managed else messages)
             emit("text", id="answer", text=answer, mode="replace")
             if status == "completed":
                 emit("status", phase="completed", label="已完成")
@@ -260,7 +290,10 @@ class DirectAgentRuntime:
                 label = "预算用尽" if reason == "budget" else "连续无新增证据"
                 emit("status", phase="incomplete", label=f"调查未完成（{label}），已保留部分答案")
             if not cancel_check or not cancel_check():
-                store.save(session, scope, messages)
+                history = managed.history(messages) if managed else messages
+                if closure:
+                    history = list(answer_closure.session_messages(history))
+                store.save(session, scope, history, investigation_memory=managed.snapshot() if managed else None)
             result_usage = usage()
             result_usage["verification"] = verification
             result_usage["references"] = verification["references"]
@@ -270,14 +303,27 @@ class DirectAgentRuntime:
         store = DirectSessionStore(context.project.data_root / "query-sessions" / "core")
         scope = self._session_scope(context, prepared)
         session = session_id or context.session_id or f"DA-{uuid.uuid4().hex}"
-        messages = retire_changed_sources(store.load(session, scope), prepared.files)
-        messages.append(HumanMessage(question))
-        system_prompt = self._system_prompt(context, prepared)
-        chat = self.chat_model()
-        bound = chat.bind_tools(list(prepared.tools))
-        tool_map = {tool.name: tool for tool in prepared.tools}
-        ledger = ReadLedger()
+        history, saved_memory = store.load_context(session, scope)
+        messages = retire_changed_sources(history, prepared.files)
+        user_message = HumanMessage(question)
         char_limit = int(self.environment.get("BUSINESS_CODE_AGENT_CONTEXT_CHARS", "64000"))
+        output_tokens = int(self.environment.get("BUSINESS_CODE_AGENT_OUTPUT_TOKENS", "4096"))
+        final_tokens = int(self.environment.get("BUSINESS_CODE_AGENT_FINAL_OUTPUT_TOKENS", "3072"))
+        if token_limit := self.context_tokens():
+            if token_limit <= max(output_tokens, final_tokens):
+                raise RuntimeErrorBase("上下文 token 预算必须大于模型输出上限")
+            managed = context_manager.ContextManager(token_limit, char_limit, user_message, len(messages),
+                                                      context.materials, saved=saved_memory, files=prepared.files)
+        messages.append(user_message)
+        system_prompt = self._system_prompt(context, prepared)
+        tools = list(prepared.tools)
+        if closure:
+            system_prompt += "\n\n" + answer_closure.GUIDANCE
+            tools.append(closure.tool())
+        chat = self.chat_model()
+        bound = chat.bind_tools(tools)
+        tool_map = {tool.name: tool for tool in tools}
+        ledger = ReadLedger()
 
         def record_usage(message):
             for key, value in (getattr(message, "usage_metadata", None) or {}).items():
@@ -286,13 +332,13 @@ class DirectAgentRuntime:
             if (message.response_metadata or {}).get("model_name"):
                 reported_models.add(str(message.response_metadata["model_name"]))
 
-        tool_definitions = [convert_to_openai_tool(tool) for tool in prepared.tools]
+        tool_definitions = [convert_to_openai_tool(tool) for tool in tools]
 
         def record_call(entry):
             if call_callback:
                 call_callback({**entry})
 
-        def begin_call(request_messages, attempt, tools=None, phase="investigation"):
+        def begin_call(request_messages, attempt, tools=None, phase="investigation", context_budget=None):
             entry = {
                 "attempt": attempt,
                 "phase": phase,
@@ -303,6 +349,8 @@ class DirectAgentRuntime:
                 "status": "running",
                 "inputTextChars": sum(len(str(message.content)) for message in request_messages),
             }
+            if context_budget is not None:
+                entry["contextBudget"] = context_budget
             record_call(entry)
             return entry
 
@@ -388,12 +436,18 @@ class DirectAgentRuntime:
                 checkpoint_summary = {"status": "skipped", "reason": "budget"}
                 emit("checkpoint", attempt=calls, status="skipped", reason="budget")
                 return None
+            request_messages = [SystemMessage(prompt), *bounded, request]
+            size = managed.measure(request_messages, []) if managed else None
+            if managed and not managed.fits(size, max_tokens):
+                checkpoint_summary = {"status": "skipped", "reason": "context"}
+                emit("checkpoint", attempt=calls, status="skipped", reason="context")
+                return None
             calls += 1
             checkpoint_calls += 1
             emit("status", phase="checkpoint", label="正在整理调查进展（检查点）")
             call_started = time.monotonic()
-            request_messages = [SystemMessage(prompt), *bounded, request]
-            call_entry = begin_call(request_messages, calls, tools=[], phase="checkpoint")
+            call_entry = begin_call(request_messages, calls, tools=[], phase="checkpoint",
+                                    context_budget=managed.metrics(size, max_tokens) if managed else None)
             try:
                 checkpoint_chat = self.chat_model(timeout=timeout, max_tokens=max_tokens)
                 response = await controlled(checkpoint_chat.ainvoke(request_messages))
@@ -411,6 +465,8 @@ class DirectAgentRuntime:
                      errorType=type(exc).__name__)
                 return None
             record_usage(response)
+            if managed:
+                managed.observe_usage(size, response)
             finish_call(call_entry, call_started, response=response, phase="checkpoint")
             data = _checkpoint_json(str(response.text or ""))
             reason = "parse"
@@ -482,6 +538,64 @@ class DirectAgentRuntime:
                 progress, additional_kwargs={"runtimeOnly": CHECKPOINT_RUNTIME_ONLY}))
             return progress
 
+        async def compact_context(prompt, tail, definitions, reserve_tokens, finalize_reason, finalize_reserve):
+            nonlocal calls
+            before = managed.measure(managed.request(messages, prompt, tail), definitions)
+            cut = managed.cut(messages, prompt, tail, definitions, reserve_tokens)
+            trimmed = managed.trim_old_search_results(messages, cut)
+            if trimmed:
+                after_search = managed.measure(managed.request(messages, prompt, tail), definitions)
+                if managed.fits(after_search, reserve_tokens):
+                    cut = managed.kept_from
+                else:
+                    cut = managed.cut(messages, prompt, tail, definitions, reserve_tokens)
+            dropped = cut - managed.kept_from
+            summary = None
+            summary_reads = ()
+            status = "pruned"
+            if (dropped and not finalize_reason
+                    and (self.max_calls is None or self.max_calls - calls > FINALIZE_RESERVED_CALLS + 1)
+                    and (self.max_seconds is None or self.max_seconds - (time.monotonic() - started)
+                         > finalize_reserve + context_manager.SUMMARY_TIMEOUT_SECONDS)):
+                request, summary_reads = managed.summary_request(messages, cut)
+                size = managed.measure(request, [])
+                if managed.fits(size, context_manager.SUMMARY_OUTPUT_TOKENS):
+                    calls += 1
+                    managed.summary_calls += 1
+                    emit("status", phase="compaction", label="正在压缩调查上下文")
+                    call_started = time.monotonic()
+                    entry = begin_call(request, calls, tools=[], phase="compaction",
+                                       context_budget=managed.metrics(size, context_manager.SUMMARY_OUTPUT_TOKENS))
+                    try:
+                        summarizer = self.chat_model(timeout=context_manager.SUMMARY_TIMEOUT_SECONDS,
+                                                     max_tokens=context_manager.SUMMARY_OUTPUT_TOKENS)
+                        response = await controlled(summarizer.ainvoke(request))
+                    except _Stopped as exc:
+                        finish_call(entry, call_started, status="cancelled" if str(exc) == _STOPPED else "incomplete")
+                        raise
+                    except Exception as exc:
+                        finish_call(entry, call_started, error=exc)
+                        status = "fallback"
+                    else:
+                        finish_call(entry, call_started, response=response, phase="compaction")
+                        record_usage(response)
+                        managed.observe_usage(size, response)
+                        summary = response.text
+                        status = "summarized"
+            accepted, rejected = managed.advance(messages, cut, summary=summary, summary_reads=summary_reads,
+                                                  linked_findings=closure.memory_findings() if closure else ())
+            if status == "summarized" and not accepted:
+                status = "fallback"
+            after = managed.measure(managed.request(messages, prompt, tail), definitions)
+            if not managed.fits(after, reserve_tokens) and managed.kept_from < len(messages):
+                extra_cut = managed.cut(messages, prompt, tail, definitions, reserve_tokens)
+                dropped += extra_cut - managed.kept_from
+                managed.kept_from = extra_cut
+                after = managed.measure(managed.request(messages, prompt, tail), definitions)
+            emit("compaction", status=status, removedMessages=dropped, trimmedSearchResults=trimmed,
+                 beforeInputTokens=before.tokens, afterInputTokens=after.tokens,
+                 confirmedFindings=len(managed.memory.confirmedFindings),
+                 pendingQuestions=len(managed.memory.pendingQuestions), rejectedFindings=rejected)
         try:
             while True:
                 if cancel_check and cancel_check():
@@ -505,20 +619,41 @@ class DirectAgentRuntime:
                     prompt = system_prompt + FINALIZE_NOTICE
                     if index:
                         prompt += "\n\n已读证据索引（仅用于引用，不要重复读取）：\n" + index
-                    final_message = HumanMessage(FINAL_ANSWER_REQUEST)
+                    final_message = HumanMessage(answer_closure.FINAL_GUIDANCE if closure else FINAL_ANSWER_REQUEST)
                     invoker = self.chat_model(
                         timeout=max(60.0, finalize_reserve),
-                        max_tokens=int(self.environment.get(
-                            "BUSINESS_CODE_AGENT_FINAL_OUTPUT_TOKENS", "3072")))
+                        max_tokens=final_tokens)
                 elif stalled_reads >= STALL_WARN_READS:
                     prompt = system_prompt + STALL_NOTICE
-                tail_chars = len(final_message.content) if final_message is not None else 0
-                content_budget = max(1, char_limit - len(prompt) - tail_chars)
-                bounded = compact_messages(messages, content_budget)
+                if closure:
+                    prompt += closure.prompt_state()
+                definitions = [] if finalize_reason else tool_definitions
+                reserve_tokens = final_tokens if finalize_reason else output_tokens
+                budget = None
+                if managed:
+                    request_messages = managed.request(messages, prompt, final_message)
+                    size = managed.measure(request_messages, definitions)
+                    if not managed.fits(size, reserve_tokens):
+                        await compact_context(prompt, final_message, definitions, reserve_tokens,
+                                              finalize_reason, finalize_reserve)
+                        request_messages = managed.request(messages, prompt, final_message)
+                        size = managed.measure(request_messages, definitions)
+                    if not managed.fits(size, reserve_tokens):
+                        raise RuntimeErrorBase("上下文 token 预算不足，请调整预算或缩小问题范围")
+                    budget = managed.metrics(size, reserve_tokens)
+                    bounded = request_messages[1:]
+                else:
+                    tail_chars = len(final_message.content) if final_message is not None else 0
+                    content_budget = max(1, char_limit - len(prompt) - tail_chars)
+                    bounded = compact_messages(messages, content_budget)
+                    if (sum(len(str(message.content)) for message in bounded) + tail_chars > content_budget):
+                        raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
+                    request_messages = [SystemMessage(prompt), *bounded, *([final_message] if final_message else [])]
+                delivered = bounded
                 ledger.observe(bounded)
-                if (sum(len(str(message.content)) for message in bounded) + tail_chars
-                        > content_budget):
-                    raise RuntimeErrorBase("上下文容量不足，请缩小问题范围后重试")
+                if closure:
+                    turn_start = next(index for index, message in enumerate(bounded) if message is user_message)
+                    closure.ledger.observe(bounded[turn_start + 1:])
                 calls += 1
                 if finalize_reason:
                     emit("status", phase="thinking", label=f"正在整理答案（{finalize_label}）")
@@ -526,12 +661,8 @@ class DirectAgentRuntime:
                     emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮，连续无新增证据）")
                 else:
                     emit("status", phase="thinking", label=f"正在分析（第 {calls} 轮）")
-                request_messages = [SystemMessage(prompt), *bounded]
-                if final_message is not None:
-                    request_messages.append(final_message)
                 call_started = time.monotonic()
-                call_entry = begin_call(request_messages, calls,
-                                        tools=[] if finalize_reason else None)
+                call_entry = begin_call(request_messages, calls, tools=definitions, context_budget=budget)
                 try:
                     response = await controlled(invoker.ainvoke(request_messages))
                 except _Stopped as exc:
@@ -547,6 +678,8 @@ class DirectAgentRuntime:
                             "incomplete", finalize_reason)
                     raise
                 record_usage(response)
+                if managed:
+                    managed.observe_usage(size, response)
                 messages.append(response)
                 finish_call(call_entry, call_started, response=response,
                             phase="answer" if finalize_reason else None)
@@ -557,6 +690,11 @@ class DirectAgentRuntime:
                      outputTokens=token_usage.get("output_tokens"))
                 if finalize_reason:
                     final_text = str(response.text or "").strip()
+                    if closure:
+                        closure.accept_text(final_text)
+                        final = (f"（调查未完成：{finalize_label}）\n\n" + closure.render())
+                        messages[-1] = AIMessage(content=final)
+                        return finish(final, "incomplete", finalize_reason)
                     if final_text:
                         final = (f"（调查未完成：{finalize_label}，"
                                  f"以下为基于已读证据整理的部分答案）\n\n{final_text}")
@@ -568,6 +706,10 @@ class DirectAgentRuntime:
                     final = str(response.text or "").strip()
                     if not final:
                         raise RuntimeErrorBase("模型没有返回最终答案")
+                    if closure:
+                        closure.accept_text(final)
+                        final = closure.render()
+                        messages[-1] = AIMessage(content=final)
                     break
                 for call in pending_calls:
                     if cancel_check and cancel_check():
@@ -614,6 +756,12 @@ class DirectAgentRuntime:
                         content=output, name=name, tool_call_id=call_id,
                         status="error" if failed else "success",
                     ))
+                if closure and closure.submitted:
+                    call_entry["phase"] = "answer"
+                    record_call(call_entry)
+                    final = closure.render()
+                    messages.append(AIMessage(content=final))
+                    break
         except _Stopped as exc:
             return stopped(str(exc) or _STOPPED)
 
@@ -642,6 +790,10 @@ class DirectAgentRuntime:
                 "checkpointOutputTokens": settings.get("checkpointOutputTokens"),
                 "checkpointContextChars": settings.get("checkpointContextChars"),
             })
+        if self.answer_closure_enabled():
+            scope["answerClosureVersion"] = answer_closure.VERSION
+        if self.context_tokens():
+            scope.update(contextTokens=settings["contextTokens"], contextVersion=settings["contextVersion"])
         return scope
 
     def _system_prompt(self, context: RunContext, prepared: PreparedCapabilities) -> str:

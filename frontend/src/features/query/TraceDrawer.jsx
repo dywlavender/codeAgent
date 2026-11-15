@@ -109,7 +109,8 @@ function TraceDetail({ item }) {
     </div>)}
     <details><summary>工具定义 · {value.tools?.length || 0}</summary><JsonBlock value={value.tools} /></details>
     <h4>公开响应</h4><JsonBlock value={value.responses || { errorType: value.errorType, error: value.error, status: value.status }} />
-    <details><summary>用量与本次调查状态</summary><JsonBlock value={{ usage: value.usage, investigation: value.investigation }} /></details>
+    <details><summary>用量与本次调查状态</summary><JsonBlock value={{ usage: value.usage,
+      contextBudget: value.contextBudget, investigation: value.investigation }} /></details>
   </>;
   if (item.kind === "tool") return <>
     <h3>{item.title} · {item.subtitle}</h3>

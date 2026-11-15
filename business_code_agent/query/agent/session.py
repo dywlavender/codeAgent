@@ -249,19 +249,23 @@ class DirectSessionStore:
         return self.root / f"{session}.json"
 
     def load(self, session, scope):
+        return self.load_context(session, scope)[0]
+
+    def load_context(self, session, scope):
         path = self._path(session)
         if path is None or not path.is_file():
-            return []
+            return [], {}
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return []
+            return [], {}
         if value.get("scope") != scope:
-            return []
+            return [], {}
         messages = messages_from_dict(value.get("messages") or [])
-        return [message for message in messages if not is_checkpoint_runtime_only(message)]
+        return ([message for message in messages if not is_checkpoint_runtime_only(message)],
+                value.get("investigationMemory") or {})
 
-    def save(self, session, scope, messages):
+    def save(self, session, scope, messages, *, investigation_memory=None):
         path = self._path(session)
         if path is None:
             return
@@ -270,10 +274,12 @@ class DirectSessionStore:
         start = humans[-6] if len(humans) > 6 else 0
         self.root.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({
-            "scope": scope,
-            "messages": messages_to_dict(compact_messages(messages[start:])),
-        }, ensure_ascii=False), encoding="utf-8")
+        history = messages[start:]
+        value = {"scope": scope, "messages": messages_to_dict(
+            compact_messages(history) if investigation_memory is None else history)}
+        if investigation_memory is not None:
+            value["investigationMemory"] = investigation_memory
+        temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
 
 

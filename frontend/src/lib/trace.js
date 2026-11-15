@@ -1,10 +1,11 @@
 import { RUN_STATUS_LABEL } from "./query-state.js";
 
+const MODEL_PHASE_LABEL = { answer: "整理答案", checkpoint: "调查检查点", compaction: "压缩上下文" };
+
 export function traceTimeline(trace) {
   const items = (trace.calls || []).map((call) => ({
     id: `model:${call.attempt}`, kind: "model", title: `模型调用 ${call.attempt}`,
-    subtitle: call.phase === "answer" ? "整理答案"
-      : call.phase === "checkpoint" ? "调查检查点" : "调查", status: call.status,
+    subtitle: MODEL_PHASE_LABEL[call.phase] || "调查", status: call.status,
     elapsedMs: call.elapsedMs ?? null, data: call,
   }));
   const tools = new Map();
@@ -18,6 +19,10 @@ export function traceTimeline(trace) {
     } else if (event.eventType === "retrieval") {
       items.push({ id: `retrieval:${event.sequence}`, kind: "retrieval", title: value.label || "检索调度",
         subtitle: value.tool || "调查事项", elapsedMs: event.elapsedMs ?? null, data: value });
+    } else if (event.eventType === "compaction") {
+      items.push({ id: `compaction:${event.sequence}`, kind: "compaction", title: "裁剪上下文",
+        subtitle: `输入估算 ${value.beforeInputTokens} → ${value.afterInputTokens} token`, status: value.status,
+        elapsedMs: event.elapsedMs ?? null, data: value });
     } else if (event.eventType === "error") {
       items.push({ id: `error:${event.sequence}`, kind: "error", title: "运行错误", subtitle: value.error,
         status: "failed", elapsedMs: event.elapsedMs ?? trace.run?.durationMs ?? 0, data: value });
@@ -30,7 +35,8 @@ export function traceTimeline(trace) {
   return items.sort((a, b) => (a.elapsedMs ?? Infinity) - (b.elapsedMs ?? Infinity));
 }
 
-export const traceStatus = (status) => ({ ...RUN_STATUS_LABEL, completed: "已完成", error: "失败", success: "已完成", interrupted: "未完成", skipped: "已跳过" }[status] || status || "");
+export const traceStatus = (status) => ({ ...RUN_STATUS_LABEL, completed: "已完成", error: "失败", success: "已完成",
+  interrupted: "未完成", skipped: "已跳过", summarized: "已更新摘要", pruned: "仅裁剪", fallback: "摘要未更新" }[status] || status || "");
 
 export const traceStopReason = (trace) => trace?.stopReason || trace?.run?.usage?.stopReason || trace?.usage?.stopReason || "";
 
