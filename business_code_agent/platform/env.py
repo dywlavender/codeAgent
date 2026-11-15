@@ -59,6 +59,29 @@ def load_env_file(path: str | Path | None = None, *, override: bool = True) -> l
     return loaded
 
 
+def normalize_proxy_environment() -> list[str]:
+    """Strip IPv6 brackets from NO_PROXY entries for HTTP client compatibility."""
+    changed: list[str] = []
+    for key in ("NO_PROXY", "no_proxy"):
+        value = os.environ.get(key)
+        if not value:
+            continue
+        entries: list[str] = []
+        for raw_entry in value.split(","):
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            if entry.startswith("[") and entry.endswith("]"):
+                entry = entry[1:-1]
+            if entry not in entries:
+                entries.append(entry)
+        normalized = ",".join(entries)
+        if normalized != value:
+            os.environ[key] = normalized
+            changed.append(key)
+    return changed
+
+
 def _parse_value(raw_value: str, path: Path, line_number: int) -> str:
     if not raw_value:
         return ""

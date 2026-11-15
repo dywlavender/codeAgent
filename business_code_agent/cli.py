@@ -10,7 +10,11 @@ import tempfile
 from pathlib import Path
 
 from business_code_agent.codeintel.analysis import JavaIndexer
-from business_code_agent.platform.env import EnvFileError, load_env_file
+from business_code_agent.platform.env import (
+    EnvFileError,
+    load_env_file,
+    normalize_proxy_environment,
+)
 from business_code_agent.requirement.builder import RequirementBuilder
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.storage.schema import connect
@@ -132,6 +136,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         load_env_file()
+        normalize_proxy_environment()
     except EnvFileError as exc:
         parser.error(str(exc))
     if args.command == "serve-query":
