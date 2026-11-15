@@ -25,27 +25,37 @@ from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from business_code_agent.query.traces import public_message
-from .session import DirectSessionStore, ReadLedger, compact_messages, retire_changed_sources
+from .session import (
+    CHECKPOINT_RUNTIME_ONLY,
+    DirectSessionStore,
+    ReadLedger,
+    compact_checkpoint_messages,
+    compact_messages,
+    retire_changed_sources,
+)
 
 
 PROMPT_VERSION = 2
-CHECKPOINT_VERSION = 1
+CHECKPOINT_VERSION = 2
 CHECKPOINT_ENABLED_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED"
+CHECKPOINT_TIMEOUT_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_TIMEOUT"
+CHECKPOINT_OUTPUT_TOKENS_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_OUTPUT_TOKENS"
+CHECKPOINT_CONTEXT_CHARS_ENV = "BUSINESS_CODE_AGENT_CHECKPOINT_CONTEXT_CHARS"
+CHECKPOINT_DEFAULT_TIMEOUT = 45.0
+CHECKPOINT_DEFAULT_OUTPUT_TOKENS = 1024
+CHECKPOINT_DEFAULT_CONTEXT_CHARS = 20000
 _STOPPED = "cancelled"
 STALL_WARN_READS = 6
 STALL_FINALIZE_READS = 10
 FINALIZE_RESERVED_CALLS = 2
 FINALIZE_RESERVED_SECONDS = 200.0
-CHECKPOINT_NOTICE = (
-    "\n\n调查进展检查点：现在暂停调查，基于本轮已 Read 到的源码整理阶段性结论。"
-    "不要调用工具，只输出一个 JSON 对象，不要代码围栏。\n"
-    "JSON 结构：{\"draftAnswer\":\"当前可给出的主要结论\","
-    "\"aspects\":[{\"question\":\"待确认事项\",\"status\":\"confirmed|partial|missing\","
-    "\"claim\":\"结论\",\"evidence\":[\"repos/.../File.java:42-50\"]}],"
-    "\"gaps\":[{\"question\":\"缺口\",\"importance\":\"required|optional\","
-    "\"reason\":\"为什么影响回答\",\"nextAction\":\"下一步核实动作\"}]}\n"
-    "要求：confirmed 必须给出已 Read 的路径和行号；没有可核验证据时用 partial 或 missing；"
-    "aspects 要覆盖用户问题要求确认的主要环节；gaps 只列会影响回答的关键缺口。"
+CHECKPOINT_SYSTEM = (
+    "你是只读调查进度整理器。只输出一个 JSON，不要解释。"
+    "结构：{\"draftAnswer\":\"一句话\",\"aspects\":[{\"id\":\"A1\",\"question\":\"事项\","
+    "\"required\":true,\"status\":\"confirmed|partial|missing\",\"claim\":\"结论\","
+    "\"evidence\":[\"repos/...:1-5\"]}],\"gaps\":[{\"aspectId\":\"A1\","
+    "\"importance\":\"required|optional\",\"resolvable\":true,\"reason\":\"原因\"}]}。"
+    "最多 3 个 aspects、2 个 gaps，总数不超过 800 字。"
 )
 CHECKPOINT_REQUEST = (
     "现在执行调查进展检查点。只输出上述 JSON 对象，不要输出 JSON 以外的文字。")
@@ -98,6 +108,17 @@ class DirectAgentRuntime:
         return self.environment.get(CHECKPOINT_ENABLED_ENV, "false").strip().lower() in {
             "1", "true", "yes", "on"}
 
+    def checkpoint_limits(self, elapsed):
+        timeout = float(self.environment.get(
+            CHECKPOINT_TIMEOUT_ENV, str(CHECKPOINT_DEFAULT_TIMEOUT)))
+        max_tokens = max(1, int(self.environment.get(
+            CHECKPOINT_OUTPUT_TOKENS_ENV, str(CHECKPOINT_DEFAULT_OUTPUT_TOKENS))))
+        if self.max_seconds is not None:
+            reserve = min(FINALIZE_RESERVED_SECONDS, self.max_seconds * 0.4)
+            remaining = self.max_seconds - elapsed - reserve
+            timeout = min(timeout, max(1.0, remaining))
+        return timeout, max_tokens
+
     def execution_settings(self):
         checkpoint = self.checkpoint_enabled()
         revision = f"core-direct-{PROMPT_VERSION}"
@@ -122,6 +143,12 @@ class DirectAgentRuntime:
             "maxRetries": 0,
             "checkpointEnabled": checkpoint,
             "checkpointVersion": CHECKPOINT_VERSION if checkpoint else None,
+            "checkpointTimeoutSeconds": self.environment.get(
+                CHECKPOINT_TIMEOUT_ENV, str(CHECKPOINT_DEFAULT_TIMEOUT)),
+            "checkpointOutputTokens": self.environment.get(
+                CHECKPOINT_OUTPUT_TOKENS_ENV, str(CHECKPOINT_DEFAULT_OUTPUT_TOKENS)),
+            "checkpointContextChars": self.environment.get(
+                CHECKPOINT_CONTEXT_CHARS_ENV, str(CHECKPOINT_DEFAULT_CONTEXT_CHARS)),
         }
 
     def chat_model(self, *, timeout=None, max_tokens=None):
@@ -339,17 +366,27 @@ class DirectAgentRuntime:
 
         async def run_checkpoint():
             nonlocal calls, checkpoint_calls, checkpoint_summary
-            index = ledger.index()
-            prompt = system_prompt + CHECKPOINT_NOTICE
-            if index:
-                prompt += "\n\n已读证据索引（仅用于引用，不要重复读取）：\n" + index
+            prompt = CHECKPOINT_SYSTEM
             request = HumanMessage(CHECKPOINT_REQUEST)
-            content_budget = max(1, char_limit - len(prompt) - len(request.content))
-            bounded = compact_messages(messages, content_budget)
+            try:
+                timeout, max_tokens = self.checkpoint_limits(time.monotonic() - started)
+                checkpoint_chars = max(2000, int(self.environment.get(
+                    CHECKPOINT_CONTEXT_CHARS_ENV, str(CHECKPOINT_DEFAULT_CONTEXT_CHARS))))
+            except (TypeError, ValueError):
+                checkpoint_summary = {"status": "failed", "reason": "config"}
+                emit("checkpoint", attempt=calls, status="failed", reason="config")
+                return None
+            content_budget = max(
+                1, min(char_limit, checkpoint_chars) - len(prompt) - len(request.content))
+            bounded = compact_checkpoint_messages(messages, content_budget)
             if (sum(len(str(message.content)) for message in bounded)
                     + len(request.content) > content_budget):
                 checkpoint_summary = {"status": "skipped", "reason": "context"}
                 emit("checkpoint", attempt=calls, status="skipped", reason="context")
+                return None
+            if timeout <= 1.0:
+                checkpoint_summary = {"status": "skipped", "reason": "budget"}
+                emit("checkpoint", attempt=calls, status="skipped", reason="budget")
                 return None
             calls += 1
             checkpoint_calls += 1
@@ -358,7 +395,8 @@ class DirectAgentRuntime:
             request_messages = [SystemMessage(prompt), *bounded, request]
             call_entry = begin_call(request_messages, calls, tools=[], phase="checkpoint")
             try:
-                response = await controlled(chat.ainvoke(request_messages))
+                checkpoint_chat = self.chat_model(timeout=timeout, max_tokens=max_tokens)
+                response = await controlled(checkpoint_chat.ainvoke(request_messages))
             except _Stopped as exc:
                 reason = str(exc) or _STOPPED
                 finish_call(call_entry, call_started,
@@ -367,23 +405,51 @@ class DirectAgentRuntime:
             except Exception as exc:
                 finish_call(call_entry, call_started, error=exc)
                 checkpoint_summary = {"status": "failed", "errorType": type(exc).__name__}
+                call_entry["checkpoint"] = checkpoint_summary
+                record_call(call_entry)
                 emit("checkpoint", attempt=calls, status="failed",
                      errorType=type(exc).__name__)
                 return None
             record_usage(response)
             finish_call(call_entry, call_started, response=response, phase="checkpoint")
-            parsed = _parse_checkpoint(str(response.text or ""))
+            data = _checkpoint_json(str(response.text or ""))
+            reason = "parse"
+            parsed = None
+            if isinstance(data, dict):
+                try:
+                    parsed = _normalize_checkpoint(data)
+                except (TypeError, ValueError, KeyError, AttributeError) as exc:
+                    reason = "structure"
+                    checkpoint_summary = {"status": "failed", "reason": reason,
+                                          "errorType": type(exc).__name__}
+                if parsed is None and checkpoint_summary is None:
+                    reason = "structure"
             if parsed is None:
-                checkpoint_summary = {"status": "failed", "reason": "parse"}
+                checkpoint_summary = checkpoint_summary or {"status": "failed", "reason": reason}
                 call_entry["checkpoint"] = checkpoint_summary
                 record_call(call_entry)
-                emit("checkpoint", attempt=calls, status="failed", reason="parse")
+                emit("checkpoint", attempt=calls, status="failed", reason=reason)
                 return None
-            _verify_checkpoint(parsed, messages)
-            confirmed = sum(1 for item in parsed["aspects"] if item["status"] == "confirmed")
-            partial = sum(1 for item in parsed["aspects"] if item["status"] == "partial")
-            missing = sum(1 for item in parsed["aspects"] if item["status"] == "missing")
-            required = [gap for gap in parsed["gaps"] if gap["importance"] == "required"]
+            try:
+                _verify_checkpoint(parsed, messages)
+                confirmed = sum(1 for item in parsed["aspects"]
+                                if item["status"] == "confirmed")
+                partial = sum(1 for item in parsed["aspects"]
+                               if item["status"] == "partial")
+                missing = sum(1 for item in parsed["aspects"]
+                               if item["status"] == "missing")
+                required = [gap for gap in parsed["gaps"] if gap["importance"] == "required"]
+                unresolvable = [gap for gap in required if not gap["resolvable"]]
+                adjusted = [gap for gap in parsed["gaps"] if gap.get("importanceAdjusted")]
+                progress = _checkpoint_progress(parsed)
+            except Exception as exc:
+                checkpoint_summary = {"status": "failed", "reason": "structure",
+                                      "errorType": type(exc).__name__}
+                call_entry["checkpoint"] = checkpoint_summary
+                record_call(call_entry)
+                emit("checkpoint", attempt=calls, status="failed", reason="structure",
+                     errorType=type(exc).__name__)
+                return None
             checkpoint_summary = {
                 "status": "completed",
                 "confirmedCount": confirmed,
@@ -391,13 +457,17 @@ class DirectAgentRuntime:
                 "missingCount": missing,
                 "gapCount": len(parsed["gaps"]),
                 "requiredGapCount": len(required),
-                "gaps": [{"question": gap["question"], "importance": gap["importance"]}
+                "requiredUnresolvableCount": len(unresolvable),
+                "adjustedGapCount": len(adjusted),
+                "gaps": [{"aspectId": gap["aspectId"], "question": gap["question"],
+                          "importance": gap["importance"], "resolvable": gap["resolvable"]}
                          for gap in parsed["gaps"][:8]],
             }
             call_entry["checkpoint"] = {
                 **checkpoint_summary,
                 "draftAnswer": parsed["draftAnswer"][:1000],
-                "aspects": [{"question": item["question"], "status": item["status"],
+                "aspects": [{"id": item["id"], "question": item["question"],
+                             "required": item["required"], "status": item["status"],
                              "evidence": item["evidence"],
                              "verification": item.get("verification")}
                             for item in parsed["aspects"][:8]],
@@ -405,9 +475,11 @@ class DirectAgentRuntime:
             record_call(call_entry)
             emit("checkpoint", attempt=calls, status="completed",
                  confirmedCount=confirmed, partialCount=partial, missingCount=missing,
-                 gapCount=len(parsed["gaps"]), requiredGapCount=len(required))
-            progress = _checkpoint_progress(parsed)
-            messages.append(HumanMessage(progress))
+                 gapCount=len(parsed["gaps"]), requiredGapCount=len(required),
+                 requiredUnresolvableCount=len(unresolvable),
+                 adjustedGapCount=len(adjusted))
+            messages.append(HumanMessage(
+                progress, additional_kwargs={"runtimeOnly": CHECKPOINT_RUNTIME_ONLY}))
             return progress
 
         try:
@@ -549,7 +621,7 @@ class DirectAgentRuntime:
 
     def _session_scope(self, context: RunContext, prepared: PreparedCapabilities) -> dict:
         settings = self.execution_settings()
-        return {
+        scope = {
             "projectId": context.project.project_id,
             "profileId": context.profile.id,
             "repositoryIds": list(context.repository_ids),
@@ -564,6 +636,13 @@ class DirectAgentRuntime:
             "checkpoint": settings.get("checkpointEnabled"),
             "checkpointVersion": settings.get("checkpointVersion"),
         }
+        if settings.get("checkpointEnabled"):
+            scope.update({
+                "checkpointTimeoutSeconds": settings.get("checkpointTimeoutSeconds"),
+                "checkpointOutputTokens": settings.get("checkpointOutputTokens"),
+                "checkpointContextChars": settings.get("checkpointContextChars"),
+            })
+        return scope
 
     def _system_prompt(self, context: RunContext, prepared: PreparedCapabilities) -> str:
         sources = [f"- {source.repository_id}: {source.path}"
@@ -619,7 +698,7 @@ def _checkpoint_due(max_calls, max_seconds, calls, elapsed):
             or (time_half is not None and elapsed >= time_half))
 
 
-def _parse_checkpoint(text):
+def _checkpoint_json(text):
     value = str(text or "").strip()
     if value.startswith("```"):
         value = re.sub(r"^```(?:json)?\s*", "", value)
@@ -631,38 +710,106 @@ def _parse_checkpoint(text):
         data = json.loads(value[start:end + 1])
     except (TypeError, ValueError):
         return None
-    return _normalize_checkpoint(data) if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_checkpoint(text):
+    data = _checkpoint_json(text)
+    if not isinstance(data, dict):
+        return None
+    try:
+        return _normalize_checkpoint(data)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return None
 
 
 def _normalize_checkpoint(data):
+    if not isinstance(data, dict):
+        return None
+    raw_aspects = data.get("aspects")
+    if not isinstance(raw_aspects, list) or not raw_aspects:
+        return None
     aspects = []
-    for item in (data.get("aspects") or [])[:8]:
+    seen = set()
+    for item in raw_aspects[:5]:
         if not isinstance(item, dict):
-            continue
-        status = str(item.get("status") or "partial").strip().lower()
+            return None
+        aspect_id = str(item.get("id") or "").strip()[:40]
+        if not aspect_id or aspect_id in seen:
+            return None
+        seen.add(aspect_id)
+        required = item.get("required", True)
+        if not isinstance(required, bool):
+            return None
+        status = str(item.get("status") or "").strip().lower()
         if status not in {"confirmed", "partial", "missing"}:
-            status = "partial"
-        evidence = [str(value).strip()[:300] for value in (item.get("evidence") or [])
-                    if str(value).strip()][:5]
+            return None
+        question = str(item.get("question") or "").strip()[:300]
+        claim = str(item.get("claim") or "").strip()[:800]
+        if not (question or claim):
+            return None
+        raw_evidence = item.get("evidence")
+        if raw_evidence is None:
+            raw_evidence = []
+        if not isinstance(raw_evidence, list):
+            return None
+        evidence = []
+        for value in raw_evidence[:5]:
+            if not isinstance(value, str):
+                return None
+            value = value.strip()[:240]
+            if value:
+                evidence.append(value)
         aspects.append({
-            "question": str(item.get("question") or "").strip()[:300],
+            "id": aspect_id,
+            "question": question,
+            "required": required,
             "status": status,
-            "claim": str(item.get("claim") or "").strip()[:800],
+            "claim": claim,
             "evidence": evidence,
         })
+    if not any(aspect["required"] for aspect in aspects):
+        return None
+    raw_gaps = data.get("gaps")
+    if raw_gaps is None:
+        raw_gaps = []
+    if not isinstance(raw_gaps, list):
+        return None
     gaps = []
-    for item in (data.get("gaps") or [])[:8]:
+    for item in raw_gaps[:4]:
         if not isinstance(item, dict):
-            continue
-        importance = str(item.get("importance") or "required").strip().lower()
+            return None
+        aspect_id = str(item.get("aspectId") or "").strip()[:40]
+        if aspect_id not in seen:
+            return None
+        importance = str(item.get("importance") or "").strip().lower()
         if importance not in {"required", "optional"}:
-            importance = "required"
+            return None
+        resolvable = item.get("resolvable", True)
+        if not isinstance(resolvable, bool):
+            return None
         gaps.append({
+            "aspectId": aspect_id,
             "question": str(item.get("question") or "").strip()[:300],
             "importance": importance,
-            "reason": str(item.get("reason") or "").strip()[:500],
-            "nextAction": str(item.get("nextAction") or "").strip()[:500],
+            "resolvable": resolvable,
+            "reason": str(item.get("reason") or "").strip()[:400],
+            "nextAction": str(item.get("nextAction") or "").strip()[:400],
         })
+    by_id = {aspect["id"]: aspect for aspect in aspects}
+    for gap in gaps:
+        if not gap["question"]:
+            aspect = by_id[gap["aspectId"]]
+            gap["question"] = aspect["question"] or aspect["claim"]
+    for aspect in aspects:
+        linked = [gap for gap in gaps if gap["aspectId"] == aspect["id"]]
+        if aspect["status"] == "missing" and not linked:
+            return None
+        if aspect["status"] == "missing" and aspect["required"]:
+            if not any(gap["importance"] == "required" for gap in linked):
+                for gap in linked:
+                    gap["importance"] = "required"
+                    gap["importanceAdjusted"] = True
     return {
         "draftAnswer": str(data.get("draftAnswer") or "").strip()[:2000],
         "aspects": aspects,
@@ -704,24 +851,34 @@ def _checkpoint_progress(checkpoint):
             lines.append(f"- {item['question'] or item['claim']}：{item['claim']}")
     if missing:
         lines.append("尚未确认：")
-        for item in missing[:4]:
-            lines.append(f"- {item['question'] or item['claim']}")
+        for item in missing[:5]:
+            flag = "必需" if item["required"] else "非必需"
+            lines.append(f"- [{flag}] {item['question'] or item['claim']}")
     required = [gap for gap in checkpoint["gaps"] if gap["importance"] == "required"]
+    resolvable = [gap for gap in required if gap["resolvable"]]
+    unresolvable = [gap for gap in required if not gap["resolvable"]]
     optional = [gap for gap in checkpoint["gaps"] if gap["importance"] == "optional"]
-    if required:
+    if resolvable:
         lines.append("关键缺口（下一步只补查这些，补齐后立即作答）：")
-        for gap in required[:6]:
+        for gap in resolvable[:6]:
             line = f"- {gap['question']}：{gap['reason']}"
             if gap["nextAction"]:
                 line += f"；建议：{gap['nextAction']}"
             lines.append(line)
-    else:
+    if unresolvable:
+        lines.append("当前授权资料内无法继续核实（不要继续搜索；在答案中说明限制）：")
+        for gap in unresolvable[:6]:
+            line = f"- {gap['question']}：{gap['reason']}"
+            if gap["nextAction"]:
+                line += f"；原计划：{gap['nextAction']}"
+            lines.append(line)
+    if not required:
         lines.append("没有必须补齐的关键缺口；若已确认结论足以回答，请直接作答，"
                      "未确认项在答案中说明。")
     if optional:
         lines.append(f"另有 {len(optional)} 个可选缺口，不影响回答，不必继续调查。")
     lines.append("除非已有结论与源码矛盾，不要再扩展无关分支。")
-    return "\n".join(lines)[:2400]
+    return "\n".join(lines)[:2600]
 
 
 def verify_answer(answer: str, messages) -> dict:

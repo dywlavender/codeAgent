@@ -15,14 +15,17 @@ from langchain_core.tools import tool
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.agent.direct import (
     DirectAgentRuntime,
+    CHECKPOINT_SYSTEM,
     _checkpoint_due,
     _checkpoint_progress,
     _parse_checkpoint,
     verify_answer,
 )
 from business_code_agent.query.agent.session import (
+    CHECKPOINT_RUNTIME_ONLY,
     DirectSessionStore,
     ReadLedger,
+    compact_checkpoint_messages,
     compact_messages,
     retire_changed_sources,
 )
@@ -188,6 +191,7 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertEqual(2, scope["promptVersion"])
         self.assertEqual("core-direct-2", runtime.execution_settings()["runtimeRevision"])
         self.assertFalse(scope["checkpoint"])
+        self.assertNotIn("checkpointTimeoutSeconds", scope)
         store = DirectSessionStore(self.root / "prompt-sessions")
         store.save("DA-prompt", scope, [HumanMessage("旧策略问题")])
         self.assertEqual(1, len(store.load("DA-prompt", scope)))
@@ -196,8 +200,11 @@ class DirectRuntimeTest(unittest.TestCase):
             environment={"BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED": "true"})
         checkpoint_scope = enabled._session_scope(self.context, self.prepared)
         self.assertTrue(checkpoint_scope["checkpoint"])
-        self.assertEqual(1, checkpoint_scope["checkpointVersion"])
-        self.assertEqual("core-direct-2-checkpoint-1",
+        self.assertEqual(2, checkpoint_scope["checkpointVersion"])
+        self.assertEqual("45.0", checkpoint_scope["checkpointTimeoutSeconds"])
+        self.assertEqual("1024", checkpoint_scope["checkpointOutputTokens"])
+        self.assertEqual("20000", checkpoint_scope["checkpointContextChars"])
+        self.assertEqual("core-direct-2-checkpoint-2",
                          enabled.execution_settings()["runtimeRevision"])
         self.assertNotEqual(scope, checkpoint_scope)
         with patch("business_code_agent.query.agent.direct.PROMPT_VERSION", 1):
@@ -216,12 +223,30 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertFalse(_checkpoint_due(None, None, 9, 119))
         self.assertTrue(_checkpoint_due(None, None, 10, 0))
 
+    def test_checkpoint_has_a_short_output_and_time_budget(self):
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=[]), environment={}, max_seconds=300)
+        self.assertEqual((45.0, 1024), runtime.checkpoint_limits(90))
+        self.assertEqual(1.0, runtime.checkpoint_limits(260)[0])
+        overridden = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=[]),
+            environment={"BUSINESS_CODE_AGENT_CHECKPOINT_TIMEOUT": "12",
+                         "BUSINESS_CODE_AGENT_CHECKPOINT_OUTPUT_TOKENS": "512"},
+            max_seconds=300)
+        self.assertEqual((12.0, 512), overridden.checkpoint_limits(90))
+
+    def test_checkpoint_system_prompt_stays_short(self):
+        self.assertLess(len(CHECKPOINT_SYSTEM), 1200)
+        self.assertIn("只输出一个 JSON", CHECKPOINT_SYSTEM)
+        self.assertIn("resolvable", CHECKPOINT_SYSTEM)
+
     def test_checkpoint_parser_handles_code_fences_and_optional_gaps_stay_out_of_progress(self):
         parsed = _parse_checkpoint("```json\n" + json.dumps({
             "draftAnswer": "草稿",
-            "aspects": [{"question": "Q", "status": "confirmed",
-                         "claim": "C", "evidence": ["A.java:1"]}],
-            "gaps": [{"question": "OPTIONAL_SECRET", "importance": "optional",
+            "aspects": [{"id": "A1", "question": "Q", "required": True,
+                         "status": "confirmed", "claim": "C", "evidence": ["A.java:1"]}],
+            "gaps": [{"aspectId": "A1", "question": "OPTIONAL_SECRET",
+                      "importance": "optional", "resolvable": True,
                       "reason": "R", "nextAction": "N"}],
         }, ensure_ascii=False) + "\n```")
         self.assertIsNotNone(parsed)
@@ -231,6 +256,53 @@ class DirectRuntimeTest(unittest.TestCase):
         self.assertIn("已确认：", progress)
         self.assertIn("1 个可选缺口", progress)
         self.assertNotIn("OPTIONAL_SECRET", progress)
+
+    def test_checkpoint_requires_linked_gaps_and_promotes_required_missing_aspects(self):
+        missing = {
+            "draftAnswer": "命令路由未确认。",
+            "aspects": [{"id": "A1", "question": "命令路由如何进入审批 Handler",
+                         "required": True, "status": "missing", "claim": "尚未确认"}],
+            "gaps": [{"aspectId": "A1", "question": "命令路由",
+                      "importance": "optional", "resolvable": True,
+                      "reason": "缺少 Handler 证据", "nextAction": "Read Handler"}],
+        }
+        parsed = _parse_checkpoint(json.dumps(missing, ensure_ascii=False))
+        self.assertIsNotNone(parsed)
+        self.assertEqual("required", parsed["gaps"][0]["importance"])
+        self.assertTrue(parsed["gaps"][0]["importanceAdjusted"])
+        self.assertIn("关键缺口", _checkpoint_progress(parsed))
+
+        unlinked = {**missing, "gaps": [{**missing["gaps"][0], "aspectId": "A9"}]}
+        self.assertIsNone(_parse_checkpoint(json.dumps(unlinked, ensure_ascii=False)))
+        no_gap = {**missing, "gaps": []}
+        self.assertIsNone(_parse_checkpoint(json.dumps(no_gap, ensure_ascii=False)))
+
+    def test_checkpoint_marks_unresolvable_gaps_as_answer_limitations(self):
+        parsed = _parse_checkpoint(json.dumps({
+            "draftAnswer": "产品配置不在授权资料中。",
+            "aspects": [{"id": "A1", "question": "产品实际策略配置",
+                         "required": True, "status": "missing", "claim": "无法确认"}],
+            "gaps": [{"aspectId": "A1", "question": "产品策略配置",
+                      "importance": "required", "resolvable": False,
+                      "reason": "授权仓库中没有产品创建代码", "nextAction": "无"}],
+        }, ensure_ascii=False))
+        self.assertIsNotNone(parsed)
+        progress = _checkpoint_progress(parsed)
+        self.assertIn("无法继续核实", progress)
+        self.assertNotIn("下一步只补查这些", progress)
+
+    def test_checkpoint_rejects_invalid_structures_without_guidance(self):
+        for value in (
+            {"aspects": {}, "gaps": []},
+            {"aspects": [], "gaps": []},
+            {"aspects": [{"id": "A1", "question": "Q", "required": "yes",
+                          "status": "missing", "claim": "C"}], "gaps": []},
+            {"aspects": [{"id": "A1", "question": "Q", "required": True,
+                          "status": "unknown", "claim": "C"}], "gaps": []},
+            {"aspects": [{"id": "A1", "question": "Q", "required": False,
+                          "status": "confirmed", "claim": "C", "evidence": []}], "gaps": []},
+        ):
+            self.assertIsNone(_parse_checkpoint(json.dumps(value, ensure_ascii=False)), value)
 
     def test_checkpoint_is_disabled_by_default(self):
         responses = [
@@ -249,14 +321,15 @@ class DirectRuntimeTest(unittest.TestCase):
         checkpoint = {
             "draftAnswer": "提款入口在渠道，调用 applyWithdraw。",
             "aspects": [
-                {"question": "渠道入口", "status": "confirmed",
-                 "claim": "Channel.applyWithdraw 是入口",
+                {"id": "A1", "question": "渠道入口", "required": True,
+                 "status": "confirmed", "claim": "Channel.applyWithdraw 是入口",
                  "evidence": ["repos/channel/Channel.java:1-4"]},
-                {"question": "决策系统后续处理", "status": "partial",
-                 "claim": "尚未确认决策仓库的调用", "evidence": []},
+                {"id": "A2", "question": "决策系统后续处理", "required": True,
+                 "status": "partial", "claim": "尚未确认决策仓库的调用", "evidence": []},
             ],
             "gaps": [
-                {"question": "决策仓库是否被调用", "importance": "required",
+                {"aspectId": "A2", "question": "决策仓库是否被调用",
+                 "importance": "required", "resolvable": True,
                  "reason": "影响调用链完整性", "nextAction": "Read Decision.java"},
             ],
         }
@@ -283,6 +356,8 @@ class DirectRuntimeTest(unittest.TestCase):
                          (summary["status"], summary["confirmedCount"],
                           summary["partialCount"], summary["gapCount"],
                           summary["requiredGapCount"]))
+        self.assertEqual(0, summary["requiredUnresolvableCount"])
+        self.assertEqual(0, summary["adjustedGapCount"])
         self.assertEqual([1, 2, 3], [entry["attempt"] for entry in entries
                                      if entry.get("status") == "completed"][:3])
         checkpoint_entry = [entry for entry in entries
@@ -300,12 +375,17 @@ class DirectRuntimeTest(unittest.TestCase):
                              if event["eventType"] == "checkpoint"]
         self.assertEqual("completed", checkpoint_events[-1]["status"])
         self.assertEqual(1, checkpoint_events[-1]["confirmedCount"])
+        store = DirectSessionStore(self.project.data_root / "query-sessions" / "core")
+        saved = store.load(result.runtime_session_id,
+                           runtime._session_scope(self.context, self.prepared))
+        self.assertFalse(any("[调查进展检查点]" in str(message.content)
+                             for message in saved))
 
     def test_checkpoint_downgrades_unverified_claims(self):
         unverified = {
             "draftAnswer": "渠道入口已确认。",
-            "aspects": [{"question": "渠道入口", "status": "confirmed",
-                         "claim": "Channel.applyWithdraw 是入口",
+            "aspects": [{"id": "A1", "question": "渠道入口", "required": True,
+                         "status": "confirmed", "claim": "Channel.applyWithdraw 是入口",
                          "evidence": ["repos/channel/Channel.java:99-120"]}],
             "gaps": [],
         }
@@ -364,6 +444,53 @@ class DirectRuntimeTest(unittest.TestCase):
                   if message.get("role") == "human"]
         self.assertFalse(any("[调查进展检查点]" in content for content in humans))
 
+    def test_checkpoint_structure_error_falls_back_without_guidance(self):
+        responses = [
+            AIMessage(content="", tool_calls=[{"id": "r1", "name": "Read",
+                                               "args": {"path": "repos/channel/Channel.java"}}]),
+            AIMessage(content="", tool_calls=[{"id": "r2", "name": "Read",
+                                               "args": {"path": "repos/decision/Decision.java"}}]),
+            AIMessage(content=json.dumps({"draftAnswer": "草稿", "aspects": {}, "gaps": []})),
+            AIMessage(content="提款入口为 repos/channel/Channel.java:3。"),
+        ]
+        entries = []
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=responses),
+            environment={"BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED": "true"},
+            max_calls=6)
+        result = runtime.ask("提款入口在哪里？", context=self.context,
+                             prepared=self.prepared, call_callback=entries.append)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(1, result.usage["checkpointCalls"])
+        summary = result.usage["checkpoint"]
+        self.assertEqual(("failed", "structure"), (summary["status"], summary["reason"]))
+        final_entry = next(entry for entry in entries if entry.get("attempt") == 4
+                           and entry.get("status") == "completed")
+        humans = [message["content"] for message in final_entry["messages"]
+                  if message.get("role") == "human"]
+        self.assertFalse(any("[调查进展检查点]" in content for content in humans))
+
+    def test_checkpoint_invalid_budget_config_falls_back(self):
+        responses = [
+            AIMessage(content="", tool_calls=[{"id": "r1", "name": "Read",
+                                               "args": {"path": "repos/channel/Channel.java"}}]),
+            AIMessage(content="", tool_calls=[{"id": "r2", "name": "Read",
+                                               "args": {"path": "repos/decision/Decision.java"}}]),
+            AIMessage(content="提款入口为 repos/channel/Channel.java:3。"),
+        ]
+        runtime = DirectAgentRuntime(
+            profile=CORE, model=ToolModel(responses=responses),
+            environment={"BUSINESS_CODE_AGENT_CHECKPOINT_ENABLED": "true",
+                         "BUSINESS_CODE_AGENT_CHECKPOINT_TIMEOUT": "not-a-number"},
+            max_calls=6)
+        result = runtime.ask("提款入口在哪里？", context=self.context, prepared=self.prepared)
+        self.assertEqual("completed", result.status)
+        self.assertEqual(3, result.usage["modelCalls"])
+        self.assertEqual(0, result.usage["checkpointCalls"])
+        self.assertEqual(("failed", "config"),
+                         (result.usage["checkpoint"]["status"],
+                          result.usage["checkpoint"]["reason"]))
+
     def test_checkpoint_is_skipped_when_finalization_is_due(self):
         responses = [
             AIMessage(content="", tool_calls=[{"id": "read", "name": "Read",
@@ -398,6 +525,34 @@ class DirectRuntimeTest(unittest.TestCase):
             name="Read", tool_call_id="recovered", status="success")
         self.assertIn("已废弃", retire_changed_sources(
             [HumanMessage("旧问题"), recovered], self.prepared.files)[1].content)
+
+    def test_checkpoint_guidance_is_runtime_only_and_not_saved(self):
+        question = "原问题" + "x" * 200
+        messages = [
+            HumanMessage(question),
+            HumanMessage("[调查进展检查点] 只在本轮有效。",
+                         additional_kwargs={"runtimeOnly": CHECKPOINT_RUNTIME_ONLY}),
+        ]
+        bounded = compact_messages(messages, 50)
+        self.assertTrue(any(question in str(message.content) for message in bounded))
+        store = DirectSessionStore(self.root / "runtime-sessions")
+        store.save("DA-runtime", {"project": "A"}, messages)
+        self.assertEqual([question], [str(message.content) for message in
+                                      store.load("DA-runtime", {"project": "A"})])
+
+    def test_checkpoint_context_replaces_tool_bodies_with_read_index(self):
+        read = ToolMessage(content=json.dumps({
+            "path": "repos/channel/Channel.java", "lineStart": 1, "lineEnd": 4000,
+            "content": "x" * 50000,
+        }), name="Read", tool_call_id="read", status="success")
+        messages = [HumanMessage("问题"), AIMessage(content="", tool_calls=[{
+            "id": "read", "name": "Read", "args": {"path": "repos/channel/Channel.java"},
+        }]), read]
+        bounded = compact_checkpoint_messages(messages, 20000)
+        text = "\n".join(str(message.content) for message in bounded)
+        self.assertIn("[检查点省略读取原文] repos/channel/Channel.java:1-4000", text)
+        self.assertNotIn("x" * 1000, text)
+        self.assertLess(len(text), 2000)
 
     def test_extra_provider_registers_tool_without_changing_direct_loop(self):
         prepared = prepare_capabilities(self.context, providers=[FileCapability(), ExtraProvider()])

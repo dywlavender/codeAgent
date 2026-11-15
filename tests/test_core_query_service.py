@@ -187,10 +187,11 @@ class CoreQueryServiceTest(unittest.TestCase):
     def test_checkpoint_call_and_summary_are_archived_in_run_trace(self):
         checkpoint = {
             "draftAnswer": "提款入口在渠道。",
-            "aspects": [{"question": "渠道入口", "status": "confirmed",
-                         "claim": "Channel.withdraw 是入口",
+            "aspects": [{"id": "A1", "question": "渠道入口", "required": True,
+                         "status": "confirmed", "claim": "Channel.withdraw 是入口",
                          "evidence": ["repos/channel/Channel.java:1-3"]}],
-            "gaps": [{"question": "决策系统", "importance": "required",
+            "gaps": [{"aspectId": "A1", "question": "决策系统",
+                      "importance": "required", "resolvable": True,
                       "reason": "影响调用链", "nextAction": "Read Decision.java"}],
         }
         model = ToolModel(responses=[
@@ -214,9 +215,12 @@ class CoreQueryServiceTest(unittest.TestCase):
                                runtime=runtime)
         result = service.query("提款入口在哪里？")
         self.assertEqual("completed", result["status"])
-        self.assertEqual("core-direct-2-checkpoint-1",
+        self.assertEqual("core-direct-2-checkpoint-2",
                          result["execution"]["settings"]["runtimeRevision"])
         self.assertTrue(result["execution"]["settings"]["checkpointEnabled"])
+        self.assertEqual("45.0", result["execution"]["settings"]["checkpointTimeoutSeconds"])
+        self.assertEqual("1024", result["execution"]["settings"]["checkpointOutputTokens"])
+        self.assertEqual("20000", result["execution"]["settings"]["checkpointContextChars"])
         self.assertEqual(1, result["usage"]["checkpointCalls"])
         self.assertEqual("completed", result["usage"]["checkpoint"]["status"])
         trace = service.get_trace(result["runId"])

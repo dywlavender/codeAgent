@@ -12,6 +12,13 @@ SESSION_PREFIX = "DA-"
 RETIRED_TOOL_BODY = "[已废弃的历史工具原文；源码可能更新，如结论依赖它请重新 Read。]"
 RECOVERIES_PER_PATH = 2
 RECOVERIES_PER_RUN = 8
+CHECKPOINT_RUNTIME_ONLY = "checkpoint"
+
+
+def is_checkpoint_runtime_only(message) -> bool:
+    return (isinstance(message, HumanMessage)
+            and (message.additional_kwargs or {}).get("runtimeOnly")
+            == CHECKPOINT_RUNTIME_ONLY)
 
 
 def _read_key(path) -> str:
@@ -203,10 +210,31 @@ def compact_messages(messages, char_limit=64000):
         total -= max(0, len(str(old.content)) - len(retired))
         result[index] = old.model_copy(update={"content": retired})
     if total > char_limit:
-        humans = [index for index, message in enumerate(result) if isinstance(message, HumanMessage)]
+        humans = [index for index, message in enumerate(result)
+                  if isinstance(message, HumanMessage)
+                  and not is_checkpoint_runtime_only(message)]
         if len(humans) > 1:
             result = result[humans[-1]:]
     return result
+
+
+def _checkpoint_tool_content(message):
+    if message.name == "Read":
+        data = _read_payload(message.content)
+        if data is not None:
+            return (f"[检查点省略读取原文] {data['path']}:"
+                    f"{data.get('lineStart')}-{data.get('lineEnd')}")
+    return f"[检查点省略工具结果] {message.name or 'tool'}"
+
+
+def compact_checkpoint_messages(messages, char_limit=20000):
+    """Keep the checkpoint request small: source bodies are represented by the read index."""
+    result = [
+        message.model_copy(update={"content": _checkpoint_tool_content(message)})
+        if isinstance(message, ToolMessage) else message
+        for message in messages
+    ]
+    return compact_messages(result, char_limit)
 
 
 class DirectSessionStore:
@@ -230,12 +258,14 @@ class DirectSessionStore:
             return []
         if value.get("scope") != scope:
             return []
-        return messages_from_dict(value.get("messages") or [])
+        messages = messages_from_dict(value.get("messages") or [])
+        return [message for message in messages if not is_checkpoint_runtime_only(message)]
 
     def save(self, session, scope, messages):
         path = self._path(session)
         if path is None:
             return
+        messages = [message for message in messages if not is_checkpoint_runtime_only(message)]
         humans = [index for index, message in enumerate(messages) if isinstance(message, HumanMessage)]
         start = humans[-6] if len(humans) > 6 else 0
         self.root.mkdir(parents=True, exist_ok=True)
