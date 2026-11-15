@@ -21,6 +21,7 @@ from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 
 from .events import PiEventAdapter
+from .models import read_model_catalog
 from .process import PiProcess, PiProcessError
 from .sessions import (prepare_session_root, resolve_session_file,
                        session_root as project_session_root, validate_session_file)
@@ -81,6 +82,33 @@ class PiAgentRuntime:
             "thinking": self.thinking,
             "sessionRoot": str(self.session_root) if self.session_root else None,
         }
+
+    def with_model(self, model: str | None) -> "PiAgentRuntime":
+        """Return a runtime bound to one selected model without mutating config."""
+        selected = str(model or "").strip()
+        if not selected or selected == self.model:
+            return self
+        clone = PiAgentRuntime(
+            profile=self.profile, environment=self.environment, command=self.command,
+            model=selected, timeout=self.timeout, session_root=self.session_root,
+            thinking=self.thinking)
+        clone._version = self._version
+        clone._version_error = self._version_error
+        return clone
+
+    def models_catalog(self) -> dict[str, Any]:
+        """Return Pi's available models with provider details removed."""
+        version = self.preflight()
+        try:
+            catalog = read_model_catalog(
+                self.command, self.environment, configured_model=self.model,
+                timeout=min(30.0, max(10.0, self.timeout)))
+        except RuntimeErrorBase as exc:
+            raise PiConfigurationError(f"Pi 模型列表读取失败：{exc}") from exc
+        except PiProcessError as exc:
+            raise PiConfigurationError(f"Pi 模型列表读取失败：{exc}") from exc
+        catalog["piVersion"] = version
+        return catalog
 
     def preflight(self) -> str:
         """Check the CLI and cache its reported version."""

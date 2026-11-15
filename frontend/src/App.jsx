@@ -188,6 +188,10 @@ export default function App() {
             toggleSidebar={() => setSidebarOpen((open) => !open)}
             scope={query.scope}
             setScope={query.setScope}
+            models={query.models}
+            defaultModel={query.defaultModel}
+            model={query.model}
+            setModel={query.setModel}
           />
         )}
         {page !== "agent" && <AppTopbar page={page} toggleSidebar={() => setSidebarOpen((open) => !open)} />}

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import replace
@@ -38,6 +39,7 @@ QUERY_MODE_LABELS = {
     "core": "零索引核心",
 }
 _TERMINAL_STATUS_LABELS = {"cancelled": "已停止", "incomplete": "调查未完成（达到显式限制）"}
+_MODEL_PATTERN = re.compile(r"[A-Za-z0-9_.:/@+-]{1,200}")
 
 
 def _final_status(status: str) -> str:
@@ -183,6 +185,7 @@ class QueryService:
         run_callback=None,
         scope=None,
         mode: str | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Dispatch one question to the selected runtime."""
         if not str(question or "").strip():
@@ -194,8 +197,11 @@ class QueryService:
         if profile is not None and profile.investigation == "pi":
             return self._query_pi(
                 question, conversation_id=conversation_id, event_callback=event_callback,
-                run_callback=run_callback, scope=scope, mode=mode, runtime=runtime,
+                run_callback=run_callback, scope=scope, mode=mode, model=model,
+                runtime=runtime,
             )
+        if model:
+            raise ValueError("model 仅支持 Pi 运行时")
         if profile is not None and profile.investigation == "direct":
             return self._query_core(
                 question, conversation_id=conversation_id, event_callback=event_callback,
@@ -206,6 +212,21 @@ class QueryService:
             event_callback=event_callback, run_callback=run_callback,
             scope=scope, mode=mode, runtime=runtime,
         )
+
+    def list_pi_models(self) -> dict[str, Any]:
+        """Return Pi's available models without exposing provider credentials."""
+        runtime = self.runtime if self.runtime is not None else _default_runtime(
+            index_root=self.index_root, project_id=self.project_id,
+            project_data_root=self.project_context.data_root)
+        catalog = getattr(runtime, "models_catalog", None)
+        if catalog is None:
+            raise QueryConfigurationError("当前运行时没有提供模型列表")
+        try:
+            return catalog()
+        except QueryConfigurationError:
+            raise
+        except RuntimeErrorBase as exc:
+            raise QueryConfigurationError(str(exc)) from exc
 
     def _query_legacy(
         self,
@@ -633,19 +654,28 @@ class QueryService:
         }
 
     def _query_pi(self, question, *, conversation_id, event_callback, run_callback,
-                  scope, mode, runtime) -> dict[str, Any]:
+                  scope, mode, model, runtime) -> dict[str, Any]:
         """Run every online material mode through the single Pi agent loop."""
         from business_code_agent.query.agent.pi import PiAgentRuntime, PiConfigurationError
 
         profile = runtime.profile
+        requested_model = str(model or "").strip()
+        if requested_model and not _MODEL_PATTERN.fullmatch(requested_model):
+            raise ValueError("model 格式不正确")
+        if requested_model:
+            bind_model = getattr(runtime, "with_model", None)
+            if bind_model is None:
+                raise ValueError("当前运行时不支持选择模型")
+            runtime = bind_model(requested_model)
         effective_mode = self._normalize_mode(mode)
         effective_scope = self._normalize_scope(scope)
         self._validate_owned_id(conversation_id, "conversation")
         runtime_name = str(getattr(runtime, "runtime_name", "PI"))
         repositories = (sorted(set(effective_scope["repositoryIds"]))
                         if effective_scope is not None else None)
-        logger.info("Pi 查询请求: conversation=%s question_characters=%s mode=%s",
-                    conversation_id or "new", len(question), effective_mode)
+        logger.info("Pi 查询请求: conversation=%s question_characters=%s mode=%s model=%s",
+                    conversation_id or "new", len(question), effective_mode,
+                    requested_model or "default")
         run_id = self._new_id("RUN")
         started_at = _now()
         started_clock = time.monotonic()

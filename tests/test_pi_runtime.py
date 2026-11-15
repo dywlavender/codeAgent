@@ -184,6 +184,34 @@ class PiRuntimeTest(unittest.TestCase):
                             and event["payload"].get("subtype") == "ToolPathDenied"
                             for event in events))
 
+    def test_models_catalog_reads_pi_without_leaking_provider_details(self):
+        catalog = self.runtime().models_catalog()
+        self.assertEqual("9.9.9", catalog["piVersion"])
+        self.assertEqual("fake/fake-model", catalog["defaultModel"])
+        self.assertEqual(["fake/fake-model", "zcode/glm-5.3-flash"],
+                         [item["id"] for item in catalog["items"]])
+        self.assertEqual({"id", "name", "provider", "contextWindow",
+                          "maxTokens", "reasoning", "input"},
+                         set(catalog["items"][0]))
+        serialized = json.dumps(catalog)
+        self.assertNotIn("provider.internal", serialized)
+        self.assertNotIn("secret", serialized)
+
+        configured = self.runtime(model="zcode/glm-5.3-flash",
+                                  environment={"FAKE_PI_ECHO_MODEL": "1"}).models_catalog()
+        self.assertEqual("zcode/glm-5.3-flash", configured["configuredModel"])
+        self.assertEqual("zcode/glm-5.3-flash", configured["selectedModel"])
+
+    def test_with_model_rebinds_only_the_selected_run(self):
+        runtime = self.runtime()
+        selected = runtime.with_model("zcode/glm-5.3-flash")
+        self.assertIsNot(runtime, selected)
+        self.assertEqual("", runtime.model)
+        self.assertEqual("zcode/glm-5.3-flash", selected.model)
+        self.assertEqual("zcode/glm-5.3-flash",
+                         selected.execution_settings()["requestedModel"])
+        self.assertEqual("pi", selected.runtime_name.lower())
+
     def test_command_exposes_only_read_only_tools_and_loads_search_extension(self):
         runtime = self.runtime()
         root = self.root / "pi-sessions"

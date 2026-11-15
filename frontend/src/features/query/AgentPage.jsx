@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, CaretDown, CaretRight, Check, Code, Copy, FileText, FolderOpen, MagnifyingGlass, SidebarSimple, Stop, ThumbsDown, ThumbsUp, WarningCircle } from "@phosphor-icons/react";
-import { Alert, Button, Checkbox, Flex, Input, Popover, Tag, Tooltip } from "antd";
+import { Alert, Button, Checkbox, Flex, Input, Popover, Select, Tag, Tooltip } from "antd";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { request } from "../../lib/api.js";
@@ -270,7 +270,25 @@ function ContextChip({ workspace, scope, setScope }) {
   </Popover>;
 }
 
-function Composer({ question, setQuestion, submit, stopQuery, loading, cancelling, workspace, home, scope, setScope }) {
+function ModelPicker({ models, defaultModel, model, setModel }) {
+  if (!models?.length) return <span className="composer-model"><Code size={14} /> 代码问答</span>;
+  const options = [
+    { value: "", label: `Pi 默认${defaultModel ? `（${defaultModel}）` : ""}` },
+    ...models.map((item) => ({
+      value: item.id,
+      label: item.provider ? `${item.name || item.id}（${item.provider}）` : (item.name || item.id),
+    })),
+  ];
+  return <span className="composer-model">
+    <Code size={14} />
+    <Select className="model-select" size="small" variant="borderless" placement="topLeft"
+      popupMatchSelectWidth={false} value={model || ""} onChange={setModel}
+      options={options} aria-label="选择模型" title="选择本轮问答使用的 Pi 模型"
+      suffixIcon={<CaretDown size={10} />} />
+  </span>;
+}
+
+function Composer({ question, setQuestion, submit, stopQuery, loading, cancelling, workspace, home, scope, setScope, models, defaultModel, model, setModel }) {
   const inputRef = useRef(null);
   const composing = useRef(false);
   useEffect(() => {
@@ -289,7 +307,7 @@ function Composer({ question, setQuestion, submit, stopQuery, loading, cancellin
     <div className="composer-toolbar">
       <Flex align="center" gap={8}>
         <ContextChip workspace={workspace} scope={scope} setScope={setScope} />
-        <span className="composer-model"><Code size={14} /> {workspace?.runtime === "LANGCHAIN" ? "LangChain" : "代码问答"}</span>
+        <ModelPicker models={models} defaultModel={defaultModel} model={model} setModel={setModel} />
       </Flex>
       <Flex align="center" gap={12}><small className="keyboard-hint">Enter 发送</small>{loading ?
         <Tooltip title={cancelling ? "正在停止后台任务" : "停止生成"}><Button className="send-button" shape="circle" loading={cancelling} disabled={cancelling} icon={<Stop size={15} weight="fill" />} onClick={stopQuery} aria-label={cancelling ? "正在停止" : "停止生成"} /></Tooltip> :

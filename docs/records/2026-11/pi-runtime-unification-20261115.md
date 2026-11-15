@@ -48,6 +48,13 @@
 - **搜索边界（P1）**：扩展不再使用全局 `--follow`，改由 `CODEAGENT_PI_MOUNTS` 指定授权真实根目录逐个检索并映射回工作区路径；仓库内部软链接不会被遍历。纯映射逻辑有独立 Node 回归，真实 Pi 扩展加载检查通过。
 - **仍未验证**：Codemode 真实运行、三题同题问答对照、Trace 模型请求 `messages`／`tools` 的完整记录（P2）。本轮修复只证明授权、引用、会话和搜索工程行为，不证明答案质量。
 
+## 在线模型选择（2026-11-15）
+
+- 新增 `query/agent/pi/models.py`：通过 Pi RPC `get_available_models` 读取模型目录，`get_state` 记录 Pi 默认模型；只保留 `id`、名称、提供方、上下文/输出上限、是否推理和输入类型，`baseUrl`、密钥等提供方细节不返回浏览器。
+- `GET /api/pi/models` 返回模型列表、Pi 默认与配置模型；`POST /api/query` 的 `model` 只支持 Pi 运行时，格式校验后由 `PiAgentRuntime.with_model()` 绑定本轮进程，不改写共享配置。模型进入会话配置，切换模型重建 Pi 会话。
+- 前端问答输入区从该接口加载模型列表，按工程保存选择；留空表示 Pi 默认。默认值不显式下发，避免恢复历史会话时无谓重建会话。
+- 真实验证：`GET /api/pi/models` 返回 14 个模型，包含 `zcode/glm-5.3-flash`，无提供方地址/密钥字段。通过网页选择 `glm-5.3-flash` 后提交问题，`RUN-347773fa313e464e836820cf20b001ba` completed，`requestedModel`／`execution.model`／`usage.actualModel` 均为 `zcode/glm-5.3-flash`，回答为“模型验证成功”。该结果只证明模型选择链路，不证明该模型答案质量优于默认模型。
+
 ## 已知边界
 
 - 工作区仍通过软链接暴露授权源码；只读扩展拦截工具参数和入口符号链接逃逸，但不是操作系统级沙箱。搜索不再跟随仓库内部软链接，`codemode` 等其它工具仍受 `tool_call` 授权检查，不能替代进程级隔离。

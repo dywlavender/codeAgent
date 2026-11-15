@@ -24,8 +24,33 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
   const [activeTurnId, setActiveTurnId] = useState(null);
   const [scope, setScope] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [models, setModels] = useState([]);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [model, setModelState] = useState("");
   const queryAbortRef = useRef(null);
   const restoreRef = useRef(0);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let cancelled = false;
+    request("/api/pi/models")
+      .then((data) => {
+        if (cancelled) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        setModels(items);
+        setDefaultModel(data.defaultModel || "");
+        const stored = sessionStorage.getItem(storageKey("queryModel", projectId));
+        const selected = [stored, data.configuredModel]
+          .find((value) => value && items.some((item) => item.id === value));
+        setModelState(selected || "");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setModels([]);
+        setDefaultModel("");
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   useEffect(() => {
     if (conversationId && projectId) {
@@ -62,6 +87,7 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
         conversationId,
         scope: scope || undefined,
         mode: QUERY_MODE,
+        model: model || undefined,
       }, {
         signal: controller.signal,
         onRun: (value) => {
@@ -130,6 +156,15 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
     }
   }
 
+  function setModel(next) {
+    const value = next || "";
+    setModelState(value);
+    if (projectId) {
+      if (value) sessionStorage.setItem(storageKey("queryModel", projectId), value);
+      else sessionStorage.removeItem(storageKey("queryModel", projectId));
+    }
+  }
+
   function clear() {
     setTurns([]);
     setResult(null);
@@ -165,6 +200,9 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
     queryAbortRef.current = null;
     clear();
     setCancelling(false);
+    setModels([]);
+    setDefaultModel("");
+    setModelState("");
   }
 
   async function restore(run) {
@@ -248,7 +286,7 @@ export function useQueryRun({ projectId, navigate, error, setError, onHistoryCha
 
   return {
     turns, result, runDetail, question, setQuestion, conversationId, status, error, setError,
-    activeTurnId, scope, setScope, cancelling,
+    activeTurnId, scope, setScope, cancelling, models, defaultModel, model, setModel,
     /** 运行中或正在取消时，禁止切换工程和发起新对话。 */
     busy: status === "loading" || Boolean(queryAbortRef.current),
     canAutoRestore: () => restoreRef.current === 0 && !queryAbortRef.current,

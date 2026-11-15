@@ -168,6 +168,40 @@ class PiQueryServiceTest(unittest.TestCase):
         self.assertTrue(all(version.startswith("meta-sha256:")
                             for version in source_versions))
 
+    def test_model_catalog_and_selected_model_shape_the_run(self):
+        runtime = PiAgentRuntime(
+            profile=PI,
+            environment={"FAKE_PI_SCENARIO": "normal", "FAKE_PI_ECHO_MODEL": "1"},
+            command=[sys.executable, str(FAKE_PI)],
+            session_root=self.root / "pi-sessions")
+        service = self.service(runtime=runtime)
+        catalog = service.list_pi_models()
+        self.assertEqual("fake/fake-model", catalog["defaultModel"])
+        self.assertIn("zcode/glm-5.3-flash",
+                      [item["id"] for item in catalog["items"]])
+        self.assertNotIn("baseUrl", json.dumps(catalog))
+
+        first = service.query("selected", mode="none", model="zcode/glm-5.3-flash")
+        self.assertEqual("zcode/glm-5.3-flash", first["usage"]["actualModel"])
+        self.assertEqual("zcode/glm-5.3-flash",
+                         first["execution"]["settings"]["requestedModel"])
+        self.assertEqual("zcode/glm-5.3-flash", first["execution"]["model"])
+        second = service.query("same model", conversation_id=first["conversationId"],
+                               mode="none", model="zcode/glm-5.3-flash")
+        self.assertEqual(first["sessionId"], second["sessionId"])
+
+        third = service.query("other model", conversation_id=first["conversationId"],
+                              mode="none", model="fake/fake-model")
+        self.assertNotEqual(second["sessionId"], third["sessionId"])
+        self.assertEqual("fake/fake-model", third["usage"]["actualModel"])
+        fourth = service.query("default model", conversation_id=first["conversationId"],
+                               mode="none")
+        self.assertNotEqual(third["sessionId"], fourth["sessionId"])
+        self.assertEqual("fake/fake-model", fourth["usage"]["actualModel"])
+
+        with self.assertRaises(ValueError):
+            service.query("bad", mode="none", model="bad model;rm -rf /")
+
     def test_follow_up_reuses_session_and_mode_change_starts_a_new_one(self):
         service = self.service()
         first = service.query("first", mode="backbone")

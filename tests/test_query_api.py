@@ -24,6 +24,11 @@ class _Runtime:
             event_callback({"sequence": 1, "eventType": "tool_use", "payload": {"name": "Read"}})
         return RuntimeResult("答案：" + question, session_id or "session-1")
 
+    def models_catalog(self):
+        return {"items": [{"id": "fake/fake-model", "name": "Fake Model", "provider": "fake"}],
+                "defaultModel": "fake/fake-model", "configuredModel": None,
+                "selectedModel": "fake/fake-model"}
+
 
 class QueryApiTest(unittest.TestCase):
     def test_cancel_endpoint_stops_stream_and_persists_partial_history(self):
@@ -86,6 +91,57 @@ class QueryApiTest(unittest.TestCase):
                     server.server_close()
                     thread.join(timeout=2)
 
+    def test_model_catalog_route_and_query_model_payload(self):
+        class StubService:
+            def __init__(self):
+                self.db = type("Db", (), {"close": lambda _self: None})()
+                self.calls = []
+
+            def list_pi_models(self):
+                return {"items": [{"id": "zcode/glm-5.3-flash"}],
+                        "defaultModel": "deepseek/deepseek-v4-pro",
+                        "configuredModel": None, "selectedModel": None}
+
+            def query(self, question, **kwargs):
+                self.calls.append({"question": question, **kwargs})
+                return {"runId": "RUN-1", "conversationId": "CONV-1", "answer": "ok",
+                        "runtime": "PI", "status": "completed", "events": []}
+
+        service = StubService()
+        with tempfile.TemporaryDirectory() as folder:
+            db_path = Path(folder) / "models.db"
+            connect(str(db_path)).close()
+            with patch("business_code_agent.api.server.QueryService",
+                       lambda *args, **kwargs: service):
+                server = make_server(str(db_path), port=0)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                base = f"http://127.0.0.1:{server.server_port}"
+                try:
+                    catalog = json.loads(urlopen(base + "/api/pi/models").read())
+                    self.assertEqual("deepseek/deepseek-v4-pro", catalog["defaultModel"])
+                    request = Request(
+                        base + "/api/query", method="POST",
+                        data=json.dumps({"question": "选模型",
+                                         "model": "zcode/glm-5.3-flash"}).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    self.assertEqual("ok", json.loads(urlopen(request).read())["answer"])
+                    self.assertEqual("zcode/glm-5.3-flash", service.calls[0]["model"])
+                    bad = Request(
+                        base + "/api/query", method="POST",
+                        data=json.dumps({"question": "坏模型", "model": ["x"]}).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with self.assertRaises(HTTPError) as raised:
+                        urlopen(bad)
+                    self.assertEqual(400, raised.exception.code)
+                    raised.exception.close()
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
+
     def test_json_and_sse_query_endpoints_use_runtime_result(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -112,6 +168,10 @@ class QueryApiTest(unittest.TestCase):
                     first = json.loads(urlopen(request).read())
                     self.assertEqual("答案：第一问", first["answer"])
                     self.assertEqual("FAKE_RUNTIME", first["runtime"])
+                    models = json.loads(urlopen(base + "/api/pi/models").read())
+                    self.assertEqual("fake/fake-model", models["defaultModel"])
+                    self.assertEqual(["fake/fake-model"],
+                                     [item["id"] for item in models["items"]])
                     conversations = json.loads(urlopen(base + "/api/conversations?limit=1").read())
                     self.assertEqual(first["conversationId"], conversations["items"][0]["conversationId"])
                     completed = json.loads(urlopen(Request(

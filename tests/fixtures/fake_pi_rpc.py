@@ -21,6 +21,16 @@ SESSION_FILE: Path | None = None
 SESSION_ID = uuid.uuid4().hex
 ABORT = threading.Event()
 PROMPT_COUNT = 0
+SELECTED_MODEL = ""
+
+DEFAULT_MODELS = [
+    {"id": "fake-model", "name": "Fake Model", "provider": "fake",
+     "baseUrl": "http://provider.internal/v1", "apiKey": "secret",
+     "contextWindow": 1000, "maxTokens": 100, "reasoning": False, "input": ["text"]},
+    {"id": "glm-5.3-flash", "name": "glm-5.3-flash", "provider": "zcode",
+     "baseUrl": "http://127.0.0.1:9999/v1", "apiKey": "secret",
+     "contextWindow": 128000, "maxTokens": 16384, "reasoning": False, "input": ["text", "image"]},
+]
 
 
 def emit(record: dict) -> None:
@@ -54,12 +64,28 @@ def options(argv: list[str]) -> dict:
     return values
 
 
+def active_model() -> dict:
+    value = SELECTED_MODEL if os.environ.get("FAKE_PI_ECHO_MODEL") == "1" else ""
+    provider, _, identifier = value.partition("/")
+    if not identifier:
+        provider, identifier = "fake", value or "fake-model"
+    return {"id": identifier, "provider": provider, "name": identifier}
+
+
+def available_models() -> list[dict]:
+    raw = os.environ.get("FAKE_PI_MODELS")
+    if raw:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else DEFAULT_MODELS
+    return DEFAULT_MODELS
+
+
 def session_state() -> dict:
     count = 0
     if SESSION_FILE and SESSION_FILE.is_file():
         count = sum(1 for _ in SESSION_FILE.open(encoding="utf-8"))
     return {
-        "model": {"id": "fake-model", "provider": "fake", "name": "Fake Model"},
+        "model": active_model(),
         "thinkingLevel": "off", "isStreaming": False, "isCompacting": False,
         "steeringMode": "one-at-a-time", "followUpMode": "one-at-a-time",
         "sessionFile": str(SESSION_FILE), "sessionId": SESSION_ID,
@@ -225,11 +251,12 @@ def prompt_worker(scenario: str) -> None:
 
 
 def main() -> int:
-    global SESSION_FILE
+    global SESSION_FILE, SELECTED_MODEL
     opts = options(sys.argv[1:])
     if opts.get("--version"):
         print("9.9.9")
         return 0
+    SELECTED_MODEL = opts.get("--model") or ""
     session_dir = Path(opts.get("--session-dir") or ".pi-sessions")
     session_dir.mkdir(parents=True, exist_ok=True)
     session_value = opts.get("--session")
@@ -252,6 +279,8 @@ def main() -> int:
         request_id = record.get("id")
         if kind == "get_state":
             response(request_id, kind, data=session_state())
+        elif kind == "get_available_models":
+            response(request_id, kind, data={"models": available_models()})
         elif kind == "get_commands":
             response(request_id, kind, data={"commands": commands})
         elif kind == "get_session_stats":

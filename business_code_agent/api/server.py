@@ -378,8 +378,11 @@ def make_server(
                 conversation_id = body.get("conversationId")
                 scope = body.get("scope")
                 mode = body.get("mode")
+                model = body.get("model")
                 if scope is not None and not isinstance(scope, dict):
                     raise ValueError("scope 必须是对象，形如 {systemIds: [], repositoryIds: []}")
+                if model is not None and not isinstance(model, str):
+                    raise ValueError("model 必须是模型字符串")
                 service = self._query_service(context)
                 if path == "/api/query/stream":
                     stream_started = True
@@ -390,6 +393,7 @@ def make_server(
                             conversation_id=conversation_id,
                             scope=scope,
                             mode=mode,
+                            model=model,
                             event_callback=lambda event: self._sse("event", event),
                             run_callback=lambda value: self._sse("run", value),
                         )
@@ -406,7 +410,8 @@ def make_server(
                             pass
                     return
 
-                self._json(200, service.query(question, conversation_id=conversation_id, scope=scope, mode=mode))
+                self._json(200, service.query(question, conversation_id=conversation_id,
+                                              scope=scope, mode=mode, model=model))
             except QueryBusyError as exc:
                 self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
@@ -485,6 +490,13 @@ def make_server(
                 evaluations = evaluation_for(context)
                 ast = ast_for(context)
                 admin_access = self._project_admin(context)
+                if path == "/api/pi/models":
+                    service = self._query_service(context)
+                    try:
+                        self._json(200, service.list_pi_models())
+                    except QueryConfigurationError as exc:
+                        self._json(503, {"error": str(exc)})
+                    return
                 chain_match = re.fullmatch(r"/api/call-chains(?:/([^/]+)(/evidence)?)?", path)
                 if chain_match:
                     from contextlib import closing

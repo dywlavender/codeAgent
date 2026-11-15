@@ -423,7 +423,10 @@ body { background: var(--canvas); color: var(--ink); overflow: hidden; font-fami
 .composer-toolbar { align-items: center; flex-wrap: wrap; }
 .composer-toolbar > div:first-child { min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
 .composer-toolbar small { color: var(--color-text-faint); }
-.composer-model { display: inline-flex; align-items: center; gap: 5px; color: var(--color-text-faint); font-size: 11px; white-space: nowrap; }
+.composer-model { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--color-text-faint); font-size: 11px; white-space: nowrap; }
+.composer-model .model-select { min-width: 150px; max-width: 240px; font-size: 11px; }
+.composer-model .model-select .ant-select-selection-item { color: var(--color-text-faint); font-size: 11px; }
+.composer-model .model-select .ant-select-selection-item, .composer-model .model-select .ant-select-selection-placeholder { padding-inline-end: 14px; }
 .ctx-chip { height: 28px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 4px 9px; background: var(--color-surface-raised); color: var(--color-text-secondary); }
 .ctx-chip:hover { border-color: var(--color-brand); color: var(--color-brand-strong); }
 .ctx-chip.scoped { background: var(--color-brand-soft); border-color: color-mix(in srgb, var(--color-brand) 42%, transparent); color: var(--color-brand-strong); }
@@ -486,7 +489,7 @@ body { background: var(--canvas); color: var(--ink); overflow: hidden; font-fami
   .composer { border-radius: var(--radius-input); padding: 10px 11px 9px; }
   .composer-toolbar { align-items: flex-start; }
   .composer-toolbar > div:first-child { row-gap: 6px; }
-  .composer-model { display: none; }
+  .composer-model .model-select { min-width: 120px; max-width: 190px; }
   .keyboard-hint { display: none; }
   .user-bubble { max-width: 93%; }
   .answer-text { font-size: 14px; }
