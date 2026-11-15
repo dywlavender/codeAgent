@@ -59,7 +59,25 @@ def _project_id(config: Path) -> str:
     return str((value.get("project") or {}).get("id") or "").strip() or "evaluation"
 
 
-def analyze_trace(trace: dict) -> dict:
+def _matches_key(path: str, key: str) -> bool:
+    value = str(path or "")
+    key = str(key or "").strip()
+    return bool(key) and (value == key or value.endswith("/" + key)
+                          or value.rsplit("/", 1)[-1] == key)
+
+
+def load_keys(path: Path | None) -> dict[str, list[str]]:
+    if not path:
+        return {}
+    value = _load(path)
+    if not isinstance(value, dict) or any(
+            not isinstance(items, list) or any(not isinstance(item, str) for item in items)
+            for items in value.values()):
+        raise ValueError("关键文件映射必须是 {caseId: [path, ...]} 的 JSON 对象")
+    return value
+
+
+def analyze_trace(trace: dict, keys=()) -> dict:
     """Deterministic investigation metrics; never a semantic correctness score."""
     run = trace.get("run") or {}
     usage = run.get("usage") or {}
@@ -206,6 +224,20 @@ def analyze_trace(trace: dict) -> dict:
 
     references = (usage.get("verification") or {})
     reference_items = references.get("references") or []
+    key_rows = []
+    for key in keys:
+        matched = [entry for path, entry in reads.items() if _matches_key(path, key)]
+        cited = [str(item.get("matchedPath") or item.get("path") or "")
+                 for item in reference_items
+                 if _matches_key(str(item.get("matchedPath") or item.get("path") or ""), key)]
+        key_rows.append({
+            "key": key,
+            "read": bool(matched),
+            "firstRound": min((entry.get("firstRound") for entry in matched
+                               if entry.get("firstRound") is not None), default=None),
+            "ranges": [item for entry in matched for item in entry.get("ranges") or []][:12],
+            "cited": bool(cited),
+        })
     return {
         "modelCalls": usage.get("modelCalls") or len(trace.get("calls") or []),
         "toolCalls": len(ordered),
@@ -233,6 +265,9 @@ def analyze_trace(trace: dict) -> dict:
         "cost": usage.get("cost"),
         "durationMs": run.get("durationMs"),
         "stopReason": usage.get("stopReason"),
+        "keyFiles": key_rows,
+        "keyFilesRead": sum(1 for item in key_rows if item["read"]),
+        "keyFilesTotal": len(key_rows),
         "reads": [
             {"path": path, **entry}
             for path, entry in sorted(reads.items(),
@@ -251,7 +286,7 @@ def analyze_trace(trace: dict) -> dict:
 
 def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
             project_config: Path, project_id: str, timeout: float,
-            thinking: str | None, output: Path) -> dict:
+            thinking: str | None, keys, output: Path) -> dict:
     run_id = f"{_safe_name(case['id'])}-{mode}-r{repeat}"
     started_at = _now()
     with tempfile.TemporaryDirectory(prefix="pi-eval-") as folder:
@@ -291,7 +326,7 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
             "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
             encoding="utf-8")
         (output / "answer.md").write_text(str(result.get("answer") or ""), encoding="utf-8")
-        metrics = analyze_trace(trace) if trace else {}
+        metrics = analyze_trace(trace, keys) if trace else {}
     record = {
         "caseId": case["id"],
         "category": case.get("category"),
@@ -331,13 +366,15 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
     return record
 
 
-def summarize(batch: Path) -> dict:
+def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> dict:
+    keys_by_case = keys_by_case or {}
     results = []
     for path in sorted(batch.glob("runs/*/result.json")):
         result = _load(path)
         trace = path.parent / "trace.json"
         if trace.is_file():
-            result["metrics"] = analyze_trace(_load(trace))
+            result["metrics"] = analyze_trace(
+                _load(trace), keys_by_case.get(result["caseId"]) or ())
         results.append(result)
     summary = {
         "generatedAt": _now(),
@@ -361,14 +398,17 @@ def summarize(batch: Path) -> dict:
     for case_id, rows in groups.items():
         first = rows[0]
         lines.extend([f"## {case_id}", "", f"**问题**：{first['question']}", ""])
-        lines.extend(["| 组 | 重复 | 状态 | 模型 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用确认 |",
-                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["| 组 | 重复 | 状态 | 模型 | 关键文件 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用确认 |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
         for row in rows:
             metrics = row.get("metrics") or {}
             refs = metrics.get("references") or {}
+            key_text = (f"{metrics.get('keyFilesRead', 0)}/{metrics.get('keyFilesTotal', 0)}"
+                        if metrics.get("keyFilesTotal") else "—")
             lines.append(
                 f"| {row['mode']} | {row['repeat']} | {row['status']} | "
                 f"{row.get('modelActual') or row.get('modelRequested') or '—'} | "
+                f"{key_text} | "
                 f"{metrics.get('modelCalls', '—')} | {metrics.get('toolCalls', '—')} | "
                 f"{metrics.get('uniqueReadFiles', '—')} | {metrics.get('searchCalls', '—')} | "
                 f"{metrics.get('candidateFiles', '—')}/{metrics.get('unreadCandidateCount', '—')} | "
@@ -385,6 +425,13 @@ def summarize(batch: Path) -> dict:
             if row.get("error"):
                 lines.append(f"- 错误：{row['errorType']}：{row['error']}")
             metrics = row.get("metrics") or {}
+            missing = [item["key"] for item in metrics.get("keyFiles") or [] if not item["read"]]
+            if missing:
+                lines.append("- 未读取的关键文件：" + "、".join(missing))
+            refs = metrics.get("references") or {}
+            if refs.get("unconfirmed"):
+                lines.append("- 未核实引用：" + "、".join(
+                    str(item) for item in refs["unconfirmed"][:15]))
             if metrics.get("unreadCandidates"):
                 lines.append("- 未读候选（启发式）：" + "、".join(
                     str(item) for item in metrics["unreadCandidates"][:10]))
@@ -427,6 +474,7 @@ def command_run(args) -> int:
     if not modes:
         raise ValueError("--modes 不能为空")
     project_id = _project_id(project_config)
+    keys_by_case = load_keys(args.keys_file)
     output = args.output.expanduser().resolve()
     plan = [(case, mode, repeat) for case in cases for mode in modes
             for repeat in range(1, args.repeats + 1)]
@@ -443,6 +491,7 @@ def command_run(args) -> int:
         "projectId": project_id, "cases": [case["id"] for case in cases],
         "modes": modes, "repeats": args.repeats, "requestedModel": args.model,
         "timeoutSeconds": args.timeout, "thinking": args.thinking,
+        "keysFile": str(args.keys_file) if args.keys_file else None,
         "startedAt": _now(),
     })
     for index, (case, mode, repeat) in enumerate(plan, 1):
@@ -451,13 +500,14 @@ def command_run(args) -> int:
         print(f"[{index}/{len(plan)}] {case['id']} mode={mode} repeat={repeat}", flush=True)
         record = run_one(case, mode=mode, repeat=repeat, model=args.model,
                          project_config=project_config, project_id=project_id,
-                         timeout=args.timeout, thinking=args.thinking, output=folder)
+                         timeout=args.timeout, thinking=args.thinking,
+                         keys=keys_by_case.get(case["id"]) or (), output=folder)
         print(json.dumps({"status": record["status"], "runId": record["runId"],
                           "actualModel": record["modelActual"],
                           "answerChars": len(record.get("answer") or ""),
                           "elapsedSeconds": record["elapsedSeconds"]},
                          ensure_ascii=False), flush=True)
-    summarize(output)
+    summarize(output, keys_by_case)
     print(f"批次完成：{output / 'summary.md'}", flush=True)
     return 0
 
@@ -466,7 +516,7 @@ def command_report(args) -> int:
     batch = args.batch.expanduser().resolve()
     if not (batch / "runs").is_dir():
         raise ValueError(f"批次目录没有 runs：{batch}")
-    summarize(batch)
+    summarize(batch, load_keys(args.keys_file))
     print(f"已更新：{batch / 'summary.md'}")
     return 0
 
@@ -483,12 +533,15 @@ def main() -> int:
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--model", default=os.environ.get("BUSINESS_CODE_PI_MODEL") or None)
     run.add_argument("--project-config", type=Path)
+    run.add_argument("--keys-file", type=Path,
+                     help="人工指定的关键文件映射，只用于评测统计")
     run.add_argument("--timeout", type=float, default=900)
     run.add_argument("--thinking")
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--plan", action="store_true", help="只打印运行计划，不调用模型")
     report = sub.add_parser("report", help="从已有 runs 重新生成汇总")
     report.add_argument("--batch", type=Path, required=True)
+    report.add_argument("--keys-file", type=Path)
     args = parser.parse_args()
     try:
         return command_run(args) if args.action == "run" else command_report(args)

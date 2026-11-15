@@ -58,7 +58,10 @@ class PiEvaluationMetricsTest(unittest.TestCase):
                     "input": {"path": "repos/b", "pattern": "*.java"}, "output": ""}},
             ],
         }
-        metrics = evaluate_pi.analyze_trace(trace)
+        metrics = evaluate_pi.analyze_trace(trace, ["X.java", "missing.java"])
+        self.assertEqual(1, metrics["keyFilesRead"])
+        self.assertEqual(2, metrics["keyFilesTotal"])
+        self.assertEqual([True, False], [item["read"] for item in metrics["keyFiles"]])
         self.assertEqual(1, metrics["uniqueReadFiles"])
         self.assertEqual(4, metrics["toolCalls"])
         self.assertEqual([[10, 11]], metrics["reads"][0]["ranges"])

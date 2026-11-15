@@ -1,0 +1,37 @@
+{
+  "native-frontend": [
+    "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts",
+    "repos/mifos-web-repo/src/app/loans/loans.service.ts",
+    "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts",
+    "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse/disburse.component.ts",
+    "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/make-repayment/make-repayment.component.ts",
+    "repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts",
+    "repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts",
+    "repos/mifos-web-repo/src/environments/environment.ts"
+  ],
+  "native-lifecycle": [
+    "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+    "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+    "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+    "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java"
+  ],
+  "v2-strategy-code": [
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanRepaymentScheduleTransactionProcessorFactory.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/transactionprocessor/impl/FineractStyleLoanRepaymentScheduleTransactionProcessor.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+    "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanproduct/domain/LoanProduct.java"
+  ],
+  "biz-payment-pending": [
+    "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+    "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+    "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java"
+  ]
+}
