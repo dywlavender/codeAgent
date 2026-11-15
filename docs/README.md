@@ -8,7 +8,7 @@
 | --- | --- |
 | [知识主干与知识图谱：项目整改指导方向](spec/knowledge-backbone-direction.md) | 知识体系的权威依据。涉及项目认知、业务补充知识、代码地图、知识图谱、入口导航、问答调查的设计与修改前必须先读 |
 | [当前架构](spec/architecture.md) | 记录 V1 实现与 V2 目标的关系；V1 工作区、多工程隔离、Runtime、数据库与 API |
-| [CodeAgent V2 总体架构](spec/agent-architecture-v2.md) | 唯一 Agent 主链、模块职责、零索引流程与扩展边界；`core-v1` 阶段 1 已实现，默认仍为 Legacy |
+| [CodeAgent V2 总体架构](spec/agent-architecture-v2.md) | 唯一 Agent 主链、模块职责、零索引流程与扩展边界；`core-v1` 阶段 1 已实现，在线默认 Pi |
 | [CodeAgent V2 能力与运行合同](spec/agent-capability-contract.md) | 完整目标合同；已实现阶段 1 最小子集，其余接口按能力阶段落地 |
 | [CodeAgent V2 迁移与验收计划](spec/agent-migration-plan.md) | 分阶段实施/回退、设计验收与阶段 1 实现、测试和真实模型限制 |
 | [业务补充知识使用指南](spec/business-baseline-guide.md) | 业务补充知识的目录约定与编写方式 |

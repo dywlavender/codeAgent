@@ -43,7 +43,7 @@ class _FakeRuntime:
 class _PreparedRuntime(_FakeRuntime):
     def __init__(self):
         super().__init__()
-        self.profile = resolve_profile({})
+        self.profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain"})
         self.tool_statuses = (ToolStatus("file_tools", "required", "ready", ("Read", "Glob", "Grep")),)
         self.settings = {"requestedModel": "fake-model", "agentVersion": 1}
         self.preparations = []
@@ -348,7 +348,8 @@ class QueryPreparedServiceTest(unittest.TestCase):
         self.assertEqual(first["sessionId"], same["sessionId"])
         self.assertEqual(self.runtime.tool_statuses, self.runtime.preparations[0].tool_statuses)
         old_config = self.session_config(first["conversationId"])
-        self.runtime.profile = resolve_profile({"BUSINESS_CODE_AGENT_WORKFLOW": "tracked"})
+        self.runtime.profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                                                "BUSINESS_CODE_AGENT_WORKFLOW": "tracked"})
         changed = self.service.query("changed", conversation_id=first["conversationId"], mode="none")
         self.assertIsNone(self.runtime.calls[-1]["session_id"])
         self.assertNotEqual(first["sessionId"], changed["sessionId"])
@@ -417,6 +418,7 @@ class QueryPreparedServiceTest(unittest.TestCase):
         from business_code_agent.query.langchain_agent import LangChainRuntime
 
         runtime = LangChainRuntime(environment={}, profile=resolve_profile({
+            "BUSINESS_CODE_AGENT_RUNTIME": "langchain",
             "BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid", "BUSINESS_CODE_AGENT_CONTRACTS": "off",
         }), index_root=self.root / "missing-index", project_id="prepared-test")
         self.service.runtime = runtime
@@ -454,7 +456,8 @@ class QueryPreparedServiceTest(unittest.TestCase):
             def bind_tools(self, *args, **kwargs):
                 return self
 
-        runtime = LangChainRuntime(environment={}, profile=resolve_profile({}), project_id="prepared-test",
+        runtime = LangChainRuntime(environment={}, profile=resolve_profile({
+            "BUSINESS_CODE_AGENT_RUNTIME": "langchain"}), project_id="prepared-test",
                                    index_root=self.root / "missing-index", contract_root=self.root / "missing-contract",
                                    model=ToolModel(responses=[AIMessage(content="返回两数之和。")]))
         self.service.runtime = runtime

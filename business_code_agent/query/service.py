@@ -18,7 +18,8 @@ from typing import Any, Mapping
 
 from business_code_agent.platform.ast_material import AstMaterial
 from business_code_agent.platform.projects import ProjectContext
-from business_code_agent.query.capabilities import prepare_capabilities
+from business_code_agent.query.capabilities import (prepare_capabilities,
+                                                    prepare_pi_capabilities)
 from business_code_agent.query.context import RunContext
 
 from .claude_runtime import default_claude_runtime
@@ -188,8 +189,14 @@ class QueryService:
         if not str(question or "").strip():
             raise ValueError("question is required")
         runtime = self.runtime if self.runtime is not None else _default_runtime(
-            index_root=self.index_root, project_id=self.project_id)
+            index_root=self.index_root, project_id=self.project_id,
+            project_data_root=self.project_context.data_root)
         profile = getattr(runtime, "profile", None)
+        if profile is not None and profile.investigation == "pi":
+            return self._query_pi(
+                question, conversation_id=conversation_id, event_callback=event_callback,
+                run_callback=run_callback, scope=scope, mode=mode, runtime=runtime,
+            )
         if profile is not None and profile.investigation == "direct":
             return self._query_core(
                 question, conversation_id=conversation_id, event_callback=event_callback,
@@ -231,7 +238,9 @@ class QueryService:
         effective_mode = self._normalize_mode(mode)
         effective_scope = self._normalize_scope(scope)
         self._validate_owned_id(conversation_id, "conversation")
-        runtime = runtime or self.runtime or _default_runtime(index_root=self.index_root, project_id=self.project_id)
+        runtime = runtime or self.runtime or _default_runtime(
+            index_root=self.index_root, project_id=self.project_id,
+            project_data_root=self.project_context.data_root)
         runtime_name = str(getattr(runtime, "runtime_name", "CLAUDE_CODE"))
         profile = getattr(runtime, "profile", None)
         workspace = self._workspace_for_mode(effective_mode)
@@ -624,6 +633,261 @@ class QueryService:
             "usage": usage,
         }
 
+    def _query_pi(self, question, *, conversation_id, event_callback, run_callback,
+                  scope, mode, runtime) -> dict[str, Any]:
+        """Run every online material mode through the single Pi agent loop."""
+        from business_code_agent.query.agent.pi import PiAgentRuntime, PiConfigurationError
+
+        profile = runtime.profile
+        effective_mode = self._normalize_mode(mode)
+        effective_scope = self._normalize_scope(scope)
+        self._validate_owned_id(conversation_id, "conversation")
+        runtime_name = str(getattr(runtime, "runtime_name", "PI"))
+        repositories = (sorted(set(effective_scope["repositoryIds"]))
+                        if effective_scope else None)
+        logger.info("Pi 查询请求: conversation=%s question_characters=%s mode=%s",
+                    conversation_id or "new", len(question), effective_mode)
+        run_id = self._new_id("RUN")
+        started_at = _now()
+        started_clock = time.monotonic()
+        workspace_id = self.workspace_manager.project_id
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            conversation = self._get_or_create_conversation(
+                conversation_id, workspace_id, effective_mode, runtime_name)
+            active = self.db.execute(
+                "SELECT id FROM query_run WHERE conversation_id=? AND status IN ('running','cancelling') LIMIT 1",
+                (conversation["id"],),
+            ).fetchone()
+            if active:
+                raise QueryBusyError(active["id"])
+            self.db.execute(
+                """INSERT INTO query_run
+                   (id,conversation_id,runtime,runtime_session_id,question,status,answer,
+                    error,usage_json,scope_json,mode,ast_version_id,execution_json,started_at,completed_at,duration_ms)
+                   VALUES (?,?,?,?,?,'running','',NULL,'{}',?,?,NULL,'{}',?,NULL,0)""",
+                (run_id, conversation["id"], runtime_name, conversation["runtime_session_id"],
+                 question, _json(effective_scope) if effective_scope else None,
+                 effective_mode, started_at),
+            )
+            self._save_message(conversation["id"], run_id, "user", question, started_at)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        settings = runtime.execution_settings()
+        expected_repositories = repositories or sorted(
+            repository_id for repository_id, _ in self.workspace_manager.repository_sources())
+        base_execution = execution_snapshot(profile, MaterialManifest(()), (), settings=settings)
+        base_execution["repositoryIds"] = list(expected_repositories)
+        emitted: list[dict[str, Any]] = []
+        client_connected = True
+        archive = RunTraceArchive(self.trace_root, run_id, self.project_id)
+        archive.start({"runId": run_id, "conversationId": conversation["id"], "question": question,
+                       "runtime": runtime_name, "mode": effective_mode, "scope": effective_scope,
+                       "astVersionId": None, "astStatus": None, "materials": [],
+                       "execution": base_execution, "startedAt": started_at, "status": "running"},
+                      self.workspace_manager.root)
+
+        def on_event(event: Mapping[str, Any]) -> None:
+            nonlocal client_connected
+            normalized = dict(event)
+            emitted.append(normalized)
+            self._save_event(run_id, normalized, len(emitted))
+            self.db.commit()
+            archive.event({**normalized, "at": normalized.get("at", _now())})
+            if event_callback and client_connected:
+                try:
+                    event_callback(normalized)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    client_connected = False
+                    logger.warning("Pi 查询客户端已断开: run=%s；后台继续保存结果", run_id)
+
+        workspace = None
+        execution = base_execution
+        callback_sent = False
+        try:
+            selection = self._mode_selection(effective_mode)
+            workspace = self.workspace_manager.prepare_pi(
+                workspace_key=conversation["id"], mode=effective_mode,
+                repository_ids=repositories, **selection)
+            manifest = MaterialManifest.from_workspace(
+                workspace.path, set(workspace.repository_ids) if workspace.repository_ids else None,
+                allowed=profile.materials, mode=effective_mode,
+                ast_version=workspace.ast_version_id, ast_status=workspace.ast_status,
+            )
+            missing = manifest.missing_required()
+            if missing:
+                raise WorkspaceError("授权仓库不可用，未调用模型：" + "、".join(
+                    source.repository_id or source.label for source in missing))
+            context = RunContext(
+                run_id=run_id, project=self.project_context, profile=profile,
+                repository_ids=workspace.repository_ids, workspace=workspace.path,
+                materials=manifest.sources, session_id=None,
+            )
+            version = runtime.preflight()
+            settings = runtime.execution_settings()
+            prepared = prepare_pi_capabilities(context, version=version, mode=effective_mode)
+            preparation = RunPreparation(manifest, prepared.statuses)
+            execution = execution_snapshot(profile, manifest, prepared.statuses, settings=settings)
+            execution["repositoryIds"] = list(workspace.repository_ids)
+            execution["mode"] = effective_mode
+            session_config = _session_config(execution, manifest, core=True)
+            session_config["mode"] = effective_mode
+            session_config["astVersionId"] = workspace.ast_version_id
+            archive.workspace = workspace.path.resolve()
+            archive.update_run(execution=execution, mode=effective_mode,
+                               astVersionId=workspace.ast_version_id,
+                               workspace=str(workspace.path),
+                               materials=[{"label": label, "path": str(path)}
+                                          for label, path in manifest.labelled_roots()])
+            self._apply_pi_run(conversation, run_id, effective_scope, effective_mode,
+                               workspace.ast_version_id, execution, session_config,
+                               runtime_name, workspace_id)
+            if run_callback:
+                callback_sent = True
+                run_callback({"runId": run_id, "conversationId": conversation["id"],
+                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                              "astVersionId": workspace.ast_version_id, "execution": execution})
+            preparation.require_tools()
+            context = replace(context, session_id=conversation["runtime_session_id"])
+            ask_kwargs = {
+                "context": context, "prepared": prepared,
+                "session_id": conversation["runtime_session_id"],
+                "event_callback": on_event,
+                "cancel_check": lambda: self.db.execute(
+                    "SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
+                "mode": effective_mode,
+            }
+            if isinstance(runtime, PiAgentRuntime):
+                ask_kwargs["call_callback"] = archive.record_call
+            raw_result = runtime.ask(question, **ask_kwargs)
+            result = normalize_runtime_result(raw_result)
+            actual_model = result.usage.get("actualModel")
+            if actual_model:
+                execution = {
+                    **execution,
+                    "model": actual_model,
+                    "settings": {**execution["settings"], "actualModel": actual_model},
+                }
+        except Exception as exc:
+            duration = round((time.monotonic() - started_clock) * 1000, 3)
+            error_text = str(exc) or exc.__class__.__name__
+            logger.error("Pi 查询失败: run=%s conversation=%s duration_ms=%s error_type=%s",
+                         run_id, conversation["id"], duration, type(exc).__name__)
+            failure_execution = {**execution, "phase": "failed", "error": error_text}
+            failure_execution.setdefault("repositoryIds", list(expected_repositories))
+            archive.update_run(execution=failure_execution, mode=effective_mode,
+                               astVersionId=workspace.ast_version_id if workspace else None,
+                               workspace=str(workspace.path) if workspace else str(self.workspace_manager.root))
+            if not callback_sent and run_callback:
+                run_callback({"runId": run_id, "conversationId": conversation["id"],
+                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                              "astVersionId": workspace.ast_version_id if workspace else None,
+                              "execution": failure_execution})
+            on_event({"eventType": "error", "subtype": exc.__class__.__name__,
+                      "payload": {"error": error_text}})
+            archive.finish(status="failed", error=error_text, completedAt=_now(), durationMs=duration)
+            self.db.execute(
+                """UPDATE query_run SET status='failed',error=?,execution_json=?,completed_at=?,duration_ms=?
+                   WHERE id=?""",
+                (error_text, _json(failure_execution), _now(), duration, run_id),
+            )
+            self.db.commit()
+            if isinstance(exc, QueryRuntimeError):
+                raise
+            if isinstance(exc, (RequiredToolUnavailable, WorkspaceError, PiConfigurationError)):
+                raise QueryConfigurationError(error_text) from exc
+            raise QueryRuntimeError(error_text) from exc
+
+        for event in result.events:
+            if event not in emitted:
+                on_event(event)
+        session_id = result.runtime_session_id or conversation["runtime_session_id"]
+        completed_at = _now()
+        final_status = _final_status(result.status)
+        terminal_label = _TERMINAL_STATUS_LABELS.get(final_status)
+        if terminal_label and not any(
+                (event.get("payload") or {}).get("phase") == final_status for event in emitted):
+            on_event({"sequence": len(emitted) + 1, "eventType": "status",
+                      "payload": {"phase": final_status, "label": terminal_label}})
+        duration = round((time.monotonic() - started_clock) * 1000, 3)
+        usage = {**result.usage, "traceArchive": str(archive.path)}
+        archive.update_run(execution=execution)
+        archive.finish(status=final_status, answer=result.answer, usage=usage,
+                       completedAt=completed_at, durationMs=duration)
+        self.db.execute(
+            """UPDATE query_run SET status=?,runtime_session_id=?,answer=?,usage_json=?,
+               execution_json=?,completed_at=?,duration_ms=? WHERE id=?""",
+            (final_status, session_id, result.answer, _json(usage), _json(execution),
+             completed_at, duration, run_id),
+        )
+        if result.answer:
+            self._save_message(conversation["id"], run_id, "assistant", result.answer, completed_at)
+        self.db.execute(
+            """UPDATE query_conversation SET runtime=?,runtime_session_id=?,workspace_id=?,
+               ast_version_id=?,updated_at=? WHERE id=?""",
+            (runtime_name, session_id, workspace.id, workspace.ast_version_id,
+             completed_at, conversation["id"]),
+        )
+        self.db.commit()
+        logger.info("Pi 查询结束: run=%s status=%s conversation=%s session=%s duration_ms=%s events=%s",
+                    run_id, final_status, conversation["id"], session_id, duration, len(emitted))
+        return {
+            "runId": run_id,
+            "conversationId": conversation["id"],
+            "projectId": self.project_id,
+            "runtime": runtime_name,
+            "sessionId": session_id,
+            "workspaceId": workspace.id,
+            "mode": effective_mode,
+            "modeLabel": QUERY_MODE_LABELS[effective_mode],
+            "astVersionId": workspace.ast_version_id,
+            "execution": execution,
+            "status": final_status,
+            "scope": effective_scope,
+            "answer": result.answer,
+            "events": emitted,
+            "usage": usage,
+        }
+
+    def _apply_pi_run(self, conversation, run_id, scope, mode, ast_version_id, execution,
+                      session_config, runtime_name, workspace_id) -> None:
+        stored_scope = _load_json(conversation.get("scope_json"), None)
+        stored_mode = str(conversation.get("mode") or "backbone")
+        changed = (
+            scope != stored_scope
+            or mode != stored_mode
+            or ast_version_id != conversation.get("ast_version_id")
+            or conversation.get("runtime") != runtime_name
+            or session_config != _load_json(conversation.get("session_config_json"), None)
+        )
+        session_id = None if changed else conversation.get("runtime_session_id")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute(
+                """UPDATE query_conversation SET scope_json=?,mode=?,ast_version_id=?,
+                   runtime=?,runtime_session_id=?,session_config_json=?,workspace_id=?,updated_at=?
+                   WHERE id=?""",
+                (_json(scope) if scope else None, mode, ast_version_id, runtime_name, session_id,
+                 _json(session_config), workspace_id, _now(), conversation["id"]),
+            )
+            self.db.execute(
+                "UPDATE query_run SET mode=?,ast_version_id=?,execution_json=?,runtime_session_id=? WHERE id=?",
+                (mode, ast_version_id, _json(execution), session_id, run_id),
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        conversation.update({
+            "runtime": runtime_name, "runtime_session_id": session_id,
+            "workspace_id": workspace_id, "mode": mode, "ast_version_id": ast_version_id,
+            "scope_json": _json(scope) if scope else None,
+            "session_config_json": _json(session_config),
+        })
+
     def _apply_core_run(self, conversation, run_id, scope, mode, execution,
                         session_config, runtime_name, workspace_id) -> None:
         stored_scope = _load_json(conversation.get("scope_json"), None)
@@ -660,7 +924,7 @@ class QueryService:
             "session_config_json": _json(session_config),
         })
 
-    def _workspace_for_mode(self, mode: str) -> Workspace:
+    def _mode_selection(self, mode: str) -> dict[str, Any]:
         business_context_source = None
         code_map_source = None
         description = None
@@ -694,10 +958,17 @@ class QueryService:
             description = MODE_DESCRIPTIONS["none"]
         else:
             description = MODE_DESCRIPTIONS["backbone"]
-        return self.workspace_manager.ensure(mode=mode, business_context_source=business_context_source,
-                                             code_map_source=code_map_source,
-                                             ast_source=ast_source, ast_status=ast_status,
-                                             mode_description=description, ast_version_id=ast_version_id)
+        return {
+            "business_context_source": business_context_source,
+            "code_map_source": code_map_source,
+            "ast_source": ast_source,
+            "ast_status": ast_status,
+            "mode_description": description,
+            "ast_version_id": ast_version_id,
+        }
+
+    def _workspace_for_mode(self, mode: str) -> Workspace:
+        return self.workspace_manager.ensure(mode=mode, **self._mode_selection(mode))
 
     def _normalize_scope(self, scope: Any) -> dict[str, list[str]] | None:
         """校验并展开查询范围；返回 None 表示不限定（全部资料）。
@@ -957,6 +1228,13 @@ class QueryService:
             }
             sources = self.workspace_manager.core_source_summary(
                 include_business_context=profile.business_context != "disabled")
+        elif profile is not None and profile.investigation == "pi":
+            workspace_info = {
+                "id": self.workspace_manager.project_id,
+                "path": str(self.workspace_manager.root / "pi"),
+                "mode": "pi",
+            }
+            sources = self.workspace_manager.source_summary()
         else:
             sources = self.workspace_manager.source_summary()
             try:
@@ -1084,9 +1362,14 @@ class QueryService:
         }
 
 
-def _default_runtime(*, index_root=None, project_id=None):
+def _default_runtime(*, index_root=None, project_id=None, project_data_root=None):
     environment = dict(os.environ)
     profile = resolve_profile(environment)
+    if profile.runtime == "pi":
+        from business_code_agent.query.agent.pi import PiAgentRuntime
+
+        root = Path(project_data_root) / "pi-sessions" if project_data_root else None
+        return PiAgentRuntime(profile=profile, environment=environment, session_root=root)
     if profile.runtime == "claude":
         return default_claude_runtime()
     if profile.investigation == "direct":

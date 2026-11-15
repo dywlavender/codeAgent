@@ -17,11 +17,11 @@ V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构
 
 `claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
 
-阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用，生产默认仍是 Legacy。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
+阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；在线问答默认已切换为 Pi（2026-11-15），Core 不参与默认链路。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
 
 真实模型答案验收尚未完成：2026-11-13 对验证工程请求时供应商返回 403（额度耗尽），失败 Run/Event/Trace 已保存；不能用模拟模型测试或 API 回归代替答案质量验收。设计通过、整包有条件通过；阶段 1 验收与测试范围见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。
 
-后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链，默认切换需要另行确认。
+后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链；默认 Pi 切换已由用户确认，硬封存/删除旧链另行确认。
 
 ## V1 目标
 
@@ -83,6 +83,8 @@ Python 负责：
 | `shared/` | 跨包共用工具 |
 
 同包内使用相对 import；跨包使用绝对 import（`business_code_agent.<包>.<模块>`），使跨包依赖在代码中可见。领域包不反向 import `api`；`cli.py` 只做参数解析和装配，不承载业务逻辑。这些规则由 `tests/test_package_boundaries.py` 静态校验（禁止跨包相对 import、领域包反向引用 `api/`、HTTP 层直接依赖 `storage/`、`storage/` 与 `shared/` 依赖领域包），`tests/test_import_paths.py` 校验 import 目标文件存在；两者都不需要安装可选运行时依赖。
+
+`query/agent/pi/` 封装 Pi RPC 子进程、事件转换、会话文件和只读检索扩展；在线问答默认启用（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`），显式 `langchain` 仅历史对照。Pi 工作区位于注册工程 `pi/<conversation-id>`（兼容单工程同理），不改动 Legacy 的 `modes/{combined,none,backbone,ast}` 布局。
 
 `storage/connections.py` 提供不应用主库 schema 的通用 SQLite 连接工厂，供契约索引等独立快照库复用；独立快照不得走 `schema.connect()`，后者会创建并迁移主库表。HTTP 层不直接调用 `storage`：请求级主库连接由 `ProjectContext.open_db()` 提供。
 
@@ -191,7 +193,7 @@ ask(question, *, workspace, session_id=None, event_callback=None)
 --add-dir <workspace>
 ```
 
-以上命令仅适用于显式 `BUSINESS_CODE_AGENT_RUNTIME=claude`。默认 LangChain 使用配置的兼容 Chat 模型、Read／Glob／Grep 及已准备时的 SearchCode。会话消息保存在模式工作区 `.langchain-sessions/`，最多保留最近六个完整用户回合；旧工具正文超过上下文预算时标为已废弃，保留工具调用与结果的配对。源码修改后历史 Read 原文作废，历史 SearchCode 原文在追问时重新取得。模式、范围、AST 版本或运行时改变不续用旧会话。页面恢复历史时保留原轮次资料信息，新的追问使用 combined；浏览器旧 queryMode 设置不再限制新问题。
+以上命令仅适用于显式 `BUSINESS_CODE_AGENT_RUNTIME=claude`。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 时使用配置的兼容 Chat 模型、Read／Glob／Grep 及已准备时的 SearchCode。会话消息保存在模式工作区 `.langchain-sessions/`，最多保留最近六个完整用户回合；旧工具正文超过上下文预算时标为已废弃，保留工具调用与结果的配对。源码修改后历史 Read 原文作废，历史 SearchCode 原文在追问时重新取得。模式、范围、AST 版本或运行时改变不续用旧会话。页面恢复历史时保留原轮次资料信息，新的追问使用 combined；浏览器旧 queryMode 设置不再限制新问题。
 
 LangChain 主问答不设调查轮数或总时长上限，旧环境变量 `BUSINESS_CODE_AGENT_MAX_CALLS`／`BUSINESS_CODE_AGENT_TIMEOUT` 不再生效。只有有界评测等显式调用者可传 `max_calls`／`max_seconds`，其中调用总数包含最后一次无工具答题；轨迹记录实际限额，无限制时为 null。手动停止可中断异步模型请求。上下文字符数、单次原文大小及单次模型网络请求超时继续管理。无工具答题不携带调查工具定义或工具调用历史，仅组装真实原文与必要对话背景。facts/contracts 调查结束后执行独立收尾。plain 优先接收自然答案，遇到只剩证据缺口或重复检索时，进入下述无工具收尾。无工具答题未返回有效答案时记录真实错误，不再误标为预算用尽。检查与渲染本身不调用模型，格式不合格不会自动重试。所有模型调用用量累计，工具原文完整保存在事件中。事实检查的协议、接受事实和 `semanticProof=false` 保存在 usage.verification；检查通过不代表语义解释正确。会话核对应答模式，事件通过 SSE 与 query_event 保存，最终回答在模型完成后输出。
 

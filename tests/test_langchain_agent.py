@@ -20,7 +20,7 @@ class ToolModel(FakeMessagesListChatModel):
 
 
 class AgentTest(unittest.TestCase):
-    def test_default_runtime_is_langchain_and_hybrid_is_explicit(self):
+    def test_legacy_runtime_requires_explicit_selection_and_hybrid_is_explicit(self):
         import os
         from unittest.mock import patch
         from business_code_agent.query.service import _default_runtime

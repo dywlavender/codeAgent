@@ -131,7 +131,7 @@ capabilities:
   contract: disabled
 ```
 
-未来显式 Profile 是唯一授权来源；与遗留 mode、WORKFLOW、RETRIEVAL、CONTRACTS 冲突的参数须拒绝，不能叠加。未提供 Profile 时仍走原兼容解析，直至另行确认默认切换。模型连接可继续读取 `.env`，但不把其中的调查开关合并进 core。
+未来显式 Profile 是唯一授权来源；与遗留 mode、WORKFLOW、RETRIEVAL、CONTRACTS 冲突的参数须拒绝，不能叠加。未提供 Profile 时默认走 `pi-v1`；原 Legacy 兼容解析仅在显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 时启用。模型连接可继续读取 `.env`，但不把其中的调查开关合并进 core。
 
 ## 3. RunContext 与能力提供者
 
@@ -355,6 +355,14 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 增加工具只改变提供者、注册清单/Profile 和对应适配器，不在 DirectRuntime 中添加 `if ast`、`if business` 或按工具名执行补查分支。
 
+### 7.4 Pi Runtime 原生工具（2026-11-15）
+
+`pi-v1` 使用 Pi 原生 `read`、`grep`、`find`、`ls`、`codemode`，不注册 LangChain 工具，不开放 `bash`／`edit`／`write`。`file_tools` 为 required；业务补充知识、AST、代码地图按模式为 optional，缺失只收缩本轮能力，不换 Profile、不生成索引。
+
+工作目录仍是只读授权视图，但软链接不是安全边界。`grep`／`find` 默认不跟随符号链接，Pi 运行时显式加载只读扩展强制跟随授权链接，并在 `tool_call` 前拦截越界路径、主目录路径和指向授权范围外的符号链接；`codemode` 的内层工具调用同样受检。该扩展不是 OS 沙箱，不能替代进程级隔离；工作区只挂载本轮授权的仓库和资料。
+
+Pi 的工具决策与调用顺序由模型决定；CodeAgent 的 Capability 只提供授权资料、状态和阅读指导。Pi 事件转换为既有 `model`／`tool`／`status`／`compaction`／`text` Trace 事件，模型调用在开始时写入 running、结束时补响应，取消时标记 cancelled。Pi 失败直接保存失败 Run 和 Trace，不自动回退旧 Runtime。
+
 ## 8. Runtime、事件与错误合同
 
 ```python
@@ -408,6 +416,26 @@ class AgentRuntime(Protocol):
 同一运行内重复 Read 同一已交付区间不重新打开文件：原文仍在当前上下文时返回可引用提示；已被上下文压缩移除时允许有限次恢复原文，恢复额度用尽后返回证据缺口，要求模型基于已有证据作答并声明无法复核。恢复不扩大文件授权，恢复后的原文仍参与来源与行号核验。
 
 Direct 运行时跟踪连续无新增证据的 Read（缓存、受控恢复和证据缺口都算无新增）。达到提醒阈值后先注入停止提示；继续无进展，或调用次数/总时长预算临近时，允许一次不带工具的最终答题调用，并在该请求中附带已读文件与行区间索引和明确的“立即作答”指令。最终答案仍标记 `incomplete`（`stopReason=no_progress|budget`），保留部分答案与未确认引用，不得计入正常完成；收尾调用的超时不得把运行改记为 failed。收尾机制不产生新的调查工具或自动补查。
+
+### 8.1 Direct 答案覆盖实验
+
+`BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED=true` 为显式选择，适用于 `core-v1` 和 `core-business-v1`。Direct 在原有工具列表中增加运行内 `RecordFindings`，资料授权仍由 Profile 和 RunContext 决定。配置变化使模型会话重新建立，证据和关系编号仅在本轮有效。Answer Checkpoint v2 默认关闭。
+
+- 原问题作为 `Q0` 保留。模型可凭原问题中的逐字引文追加目标。分句、词面匹配和模型的拆解结果均不证明完整覆盖，因此 `questionCoverage=unknown`。
+- 新结论使用精确的 `路径:行号` 或 `路径:起始-结束`。程序关联本轮实际交给模型的 Read 原文、资料类型及调用 ID，已有有效关联可留作本轮记录。Grep/Glob 命中、历史原文或同批次尚未交付的 Read 结果不能为新结论提供依据。需求和业务约定只支持相应来源的结论。
+- 必要关系关联已有目标，并登记发现该关系的来源。确认连接需要引用实际调用、路由注册或配置绑定的源码；读到两端只提供发现线索。连接仍缺失时目标标为部分覆盖，收尾只展示带原文且明确限制的局部结论。
+- `submit=true` 提交并渲染已登记结论和缺口。同条结论或连接同时包含有效和无效引用时，最多退回一次具体问题，由原模型拆分结论、声明缺口或选择定向补查。修正仍计入原调用和时间预算。预算收尾复用已有一次无工具答题，仍记 `incomplete`。未结构化的模型回应保留在 Trace，正文使用已经关联原文的结论。
+- `usage.answerClosure` 保存 Question Contract、Evidence Ledger、已登记目标覆盖和 `semanticProof=false`。`supported` 指登记结论与交付原文已关联，`partial` 表示仍有缺口，`unknown` 表示缺少可用依据。执行状态与覆盖状态独立，语义正确性由真实答案评估判断。
+
+### 8.2 Direct 上下文管理实验
+
+`BUSINESS_CODE_AGENT_CONTEXT_TOKENS` 启用 Direct 的请求 token 预算，计入系统提示、摘要、工具定义和调用入参，预留配置的输出上限。字符上限继续约束请求。兼容供应商的分词器可能不同，使用本地估算并按供应商返回的输入 token 向上校准。Trace 同时保存请求估算与供应商实际返回的用量。
+
+达到上限时，优先收缩旧 Grep 和 Glob 的大结果，保留相应的调用参数和最近完整工具批次。仍超预算时，按完整工具批次选择保留的近期后缀，原问题始终在上下文。一次压缩可调用同一模型生成短摘要，不提供工具。摘要请求计入原调用次数和时长，可取消。临近答题预算、摘要失败或请求过长时，收缩上下文并沿用已有调查记忆。缩减只影响模型后续看到的消息，原始工具结果保留在调用轨迹。此设计参考了 Pi 的阈值压缩和工具批次边界。[Pi 上下文压缩](https://upd.dev/badlogic/pi-mono/src/branch/stable/packages/coding-agent/docs/compaction.md)
+
+摘要保存有已读位置的结论线索、未确认问题、已读路径和下一步建议。原文不在当前答题请求时，凭路径和行区间请求 `ReadLedger` 恢复。本轮已有来源关联的结论和必要关系优先进入摘要。生成的摘要只用于调查记忆，普通答题的引用核对只接收当前答题请求带入的 Read 原文。
+
+保留的消息和摘要复用 Direct SessionStore。预算及上下文版本参与会话隔离；恢复时按授权路径核对文件版本，变化的文件原文和关联摘要结论失效。压缩前后估算、模型调用及处理状态可在 Trace 查询，汇总位于 `usage.contextManager`。
 
 ## 9. 会话身份与历史隔离
 

@@ -282,7 +282,7 @@ class RetrievalCoordinatorTest(unittest.TestCase):
     def test_auto_index_selection_does_not_create_missing_index(self):
         from business_code_agent.query.materials import MaterialManifest
 
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"BUSINESS_CODE_AGENT_RUNTIME": "langchain"}, clear=True):
             runtime = _default_runtime(index_root=self.root / "retrieval-index", project_id="A")
         preparation = runtime.prepare(workspace=self.workspace, materials=MaterialManifest.from_workspace(self.workspace))
         statuses = {tool.capability: (tool.policy, tool.status) for tool in preparation.tool_statuses}

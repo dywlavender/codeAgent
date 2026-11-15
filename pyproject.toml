@@ -20,3 +20,6 @@ business-code-agent = "business_code_agent.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["business_code_agent*"]
+
+[tool.setuptools.package-data]
+"business_code_agent.query.agent.pi" = ["extension/*.js"]

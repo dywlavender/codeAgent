@@ -1,8 +1,8 @@
 # CodeAgent V2 迁移与验收计划
 
-状态：V2 设计通过；V1 预备实现已提交，整包有条件通过；core-v1 尚未实现。确认日期：2026-11-13。
+状态：V2 设计冻结，`core-v1` 和 `core-business-v1` 已显式开放，生产默认使用 Legacy。Direct 的 Evidence Ledger 与 Answer Closure 作为独立实验接入，真实答案质量仍按对应对照验收。
 
-依据：[V2 总体架构](agent-architecture-v2.md)、[能力与运行合同](agent-capability-contract.md)。本次第一步称为阶段 0；下文阶段 1 是下一步 `core-v1` 实现，不能把两者验收混在一起。
+依据见[V2 总体架构](agent-architecture-v2.md)和[能力与运行合同](agent-capability-contract.md)。第 1–7 节保留设计冻结时的基线及验收记录，实现进度见第 8 节起。
 
 ## 1. 当前基线与保护范围
 
@@ -87,7 +87,7 @@
 
 其他必验项：无可选解析/检索依赖也可导入 core；禁用能力探测函数「调用即失败」仍可问答；模型可自主跨授权仓库搜索；Profile/范围/实际工具和资料变化重建会话；取消与失败保留事件。固定结果测试提供者验证注册不改 Direct 循环，不扩展真实业务/结构能力。
 
-**已实现（2026-11-13）**：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py`、`query/agent/session.py` 及 QueryService core 分支。默认仍为 Legacy，`BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；网页默认 `mode=combined` 映射为 `core`，显式旧模式拒绝。
+**已实现（2026-11-13）**：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py`、`query/agent/session.py` 及 QueryService core 分支。当时默认仍为 Legacy，`BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；2026-11-15 起在线默认已切换为 Pi（见第 10 节）。网页默认 `mode=combined` 映射为 `core`，显式旧模式拒绝。
 
 **延后项**：完整运行期能力失效联动、全部结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定、AST/Contract 专属授权、高级检索动态状态管理，随阶段 2/3/后续对应能力实施。core 的路径授权、required 明确失败、基本原文引用和会话边界未因延后这些机制而省略。
 
@@ -99,7 +99,7 @@
 
 ### 阶段 3：AST 与结构导航
 
-将 AST 生命周期从 evaluation 调整到 CodeIntel，保留已有版本目录、显式生成和历史引用。提供真正只读的状态/版本 reader 及 AstCapability，复用已有解析结果和 Code Map 导航视图；问答不解析、不更新缓存型索引、不重新生成。
+在阶段 2.5 的 Direct 答案覆盖验证之后安排。将 AST 生命周期从 evaluation 调整到 CodeIntel，保留已有版本目录、显式生成和历史引用。提供只读的状态/版本 reader 及 AstCapability，复用已有解析结果和 Code Map 导航视图。
 
 解析器能力范围如实暴露：调用/继承/实现关系能返回哪些由真实数据决定；消息消费者和任务未被索引时，工具交付缺口，由模型用现有文件工具继续。符号库存在不等于已实现可编程查询，更不表示完整业务链已证明。
 
@@ -565,7 +565,23 @@ A=当前代码检查点关闭，B=相同代码/工具/Prompt 开启检查点；`
 - 未改善：`native-frontend` 两组均 2/2 完成、8/8 关键文件，B 更慢；`native-lifecycle` 主样本检查点全部因连接错误未执行，B 0/2 完成、关键文件 8/12，A 0/2、9/12，主样本没有真正检验命令路由缺口。
 - 补充 lifecycle 运行：检查点完成后 16 次调用完成，但关键文件仅 3/6（缺 `CommandWrapperBuilder`、`ApprovalCommandHandler`、`CommandHandlerProvider`），答案却写“所有关键环节已确认到行级证据”。这是“完成但关键证据遗漏并过度声明”的 P0 反例，不能算检查点有效。
 - 结论：v2 修复了结构、会话和成本问题，完成数略升、调用略降，但关键覆盖和答案关键词未改善，lifecycle 的关键缺口场景仍失败，并出现提前收尾/过度声明。**不批准默认启用，不进入 8 题扩展；检查点保持默认关闭，生产默认仍为 Legacy。**
-- 下一步：不再增加检查点次数或引入评审模型；优先设计“完成前必需事项必须有可核验证据或明确标为不可核实”的收尾条件，并继续用同一 3 题验证命令路由、跨系统职责等关键环节。
+- 后续调整见下节。检查点 v2 继续作为可复验的历史实验。
+
+### 2026-11-15 Direct 证据与答案覆盖闭环
+
+Question Contract v3 冻结，保留原问题和模型登记的目标，停止扩展分句与词面覆盖规则。Evidence Ledger 关联目标、模型结论、原文及必要关系。Answer Closure 只从已有记录组织可核对的结论并标明限制，在同一 Direct 循环内工作。`ReadLedger` 继续负责原文区间和恢复。运行方式见[能力与运行合同](agent-capability-contract.md#81-direct-答案覆盖实验)。
+
+使用 `native-frontend`、`native-lifecycle`、`v2-strategy-code` 做同题配对。各组使用同一冻结工程、`core-v1`、模型、温度、预算，均关闭 Answer Checkpoint v2。A 使用原 Direct 答题，B 启用首次闭环实现。B 出现把有效局部结论和无效引用装在同一段而丢失答案的情况，修正版 C 只增加有条件的一次退回，在同一模型循环内拆出有效部分和未核实项。逐题复核答案、连接证据和未确认项，同时统计关键文件、耗时、调用数和 token。
+
+九次真实运行已完成。C 的关键文件 Read 为 18/19，A 为 13/19。C 恢复了前端题的局部结论并核实策略题的产品覆盖条件，三题均以预算收尾，累计耗时较 A 增加约 31%。B 和 C 没有成功登记必要关系，关键命令路由的效果验收尚未通过。闭环继续作为显式实验，后续评估聚焦调查中及时登记连接和局部依据。见[真实对照及轨迹索引](../records/2026-11/direct-answer-closure-ab-20261115.md)。
+
+### 2026-11-15 Context Manager
+
+先验证上下文预算、压缩与恢复，文件输出和调查进展分别作为后续变更，沿用 Direct 的模型和工具循环。压缩策略、引用边界及使用方式见[能力与运行合同](agent-capability-contract.md#82-direct-上下文管理实验)。
+
+此前答案覆盖对照的 600,000 字符上限下，原 Direct 的三个基线运行均未触发 Read 正文裁剪。为观察压缩，另用同一个冻结工程与三题，将三组的字符上限都设为 100,000，并固定模型、输出上限、轮数与时长，关闭检查点与 Answer Closure。首版与修正版使用 40,000 token 的总窗口。比较压缩是否触发、实际交付给答题模型的原文、关键文件覆盖、答案和总用量。
+
+九次真实运行及策略题同请求重放已完成。首版整批裁剪丢失已读请求值，修正版优先缩减旧搜索输出并保留该原文。修正版相对字符基线正常完成数从 1/3 升至 2/3，最终可见关键文件均为 16/19，模型调用、搜索次数、总耗时和 token 上升。继续显式启用，生命周期题的命令分派仍待核实。见[真实对照及轨迹索引](../records/2026-11/direct-context-manager-ab-20261115.md)。
 
 ### 未完成的效果验收
 
@@ -575,6 +591,19 @@ A=当前代码检查点关闭，B=相同代码/工具/Prompt 开启检查点；`
 - 同一记录中的第二题曾因重复补读运行 230 次调用；重复读取修复后改用新模型 `glm-5.3-flash` 复验，128k/64k 下 Core 与 Business 共四次运行全部完成，64k 两组实际恢复被压缩的原文 1 次和 4 次、证据缺口为 0，已从“无法收敛”转为能够形成答案。该复验仍不是完整的 16 题对照。
 - 2026-11-14 完成 8 题预算收紧子集（40 次/300 秒/600k 字符，单路，16 次运行）：7 次 `completed`、9 次 `incomplete`（全部 `budget`），无重复读取、恢复或缺口；Business 4/8、Core 3/8 完成，样本不足以证明业务知识收益。完整 16 题对照仍未执行，浏览器人工复核、关键阶段覆盖率与错误结论统计仍未完成。
 - 验证期间修复了系统提示未计入上下文预算、压缩证据不可恢复和限制停止记成 completed 三类问题，并增加回归测试；修复不能替代效果验收。
-- 生产默认仍为 Legacy；`core-business-v1` 需显式配置启用。
+- 当时生产默认仍为 Legacy；`core-business-v1` 需显式配置启用。2026-11-15 起在线默认已切换为 Pi（见第 10 节）。
 
 效果验收必须在同一模型、同一组问题、仅改变 Business Context 授权的条件下完成，并单独记录；不能由工程测试通过替代。
+
+## 10. Pi Runtime 统一问答主链（2026-11-15，已实现并默认启用）
+
+本轮新增 Pi 作为在线问答的唯一调查循环，旧 LangChain 与 Direct 代码保留但不在 Pi 链路内复用。实现与证据见[Pi Runtime 实现记录](../records/2026-11/pi-runtime-unification-20261115.md)。
+
+- **入口**：在线问答默认选择 `pi-v1`（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`）；`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，Pi 失败不回退 LangChain。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 仅用于历史同题对照与评测，不在默认链路。
+- **Pi 职责**：模型选择、工具决策、工具执行、上下文压缩、会话与 Agent Loop 均由 Pi 进程负责；CodeAgent 只准备授权工作区、资料清单、Run/Trace、取消、持久化和结果协议。
+- **工具**：只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接；Pi 自带 `grep`／`find` 默认不跟随符号链接，因此显式加载只读扩展 `extension/codeagent_search.js`，强制跟随授权链接并在执行前拦截越界路径。该扩展不是 OS 沙箱，不能把工作区 cwd 当作安全边界。
+- **会话**：CodeAgent `conversationId` 映射到工程数据目录 `pi-sessions/` 下的 Pi 会话文件；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建 Pi 会话。旧 LangChain 会话不直接复用，历史答案仍可查看。
+- **Trace**：Pi 事件转换为现有 `model`／`tool`／`status`／`compaction`／`text` 事件；模型调用在 `message_start` 即写入 running，`message_end` 补响应，取消时标记 cancelled。Trace 记录 Pi 版本、实际模型、工具、上下文压缩、token 和会话文件。
+- **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（空为 Pi 默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
+
+验证：Pi 专项 21 项、全量后端 513 项及 91 个子测试通过；真实 API/SSE 已完成源码问答、同会话追问和取消三次运行。默认运行已于 2026-11-15 由用户确认切换为 Pi。该验证只证明链路可用，不证明相对旧链的答案质量收益；8／16 题同题同模型对照与现有模式验收仍未完成，旧 LangChain 显式入口暂留作对照，硬封存与删除另行确认。

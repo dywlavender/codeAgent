@@ -18,19 +18,19 @@ from business_code_agent.query.runtime import RequiredToolUnavailable
 
 
 class ResolveProfileTest(unittest.TestCase):
-    def test_defaults_preserve_coordinated_plain_and_auto_policies(self):
+    def test_default_runtime_is_pi_and_legacy_needs_explicit_runtime(self):
         for environment in ({}, {"BUSINESS_CODE_AGENT_PROFILE": "  "}):
             with self.subTest(environment=environment):
                 profile = resolve_profile(environment)
-                self.assertEqual(
-                    ("coordinated-legacy-v1", "langchain", "coordinated", "plain"),
-                    (profile.id, profile.runtime, profile.investigation, profile.answer_mode),
-                )
+                self.assertEqual(("pi-v1", "pi", "pi"), (profile.id, profile.runtime, profile.investigation))
                 self.assertEqual(MATERIAL_KINDS, profile.materials)
-                self.assertEqual(
-                    ("required", "optional", "optional"),
-                    (profile.file_tools, profile.search_code, profile.contract_trace),
-                )
+        profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain"})
+        self.assertEqual(
+            ("coordinated-legacy-v1", "langchain", "coordinated", "plain"),
+            (profile.id, profile.runtime, profile.investigation, profile.answer_mode),
+        )
+        self.assertEqual(("required", "optional", "optional"),
+                         (profile.file_tools, profile.search_code, profile.contract_trace))
 
     def test_basic_and_tracked_map_legacy_switches(self):
         for workflow in ("basic", "tracked"):
@@ -39,7 +39,8 @@ class ResolveProfileTest(unittest.TestCase):
                 ("auto", "auto", "optional"), ("hybrid", "on", "required"),
             ):
                 with self.subTest(workflow=workflow, retrieval=retrieval, contracts=contracts):
-                    environment = {"BUSINESS_CODE_AGENT_WORKFLOW": workflow,
+                    environment = {"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                                   "BUSINESS_CODE_AGENT_WORKFLOW": workflow,
                                    "BUSINESS_CODE_AGENT_ANSWER_MODE": "facts"}
                     if retrieval is not None:
                         environment["BUSINESS_CODE_AGENT_RETRIEVAL"] = retrieval
@@ -74,14 +75,20 @@ class ResolveProfileTest(unittest.TestCase):
         for key, message in (
             ("PROFILE", "未知的 Agent Profile"), ("WORKFLOW", "WORKFLOW"),
             ("ANSWER_MODE", "ANSWER_MODE"), ("RETRIEVAL", "RETRIEVAL"), ("CONTRACTS", "CONTRACTS"),
+            ("RUNTIME", "RUNTIME"),
         ):
+            environment = {f"BUSINESS_CODE_AGENT_{key}": "invalid"}
+            if key != "PROFILE":
+                environment["BUSINESS_CODE_AGENT_RUNTIME"] = (
+                    "invalid" if key == "RUNTIME" else "langchain")
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, message):
-                resolve_profile({f"BUSINESS_CODE_AGENT_{key}": "invalid"})
+                resolve_profile(environment)
 
     def test_contracts_answer_requires_contract_tools(self):
         for policy in ("auto", "on", "off"):
             with self.subTest(contracts=policy):
-                environment = {"BUSINESS_CODE_AGENT_ANSWER_MODE": "contracts",
+                environment = {"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                               "BUSINESS_CODE_AGENT_ANSWER_MODE": "contracts",
                                "BUSINESS_CODE_AGENT_CONTRACTS": policy}
                 if policy == "off":
                     with self.assertRaisesRegex(ValueError, "contracts 答题模式需要启用工程契约索引"):
@@ -235,7 +242,8 @@ class PrepareToolsTest(TemporaryWorkspaceTest):
             ) as dependencies, patch.object(
                 preparation_module, "ContractIndex", side_effect=AssertionError("no prepared contract index"),
             ) as contract_index:
-                preparation = self.prepare(resolve_profile({}), index_root=root)
+                preparation = self.prepare(resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain"}),
+                                           index_root=root)
                 preparation.require_tools()
                 self.assertIs(preparation.materials, self.materials)
                 statuses = {status.capability: status for status in preparation.tool_statuses}
@@ -268,7 +276,8 @@ class PrepareToolsTest(TemporaryWorkspaceTest):
         # A sentinel, deliberately not a valid SQLite index; disabled means it is never inspected.
         sentinel = self.write_fixture("contract-index/contracts.sqlite", "not an index")
         self.assertTrue(sentinel.is_file())
-        profile = resolve_profile({"BUSINESS_CODE_AGENT_WORKFLOW": "basic"})
+        profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                                   "BUSINESS_CODE_AGENT_WORKFLOW": "basic"})
         with patch.object(Path, "is_file", side_effect=AssertionError("disabled index must not be probed")) as probe, \
                 patch.object(preparation_module, "ContractIndex", side_effect=AssertionError("disabled")) as constructor:
             preparation = self.prepare(profile, contract_root=sentinel.parent)
@@ -285,7 +294,9 @@ class PrepareToolsTest(TemporaryWorkspaceTest):
         self.assertEqual("not an index", sentinel.read_text(encoding="utf-8"))
 
     def test_required_missing_indexes_raise_through_require_tools(self):
-        profile = resolve_profile({"BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid", "BUSINESS_CODE_AGENT_CONTRACTS": "on"})
+        profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                                   "BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid",
+                                   "BUSINESS_CODE_AGENT_CONTRACTS": "on"})
         with patch.object(preparation_module, "find_spec", side_effect=AssertionError("no index")) as dependencies, \
                 patch.object(preparation_module, "ContractIndex", side_effect=AssertionError("no index")) as constructor:
             preparation = self.prepare(profile, index_root=self.root / "missing-hybrid",
@@ -308,7 +319,8 @@ class ExecutionSnapshotTest(TemporaryWorkspaceTest):
     def test_snapshot_records_profile_materials_tool_versions_model_and_settings(self):
         (self.root / "knowledge/ast").mkdir(parents=True)
         materials = MaterialManifest.from_workspace(self.root, allowed=("ast",), ast_version="ast-version-7")
-        profile = resolve_profile({"BUSINESS_CODE_AGENT_WORKFLOW": "tracked",
+        profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                                   "BUSINESS_CODE_AGENT_WORKFLOW": "tracked",
                                    "BUSINESS_CODE_AGENT_ANSWER_MODE": "facts",
                                    "BUSINESS_CODE_AGENT_RETRIEVAL": "auto"})
         # Synthetic public statuses test serialization, not index readiness or search quality.

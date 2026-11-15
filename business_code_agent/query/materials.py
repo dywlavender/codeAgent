@@ -67,12 +67,14 @@ class MaterialManifest:
         code_map = "knowledge/generated-code-map"
         sources = []
 
-        def add(kind, label, path, version=None, unavailable="missing"):
+        def add(kind, label, path, version=None, unavailable="missing",
+                repository_id=None):
             if kind in kinds:
                 candidate = root / path
                 directory = candidate.resolve() if candidate.is_dir() else None
                 sources.append(MaterialSource(kind, label, path, directory,
-                                              "available" if directory else unavailable, version))
+                                              "available" if directory else unavailable,
+                                              version, repository_id))
 
         add("business_context", context_label, context)
         add("code_map", "自动代码地图", code_map)
@@ -85,7 +87,8 @@ class MaterialManifest:
             entries = sorted(repos.iterdir()) if repos.is_dir() else []
             for entry in entries:
                 if entry.is_dir() and (repositories is None or entry.name in repositories):
-                    add("source", f"代码仓库 {entry.name}", f"repos/{entry.name}")
+                    add("source", f"代码仓库 {entry.name}", f"repos/{entry.name}",
+                        repository_id=entry.name)
             if not any(source.kind == "source" for source in sources):
                 sources.append(MaterialSource("source", "代码仓库", "repos", None, "missing"))
         return cls(tuple(sources))

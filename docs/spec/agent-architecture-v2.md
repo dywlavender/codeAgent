@@ -1,6 +1,6 @@
 # CodeAgent V2 架构设计
 
-状态：设计冻结；`core-v1` 阶段 1 最小主链与 `core-business-v1` 阶段 2 Business Context 工程接入已实现，可分别通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1`、`core-business-v1` 显式启用；真实模型效果验收仍未完成，生产默认仍为 Legacy。确认日期：2026-11-13。
+状态：设计冻结；`core-v1` 阶段 1 最小主链与 `core-business-v1` 阶段 2 Business Context 工程接入已实现，可分别通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1`、`core-business-v1` 显式启用；在线问答默认已切换为 Pi（2026-11-15），真实模型效果验收仍未完成。确认日期：2026-11-13。
 
 `claudecode` 提交 `9a1c71e7c7bd7400d8d400475f51e47ccbca41f2` 的实际交付是「V2 设计 + V1 运行配置预备实现」，不是纯文档提交。Profile、资料清单、工具预检、执行快照与会话配置已进入该提交，另有 Runtime、API、schema 和轨迹前端配套改动；这些不是 V2 Direct Runtime。当前结论为：架构设计通过，整包提交有条件通过，验证范围与缺口见[迁移计划第 7 节](agent-migration-plan.md#7-本次验证与交付状态)。
 
@@ -52,6 +52,12 @@ Trace 从运行创建开始持续记录，并非回答之后才开始。资料/�
 
 `legacy-v1` 是 V1 coordinated Runtime 的兼容入口，其内部程序调度保留为对照，不属于 Direct 主循环。不能把 Coordinator 放进一个叫 Capability 的包装里，再让 `core-v1` 间接使用它。
 
+### Direct 的目标、证据和收尾
+
+开启 Answer Closure 后，模型可在同一调查循环中登记原问题要求、必要关系和带原文的结论。Question Contract v3 留存原问题和追加式目标，模型负责解释问题及判断关系必要性。Evidence Ledger 将结论和连接引用关联到本轮实际交付的授权 Read 原文。Answer Closure 渲染有依据的结论和未核实项，完整覆盖原问题仍需语义复核。
+
+模型选择何时继续定位、读取或提交答案，`RecordFindings` 只维护当前运行状态。正常提交直接结束。同一结论混用有效和无效引用时，原循环可收回一次提交，让模型用已读原文拆分结论或明确缺口。现有有界收尾可用相同字段提交部分结论。该路径在 Direct Profile 中显式启用，运行配置和记录进入现有 Trace。具体检查及启用方式见[能力与运行合同](agent-capability-contract.md#81-direct-答案覆盖实验)。
+
 ## 3. 资料与工具分层
 
 | 类别 | 对象 | 如何交付 | 证明边界 |
@@ -88,7 +94,7 @@ BusinessContextCapability 通常不增加工具，复用 FileCapability 的 Read
 
 | Profile | Runtime | 资料与能力 | 当前状态 |
 | --- | --- | --- | --- |
-| `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 已实现基础主链（阶段 1）；默认未切换 |
+| `core-v1` | `langchain-direct` | 源码 required、需求 optional、File required，其余 disabled | 已实现基础主链（阶段 1）；显式 Profile，默认 Pi |
 | `legacy-v1` | `langchain-legacy` | 保留当前 combined/coordinated 及已准备索引的使用语义 | 需未来兼容适配；当前仍用现有入口 |
 | `core-business-v1` | 同一 `langchain-direct` | core 加可选 Business Context 文件与阅读指导 | 阶段 2 工程接入已实现；效果未验收 |
 | `core-ast-v1` | 同一 `langchain-direct` | core 加 AST 结构导航 | 预留，未开放 |
@@ -105,6 +111,8 @@ BusinessContextCapability 通常不增加工具，复用 FileCapability 的 Read
 Direct 的模型自主决定下一次 Read／Glob／Grep 和何时回答。不继承 V1 的固定补读、Investigation 待办、按连续无命中次数收尾或 Coordinator。生产不设置模型调用次数、调查总时长或有限 LangGraph 步数；保留取消、上下文容量、单次工具上限和单次网络请求超时。独立有界评测可通过公开运行参数设限并记录，不读取旧预算环境变量。
 
 上下文不足时可以丢弃/摘要历史工具正文，但必须标明原文未在当前上下文中，不能伪装为仍可引用。证据不足可以回答「尚未确认」，不是强制打开其他能力的理由。
+
+Direct 的可选 Context Manager 在模型请求前检查 token 预算，保留原问题、短调查摘要和最近的工具批次，并用现有 SessionStore 继承记录。模型可经 ReadLedger 恢复压缩前的原文。运行协议见[能力与运行合同](agent-capability-contract.md#82-direct-上下文管理实验)。
 
 ## 6. 逻辑目标结构与依赖规则
 
@@ -173,4 +181,12 @@ repos/
 
 设计冻结通过条件为 A01—A12 能由接口和场景解释清楚；该设计已通过。阶段 1 已补配置/预检/会话/失败持久化及 core 闭环测试，逐一缺失仓库校验已在 `prepare_core` 实现。还没有完成真实模型答案验收：2026-11-13 对 `validation-projects/complex-loan` 发起真实请求时供应商返回 403（免费额度耗尽），core 已正确保存失败 Run、事件和 Trace。不能据此宣称零索引 Agent 的答案质量、业务认知收益或 AST 收益已验证。
 
-下一阶段只实现 `core-v1` 与现有 QueryService 的接入，保留 Legacy 回退。业务知识、AST、检索与契约都不参与基础 Runtime 验收；以后按能力分别接入、分别做同模型同资料条件的增量评测。
+Core 和 Business Context 已接入，Legacy 保留为生产默认。阶段 2 后已有真实模型小样本，证据与收尾的验证见[迁移计划](agent-migration-plan.md)。AST、检索与契约按能力独立接入与评测。
+
+## 9. Pi Runtime 统一主链（2026-11-15）
+
+在线问答默认使用 `PiAgentRuntime`（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`）。Pi 负责模型调用、工具选择与调度、上下文压缩和会话；CodeAgent 继续负责工程/资料授权、RunContext、Trace、取消、持久化和业务问答增强。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，失败不自动回退旧链。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 仅用于历史同题对照与评测。
+
+Pi 只开放 `read`、`grep`、`find`、`ls`、`codemode`。工作区仍通过软链接暴露授权仓库；Pi 自带搜索默认不跟随符号链接，因此加载只读扩展强制跟随授权链接并在执行前检查路径。工作区 cwd 不是 OS 安全边界，扩展也不替代进程级隔离。Pi 会话文件限定在工程数据目录，配置或资料身份变化时重建。实现与真实运行证据见[迁移计划第 10 节](agent-migration-plan.md#10-pi-runtime-统一问答主链2026-11-15已实现并默认启用)。
+
+默认 Runtime 已切换为 Pi；旧 LangChain 与 Direct 仅保留显式历史对照。8／16 题同题同模型对照与现有模式验收仍未完成，不能据此宣称答案质量收益；硬封存 LangChain 在线入口、删除旧链，以及 Question Contract／Evidence Ledger／Answer Closure 如何消费 Pi 事件，仍按迁移计划分别验收。

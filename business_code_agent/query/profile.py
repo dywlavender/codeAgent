@@ -31,6 +31,9 @@ CORE_BUSINESS = AgentProfile("core-business-v1", "langchain-direct", "direct",
                              materials=("source", "requirements", "business_context"),
                              file_tools="required", search_code="disabled",
                              contract_trace="disabled", business_context="optional")
+PI = AgentProfile("pi-v1", "pi", "pi", materials=MATERIAL_KINDS,
+                  file_tools="required", search_code="disabled",
+                  contract_trace="disabled", business_context="optional")
 STANDARD = AgentProfile("standard-v1", "langchain", "agent_direct")
 COORDINATED_LEGACY = AgentProfile("coordinated-legacy-v1", "langchain", "coordinated",
                                   contract_trace="optional")
@@ -54,12 +57,17 @@ def resolve_profile(environment: Mapping[str, str]) -> AgentProfile:
     name = environment.get("BUSINESS_CODE_AGENT_PROFILE", "").strip()
     if name:
         profiles = {profile.id: profile for profile in (
-            CORE, CORE_BUSINESS, STANDARD, COORDINATED_LEGACY, CLAUDE_COMPAT)}
+            CORE, CORE_BUSINESS, PI, STANDARD, COORDINATED_LEGACY, CLAUDE_COMPAT)}
         if name not in profiles:
             raise ValueError(f"未知的 Agent Profile：{name}")
         return profiles[name]
-    if environment.get("BUSINESS_CODE_AGENT_RUNTIME", "langchain").lower() == "claude":
+    runtime = environment.get("BUSINESS_CODE_AGENT_RUNTIME", "pi").strip().lower()
+    if runtime == "pi":
+        return PI
+    if runtime == "claude":
         return CLAUDE_COMPAT
+    if runtime != "langchain":
+        raise ValueError("BUSINESS_CODE_AGENT_RUNTIME 仅支持 pi、langchain 或 claude")
 
     workflow = environment.get("BUSINESS_CODE_AGENT_WORKFLOW", "coordinated")
     coordinated = workflow == "coordinated"

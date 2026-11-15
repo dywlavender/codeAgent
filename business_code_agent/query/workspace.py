@@ -321,6 +321,133 @@ class WorkspaceManager:
                                    if include_business_context and business_link.is_dir() else None),
         )
 
+    def prepare_pi(self, *, workspace_key: str, mode: str | None = None,
+                   repository_ids=None,
+                   business_context_source: str | Path | None = None,
+                   code_map_source: str | Path | None = None,
+                   ast_source: str | Path | None = None,
+                   ast_status: str | None = None,
+                   mode_description: str | None = None,
+                   ast_version_id: str | None = None) -> Workspace:
+        """Create or refresh the stable read-only view used by Pi sessions.
+
+        Pi's process working directory is the only filesystem scope the model
+        is told about. Repository links are rebuilt from the configured set and
+        the normalized query scope, so a narrower turn cannot see a previously
+        linked repository through the same conversation workspace.
+        """
+
+        configured = self.repository_sources()
+        if not configured:
+            raise WorkspaceError("项目未配置代码仓库，无法启动 Pi 调查")
+        available = {repository_id: source for repository_id, source in configured}
+        selected_ids = (sorted(dict.fromkeys(str(repository_id) for repository_id in repository_ids))
+                        if repository_ids else list(available))
+        unknown = [repository_id for repository_id in selected_ids if repository_id not in available]
+        if unknown:
+            raise WorkspaceError("仓库未在项目配置中登记：" + "、".join(unknown))
+        selected = [(repository_id, available[repository_id]) for repository_id in selected_ids]
+        unusable = []
+        for repository_id, source in selected:
+            if not source.is_dir():
+                unusable.append(f"{repository_id}（目录不存在: {source}）")
+                continue
+            try:
+                with os.scandir(source):
+                    pass
+            except OSError as exc:
+                unusable.append(f"{repository_id}（无法读取: {exc}）")
+        if unusable:
+            raise WorkspaceError("授权仓库不可用，未调用模型：" + "；".join(unusable))
+
+        root = self.root / "pi" / _safe_name(workspace_key)
+        root.mkdir(parents=True, exist_ok=True)
+        repositories = root / "repos"
+        knowledge = root / "knowledge"
+        repositories.mkdir(exist_ok=True)
+        knowledge.mkdir(exist_ok=True)
+        desired = {_safe_name(repository_id) for repository_id, _ in selected}
+        for child in repositories.iterdir():
+            if child.is_symlink() and child.name not in desired:
+                child.unlink()
+        for repository_id, source in selected:
+            link = repositories / _safe_name(repository_id)
+            self._link_directory(link, source)
+            if not link.is_dir():
+                raise WorkspaceError(f"仓库挂载失败：{repository_id}")
+
+        business_context_link = knowledge / "business-context"
+        code_map_link = knowledge / "generated-code-map"
+        ast_link = knowledge / "ast"
+        requirements_link = root / "requirements"
+        if business_context_source is None and mode in {"backbone", "combined"}:
+            business_context_source = self.business_context_root
+        else:
+            business_context_source = (Path(business_context_source).expanduser().resolve()
+                                       if business_context_source else None)
+        if mode in {"none", "ast"}:
+            business_context_source = None
+        if code_map_source is None and mode == "combined":
+            code_map_source = self.code_map_root
+        else:
+            code_map_source = (Path(code_map_source).expanduser().resolve()
+                               if code_map_source else None)
+        if mode in {"backbone", "none"}:
+            code_map_source = None
+        if mode == "ast" and (not code_map_source or not code_map_source.is_dir()):
+            raise WorkspaceError("AST 资料目录不可用，请先手动生成 AST")
+        if mode != "combined":
+            ast_source = None
+        else:
+            ast_source = Path(ast_source).expanduser().resolve() if ast_source else None
+        if business_context_source:
+            self._link_directory(business_context_link, business_context_source)
+        else:
+            self._unlink_directory(business_context_link)
+        if code_map_source:
+            self._link_directory(code_map_link, code_map_source)
+        else:
+            self._unlink_directory(code_map_link)
+        if ast_source:
+            self._link_directory(ast_link, ast_source)
+        else:
+            self._unlink_directory(ast_link)
+        if self.requirements_root.is_dir():
+            self._link_directory(requirements_link, self.requirements_root)
+        else:
+            self._unlink_directory(requirements_link)
+        claude_file = root / "CLAUDE.md"
+        claude_file.write_text(self._claude_instructions(), encoding="utf-8")
+        turn_context_file = root / TURN_CONTEXT_FILENAME
+        turn_context_file.write_text(
+            self._turn_context(root, mode, mode_description, ast_version_id), encoding="utf-8")
+        navigation = build_navigation(
+            self.config,
+            {repository_id: f"repos/{_safe_name(repository_id)}" for repository_id, _ in selected},
+            self.project_id, self.project_name,
+        )
+        (root / NAVIGATION_FILE).write_text(
+            json.dumps(navigation, ensure_ascii=False, indent=2), encoding="utf-8")
+        return Workspace(
+            id=self.project_id,
+            path=root,
+            claude_file=claude_file,
+            knowledge_path=business_context_link,
+            requirements_path=requirements_link,
+            repositories_path=repositories,
+            mode=mode,
+            ast_version_id=ast_version_id,
+            business_context_path=(business_context_link
+                                   if business_context_link.is_dir() else None),
+            code_map_path=code_map_link,
+            turn_context_path=turn_context_file,
+            ast_path=ast_link,
+            ast_status=ast_status,
+            repository_ids=tuple(repository_id for repository_id, _ in selected),
+            repository_mounts=tuple((repository_id, f"repos/{_safe_name(repository_id)}")
+                                    for repository_id, _ in selected),
+        )
+
     def ensure(self, *, mode: str | None = None,
                business_context_source: str | Path | None = None,
                code_map_source: str | Path | None = None,
