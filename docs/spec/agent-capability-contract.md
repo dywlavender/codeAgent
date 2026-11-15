@@ -131,7 +131,7 @@ capabilities:
   contract: disabled
 ```
 
-未来显式 Profile 是唯一授权来源；与遗留 mode、WORKFLOW、RETRIEVAL、CONTRACTS 冲突的参数须拒绝，不能叠加。未提供 Profile 时默认走 `pi-v1`；原 Legacy 兼容解析仅在显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 时启用。模型连接可继续读取 `.env`，但不把其中的调查开关合并进 core。
+未来显式 Profile 是唯一授权来源；与遗留 mode、WORKFLOW、RETRIEVAL、CONTRACTS 冲突的参数须拒绝，不能叠加。正常在线入口固定走 `pi-v1`；`resolve_profile()` 的原 Legacy 解析仅供离线／评测代码显式调用，环境变量不能把在线 API 切回旧 Runtime。模型连接可继续读取 `.env`，但不把其中的调查开关合并进 core。
 
 ## 3. RunContext 与能力提供者
 
@@ -359,9 +359,13 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 `pi-v1` 使用 Pi 原生 `read`、`grep`、`find`、`ls`、`codemode`，不注册 LangChain 工具，不开放 `bash`／`edit`／`write`。`file_tools` 为 required；业务补充知识、AST、代码地图按模式为 optional，缺失只收缩本轮能力，不换 Profile、不生成索引。
 
-工作目录仍是只读授权视图，但软链接不是安全边界。`grep`／`find` 默认不跟随符号链接，Pi 运行时显式加载只读扩展强制跟随授权链接，并在 `tool_call` 前拦截越界路径、主目录路径和指向授权范围外的符号链接；`codemode` 的内层工具调用同样受检。该扩展不是 OS 沙箱，不能替代进程级隔离；工作区只挂载本轮授权的仓库和资料。
+正常在线 API 入口固定进入 Pi；旧 Profile／Runtime 环境变量不能再覆盖这一选择。旧 Runtime 仅允许历史评测代码显式构造并注入。
 
-Pi 的工具决策与调用顺序由模型决定；CodeAgent 的 Capability 只提供授权资料、状态和阅读指导。Pi 事件转换为既有 `model`／`tool`／`status`／`compaction`／`text` Trace 事件，模型调用在开始时写入 running、结束时补响应，取消时标记 cancelled。Pi 失败直接保存失败 Run 和 Trace，不自动回退旧 Runtime。
+工作目录仍是只读授权视图，但软链接不是安全边界。`grep`／`find` 默认不跟随符号链接；只读扩展不再请求全局 `--follow`，而是从本轮授权真实根目录分别检索，并通过 `CODEAGENT_PI_MOUNTS` 把结果路径映射回工作区。仓库内部指向其他目录的软链接因此不会被遍历。扩展同时在 `tool_call` 前拦截越界路径、主目录路径和指向授权范围外的入口符号链接；`codemode` 的内层工具调用同样受检。该扩展不是 OS 沙箱，不能替代进程级隔离；工作区只挂载本轮授权的仓库和资料。范围展开为空时在调用模型前拒绝，`None` 与空数组不得混用。
+
+Pi 的工具决策与调用顺序由模型决定；CodeAgent 的 Capability 只提供授权资料、状态和阅读指导。Pi 事件转换为既有 `model`／`tool`／`status`／`compaction`／`text` Trace 事件，模型调用在开始时写入 running、结束时补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，写入 usage／Trace；该核验只证明原文交付，`semanticProof` 保持 false。Pi 失败直接保存失败 Run 和 Trace，不自动回退旧 Runtime。
+
+Pi 会话身份包含资料版本：业务文档、需求和代码地图使用内容指纹，源码仓库使用文件名、大小和修改时间生成的元数据修订号；版本变化时重建会话。
 
 ## 8. Runtime、事件与错误合同
 

@@ -25,6 +25,7 @@ from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from business_code_agent.query.traces import public_message
 from . import answer_closure
+from . import citations
 from . import context_manager
 from .session import (
     CHECKPOINT_RUNTIME_ONLY,
@@ -74,11 +75,6 @@ FINAL_ANSWER_REQUEST = (
     "立即输出最终答案。不要描述你接下来准备读取什么，也不要调用工具。"
     "请按“结论—源码依据—未确认缺口”组织；没有依据的内容明确列为缺口。"
     "答案控制在 1000 字以内。")
-_CITATION = re.compile(
-    r"([A-Za-z0-9_./-]+\.(?:java|kt|scala|groovy|py|go|rs|cs|cpp|cxx|c|hpp|hxx|h|"
-    r"jsx|js|tsx|ts|vue|html|xml|sql|yml|yaml|properties|json|toml|gradle|md|txt))"
-    r"(?![A-Za-z0-9])(?::(\d+)(?:-(\d+))?)?"
-)
 
 
 def _now() -> str:
@@ -1046,82 +1042,4 @@ def verify_answer(answer: str, messages) -> dict:
         if data.get("error") or not data.get("content"):
             continue
         reads.append(data)
-    by_path: dict[str, list[dict]] = {}
-    for data in reads:
-        by_path.setdefault(data["path"], []).append(data)
-    references = []
-    for match in _CITATION.finditer(answer or ""):
-        cited = match.group(1).lstrip("/")
-        if cited.startswith("./"):
-            cited = cited[2:]
-        line = int(match.group(2)) if match.group(2) else None
-        line_end = int(match.group(3)) if match.group(3) else line
-        matched_path = _match_reference_path(cited, by_path)
-        confirmed = bool(matched_path and line is not None
-                         and _delivered(by_path[matched_path], line, line_end))
-        references.append({
-            "path": cited,
-            "kind": _reference_kind(matched_path or cited),
-            "line": line,
-            "lineEnd": line_end,
-            "matchedPath": matched_path,
-            "fileRead": matched_path is not None,
-            "confirmed": confirmed,
-        })
-    return {
-        "semanticProof": False,
-        "references": references,
-        "unconfirmed": [_reference_text(reference) for reference in references
-                        if not reference["confirmed"]],
-        "readFiles": sorted(by_path),
-    }
-
-
-def _match_reference_path(cited: str, by_path) -> str | None:
-    if cited in by_path:
-        return cited
-    candidates = [path for path in by_path if path.endswith("/" + cited)]
-    if len(candidates) == 1:
-        return candidates[0]
-    if "..." not in cited and "…" not in cited:
-        return None
-    pattern = cited.replace("…", "...")
-    if not pattern.replace(".", "").strip("/"):
-        return None
-    expression = re.escape(pattern).replace(r"\.\.\.", ".*")
-    matcher = re.compile(r"(?:^|/)" + expression + r"$")
-    matches = [path for path in by_path if matcher.search(path)]
-    return matches[0] if len(matches) == 1 else None
-
-
-def _reference_kind(path: str) -> str:
-    if path.startswith("knowledge/business-context/"):
-        return "business_context"
-    if path.startswith("requirements/"):
-        return "requirements"
-    return "source"
-
-
-def _reference_text(reference) -> str:
-    path, line, line_end = reference["path"], reference["line"], reference["lineEnd"]
-    if line is None:
-        return path
-    return f"{path}:{line}" if line_end == line else f"{path}:{line}-{line_end}"
-
-
-def _delivered(read_results, start, end) -> bool:
-    """Whether the cited line interval was fully present in delivered Read output."""
-    low, high = sorted((start, end))
-    intervals = sorted(
-        (item["lineStart"], item["lineEnd"]) for item in read_results
-        if item.get("lineStart") is not None and item.get("lineEnd") is not None)
-    cursor = low
-    for interval_start, interval_end in intervals:
-        if interval_end < cursor:
-            continue
-        if interval_start > cursor:
-            return False
-        cursor = max(cursor, interval_end + 1)
-        if cursor > high:
-            return True
-    return False
+    return citations.verify_references(answer, reads)

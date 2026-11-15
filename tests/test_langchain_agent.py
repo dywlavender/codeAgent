@@ -20,7 +20,7 @@ class ToolModel(FakeMessagesListChatModel):
 
 
 class AgentTest(unittest.TestCase):
-    def test_legacy_runtime_requires_explicit_selection_and_hybrid_is_explicit(self):
+    def test_online_runtime_is_pi_even_with_legacy_configuration(self):
         import os
         from unittest.mock import patch
         from business_code_agent.query.service import _default_runtime
@@ -29,25 +29,13 @@ class AgentTest(unittest.TestCase):
             os.environ,
             {
                 "BUSINESS_CODE_AGENT_RUNTIME": "langchain",
-                "BUSINESS_CODE_AGENT_RETRIEVAL": "files",
-            },
-        ):
-            runtime = _default_runtime(index_root="/tmp/index", project_id="A")
-            self.assertEqual("LANGCHAIN", runtime.runtime_name)
-            self.assertEqual("plain", runtime.answer_mode)
-            self.assertEqual("coordinated", runtime.workflow_mode)
-            self.assertIsNone(runtime.index_root)
-        with patch.dict(
-            os.environ,
-            {
-                "BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+                "BUSINESS_CODE_AGENT_PROFILE": "core-v1",
                 "BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid",
             },
         ):
-            self.assertEqual(
-                Path("/tmp/index"),
-                _default_runtime(index_root="/tmp/index", project_id="A").index_root,
-            )
+            runtime = _default_runtime(index_root="/tmp/index", project_id="A")
+        self.assertEqual("PI", runtime.runtime_name)
+        self.assertEqual("pi-v1", runtime.profile.id)
 
     def workspace(self, root):
         root = Path(root)

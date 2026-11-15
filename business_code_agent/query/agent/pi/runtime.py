@@ -144,6 +144,11 @@ class PiAgentRuntime:
                 [str(Path(context.workspace).resolve()),
                  *(str(Path(root).resolve()) for root in allowed_roots)],
                 ensure_ascii=False),
+            "CODEAGENT_PI_MOUNTS": json.dumps(
+                {str(source.path): str(Path(source.directory).resolve())
+                 for source in context.materials
+                 if source.available and source.directory},
+                ensure_ascii=False),
         }
         process = PiProcess(command, cwd=context.workspace,
                             environment=process_environment)

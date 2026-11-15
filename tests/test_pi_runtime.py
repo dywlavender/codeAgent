@@ -19,7 +19,7 @@ from business_code_agent.query.materials import MaterialManifest, MaterialSource
 from business_code_agent.query.profile import PI, resolve_profile
 from business_code_agent.query.runtime import RuntimeErrorBase
 from business_code_agent.query.service import _default_runtime
-from business_code_agent.query.workspace import WorkspaceManager
+from business_code_agent.query.workspace import WorkspaceError, WorkspaceManager
 
 
 FAKE_PI = Path(__file__).parent / "fixtures" / "fake_pi_rpc.py"
@@ -245,6 +245,11 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         self.assertFalse((second.path / "repos" / "a").exists())
         self.assertTrue((second.path / "repos" / "b").is_dir())
 
+    def test_explicit_empty_repository_scope_is_rejected(self):
+        with self.assertRaisesRegex(WorkspaceError, "未包含任何代码仓库"):
+            self.manager.prepare_pi(workspace_key="empty", mode="none", repository_ids=[])
+        self.assertFalse((self.manager.root / "pi" / "empty").exists())
+
     def test_mode_material_mounts(self):
         none = self.manager.prepare_pi(workspace_key="none", mode="none",
                                        business_context_source=self.business,
@@ -319,6 +324,17 @@ class PiProfileAndDefaultRuntimeTest(unittest.TestCase):
         self.assertEqual(PI, runtime.profile)
         self.assertEqual("pi-sessions", runtime.session_root.name)
         self.assertEqual("pi-data", runtime.session_root.parent.name)
+
+    def test_online_runtime_ignores_legacy_profile_and_runtime_selection(self):
+        with patch.dict(os.environ, {
+            "BUSINESS_CODE_AGENT_PROFILE": "core-v1",
+            "BUSINESS_CODE_AGENT_RUNTIME": "langchain",
+            "BUSINESS_CODE_AGENT_WORKFLOW": "coordinated",
+            "BUSINESS_CODE_AGENT_RETRIEVAL": "hybrid",
+        }, clear=True):
+            runtime = _default_runtime(index_root=Path("/tmp/legacy-index"), project_id="legacy")
+        self.assertEqual("PI", runtime.runtime_name)
+        self.assertEqual(PI, runtime.profile)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,8 @@ from business_code_agent.query.capabilities import (prepare_capabilities,
                                                     prepare_pi_capabilities)
 from business_code_agent.query.context import RunContext
 
-from .claude_runtime import default_claude_runtime
 from .materials import MATERIAL_KINDS, MaterialManifest
-from .profile import execution_snapshot, resolve_profile
+from .profile import execution_snapshot, resolve_online_profile
 from .runtime import RequiredToolUnavailable, RunPreparation, RuntimeErrorBase, normalize_runtime_result
 from .traces import RunTraceArchive
 from .workspace import MODE_DESCRIPTIONS, Workspace, WorkspaceError, WorkspaceManager, _safe_name
@@ -445,7 +444,7 @@ class QueryService:
         self._validate_owned_id(conversation_id, "conversation")
         runtime_name = str(getattr(runtime, "runtime_name", "LANGCHAIN_DIRECT"))
         repositories = (sorted(set(effective_scope["repositoryIds"]))
-                        if effective_scope else None)
+                        if effective_scope is not None else None)
         logger.info("core 查询请求: conversation=%s question_characters=%s",
                     conversation_id or "new", len(question))
         run_id = self._new_id("RUN")
@@ -478,8 +477,8 @@ class QueryService:
             raise
 
         settings = runtime.execution_settings()
-        expected_repositories = repositories or sorted(
-            repository_id for repository_id, _ in self.workspace_manager.repository_sources())
+        expected_repositories = (repositories if repositories is not None else sorted(
+            repository_id for repository_id, _ in self.workspace_manager.repository_sources()))
         base_execution = execution_snapshot(profile, MaterialManifest(()), (), settings=settings)
         base_execution["repositoryIds"] = list(expected_repositories)
         emitted: list[dict[str, Any]] = []
@@ -644,7 +643,7 @@ class QueryService:
         self._validate_owned_id(conversation_id, "conversation")
         runtime_name = str(getattr(runtime, "runtime_name", "PI"))
         repositories = (sorted(set(effective_scope["repositoryIds"]))
-                        if effective_scope else None)
+                        if effective_scope is not None else None)
         logger.info("Pi 查询请求: conversation=%s question_characters=%s mode=%s",
                     conversation_id or "new", len(question), effective_mode)
         run_id = self._new_id("RUN")
@@ -677,8 +676,8 @@ class QueryService:
             raise
 
         settings = runtime.execution_settings()
-        expected_repositories = repositories or sorted(
-            repository_id for repository_id, _ in self.workspace_manager.repository_sources())
+        expected_repositories = (repositories if repositories is not None else sorted(
+            repository_id for repository_id, _ in self.workspace_manager.repository_sources()))
         base_execution = execution_snapshot(profile, MaterialManifest(()), (), settings=settings)
         base_execution["repositoryIds"] = list(expected_repositories)
         emitted: list[dict[str, Any]] = []
@@ -1217,7 +1216,7 @@ class QueryService:
         profile = getattr(runtime, "profile", None) if runtime is not None else None
         if runtime is None:
             try:
-                profile = resolve_profile(dict(os.environ))
+                profile = resolve_online_profile(dict(os.environ))
             except Exception:
                 profile = None
         if profile is not None and profile.investigation == "direct":
@@ -1363,28 +1362,17 @@ class QueryService:
 
 
 def _default_runtime(*, index_root=None, project_id=None, project_data_root=None):
+    """Build the online runtime. Normal API queries always run Pi."""
     environment = dict(os.environ)
-    profile = resolve_profile(environment)
-    if profile.runtime == "pi":
-        from business_code_agent.query.agent.pi import PiAgentRuntime
+    configured = (environment.get("BUSINESS_CODE_AGENT_PROFILE")
+                  or environment.get("BUSINESS_CODE_AGENT_RUNTIME") or "").strip()
+    if configured and configured.lower() not in {"pi", "pi-v1"}:
+        logger.warning("在线问答固定使用 Pi，已忽略旧 Runtime 配置: %s", configured)
+    profile = resolve_online_profile(environment)
+    from business_code_agent.query.agent.pi import PiAgentRuntime
 
-        root = Path(project_data_root) / "pi-sessions" if project_data_root else None
-        return PiAgentRuntime(profile=profile, environment=environment, session_root=root)
-    if profile.runtime == "claude":
-        return default_claude_runtime()
-    if profile.investigation == "direct":
-        from business_code_agent.query.agent.direct import DirectAgentRuntime
-
-        return DirectAgentRuntime(profile=profile, environment=environment,
-                                  project_id=project_id)
-    if profile.investigation == "agent_direct":
-        raise ValueError("standard-v1 将在自主调查策略接入后开放，当前可使用 coordinated-legacy-v1")
-    from .langchain_agent import LangChainRuntime
-    return LangChainRuntime(
-        profile=profile, environment=environment, project_id=project_id,
-        index_root=index_root if profile.search_code != "disabled" else None,
-        contract_root=Path(index_root).parent / "contract-index" if index_root and profile.contract_trace != "disabled" else None,
-    )
+    root = Path(project_data_root) / "pi-sessions" if project_data_root else None
+    return PiAgentRuntime(profile=profile, environment=environment, session_root=root)
 
 
 __all__ = ["QueryRuntimeError", "QueryService"]

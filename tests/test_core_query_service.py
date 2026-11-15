@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from business_code_agent.query.agent.direct import DirectAgentRuntime
-from business_code_agent.query.profile import CORE
+from business_code_agent.query.profile import CORE, PI
 from business_code_agent.query.runtime import RuntimeResult
 from business_code_agent.query.service import (
     QueryConfigurationError,
@@ -63,6 +63,8 @@ def project_config(root: Path, repositories=("channel", "decision")) -> Path:
             {"id": repository_id, "gitUrl": "unused", "localPath": f"repos/{repository_id}"}
             for repository_id in repositories
         ],
+        "systems": [{"id": "empty-system", "name": "空系统"}],
+        "applications": [],
     }), encoding="utf-8")
     return config
 
@@ -91,6 +93,15 @@ class CoreQueryServiceTest(unittest.TestCase):
         return QueryService(self.db, db_path=self.db_path,
                             project_config=config or self.config,
                             project_id="core-query", runtime=runtime), runtime
+
+    def test_empty_system_scope_is_rejected_before_model(self):
+        service, runtime = self.service([])
+        with self.assertRaises(QueryConfigurationError) as caught:
+            service.query("empty scope", mode="combined",
+                          scope={"systemIds": ["empty-system"]})
+        self.assertIn("未包含任何代码仓库", str(caught.exception))
+        self.assertEqual([], self.db.execute(
+            "SELECT id FROM query_run WHERE status='completed'").fetchall())
 
     def test_core_query_completes_with_source_evidence_and_run_trace(self):
         responses = [
@@ -507,19 +518,19 @@ class CoreQueryServiceTest(unittest.TestCase):
 
 
 class CoreDefaultRuntimeTest(unittest.TestCase):
-    def test_core_profile_selects_direct_runtime_without_legacy_index_probe(self):
-        with patch.dict(os.environ, {"BUSINESS_CODE_AGENT_PROFILE": "core-v1"}, clear=True):
-            runtime = _default_runtime(index_root=Path("/tmp/does-not-exist"), project_id="core")
-        self.assertEqual("LANGCHAIN_DIRECT", runtime.runtime_name)
-        self.assertEqual(("core-v1", "direct"), (runtime.profile.id, runtime.profile.investigation))
-
-    def test_business_profile_selects_the_same_direct_runtime(self):
-        with patch.dict(os.environ, {"BUSINESS_CODE_AGENT_PROFILE": "core-business-v1"}, clear=True):
-            runtime = _default_runtime(index_root=Path("/tmp/does-not-exist"), project_id="core")
-        self.assertEqual("LANGCHAIN_DIRECT", runtime.runtime_name)
-        self.assertEqual(("core-business-v1", "direct", "optional"),
-                         (runtime.profile.id, runtime.profile.investigation,
-                          runtime.profile.business_context))
+    def test_online_entry_is_pi_even_with_legacy_profile_or_runtime(self):
+        for environment in (
+            {"BUSINESS_CODE_AGENT_PROFILE": "core-v1"},
+            {"BUSINESS_CODE_AGENT_PROFILE": "core-business-v1"},
+            {"BUSINESS_CODE_AGENT_RUNTIME": "langchain"},
+            {"BUSINESS_CODE_AGENT_RUNTIME": "claude"},
+        ):
+            with self.subTest(environment=environment), \
+                    patch.dict(os.environ, environment, clear=True):
+                runtime = _default_runtime(
+                    index_root=Path("/tmp/does-not-exist"), project_id="core")
+            self.assertEqual("PI", runtime.runtime_name)
+            self.assertEqual(PI, runtime.profile)
 
 
 if __name__ == "__main__":

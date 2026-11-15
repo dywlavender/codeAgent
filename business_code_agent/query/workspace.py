@@ -56,7 +56,7 @@ def workspace_sources(root: Path, repositories: set[str] | None = None) -> list[
     repo; a set keeps only the listed ones — this is what enforces a query
     scope at the CLI permission level.
     """
-    return MaterialManifest.from_workspace(root, repositories).labelled_roots()
+    return MaterialManifest.from_workspace(root, repositories, versions=False).labelled_roots()
 
 
 def search_instructions(sources: list[tuple[str, Path]], scoped: bool = False) -> str:
@@ -253,8 +253,13 @@ class WorkspaceManager:
         if not configured:
             raise WorkspaceError("项目未配置代码仓库，无法启动 core 调查")
         available = {repository_id: source for repository_id, source in configured}
-        selected_ids = (sorted(dict.fromkeys(str(repository_id) for repository_id in repository_ids))
-                        if repository_ids else [repository_id for repository_id, _ in configured])
+        if repository_ids is None:
+            selected_ids = list(available)
+        else:
+            selected_ids = sorted(dict.fromkeys(
+                str(repository_id) for repository_id in repository_ids))
+            if not selected_ids:
+                raise WorkspaceError("查询范围未包含任何代码仓库，已拒绝调用模型")
         unknown = [repository_id for repository_id in selected_ids if repository_id not in available]
         if unknown:
             raise WorkspaceError("仓库未在项目配置中登记：" + "、".join(unknown))
@@ -341,8 +346,13 @@ class WorkspaceManager:
         if not configured:
             raise WorkspaceError("项目未配置代码仓库，无法启动 Pi 调查")
         available = {repository_id: source for repository_id, source in configured}
-        selected_ids = (sorted(dict.fromkeys(str(repository_id) for repository_id in repository_ids))
-                        if repository_ids else list(available))
+        if repository_ids is None:
+            selected_ids = list(available)
+        else:
+            selected_ids = sorted(dict.fromkeys(
+                str(repository_id) for repository_id in repository_ids))
+            if not selected_ids:
+                raise WorkspaceError("查询范围未包含任何代码仓库，已拒绝调用模型")
         unknown = [repository_id for repository_id in selected_ids if repository_id not in available]
         if unknown:
             raise WorkspaceError("仓库未在项目配置中登记：" + "、".join(unknown))

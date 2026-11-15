@@ -15,10 +15,11 @@
 
 ## Pi Runtime 统一问答主链（2026-11-15）
 
-- 在线问答默认使用 `PiAgentRuntime`（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`）；`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`。Pi 负责模型、工具决策与调度、上下文压缩、会话和 Agent Loop；CodeAgent 只负责授权、RunContext、Trace、取消、持久化和业务问答增强。
-- Pi 只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接，Pi 自带搜索不跟随链接，因此加载只读扩展 `query/agent/pi/extension/codeagent_search.js`；工作区 cwd 不是 OS 安全边界，不能把扩展当作完整沙箱。
-- Pi 会话文件限定在工程数据目录 `pi-sessions/`；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建，旧 LangChain 会话不直接复用。Pi 失败不回退 LangChain。配置见 `.env.example` 的 `BUSINESS_CODE_PI_*`。
-- 默认 Runtime 已于 2026-11-15 切换为 Pi；显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 仅保留历史同题对照与评测，不参与默认链路，Pi 失败不回退。8／16 题同模型真实对照与现有模式验收尚未完成，工程测试或单次真实运行不能替代答案质量验收；硬封存/删除旧链另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
+- 在线问答默认使用 `PiAgentRuntime`，正常 API 入口固定进入 Pi；`BUSINESS_CODE_AGENT_PROFILE`／`BUSINESS_CODE_AGENT_RUNTIME` 不能再把在线问答切回 LangChain/Direct/Claude。旧 Runtime 只允许评测代码显式构造并注入。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`。Pi 负责模型、工具决策与调度、上下文压缩、会话和 Agent Loop；CodeAgent 只负责授权、RunContext、Trace、取消、持久化和业务问答增强。
+- Pi 只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接，Pi 自带搜索不跟随链接，因此加载只读扩展 `query/agent/pi/extension/codeagent_search.js`；扩展以授权真实根目录为搜索起点，不使用全局 `--follow`，结果路径映射回工作区，仓库内部软链接不会扩大授权范围。工作区 cwd 不是 OS 安全边界，不能把扩展当作完整沙箱。
+- Pi 会话文件限定在工程数据目录 `pi-sessions/`；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档和需求使用内容指纹，源码仓库使用文件元数据修订号，资料变化会隔离旧会话；旧 LangChain 会话不直接复用。Pi 失败不回退 LangChain。配置见 `.env.example` 的 `BUSINESS_CODE_PI_*`。
+- Pi 最终答案的引用会按本轮实际交付的 `read` 原文核验路径与行区间，记录在 usage/Trace；`semanticProof=false`，核验通过不等于语义正确。空范围展开后没有仓库时，必须在调用模型前拒绝，不能回退为全部仓库。
+- 8／16 题同模型真实对照与现有模式验收尚未完成，工程测试或单次真实运行不能替代答案质量验收；旧 Runtime 的删除与历史评测入口调整另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）
 
@@ -28,7 +29,7 @@
 
 - 唯一调查主链为 QueryService → RunContext → AgentRuntime → 模型自主选择工具 → Answer → 证据检查与持久化；Trace 从运行开始持续记录。Business Context、AST、检索与契约不能各自建立全局调查编排。
 - RunContext 复用现有 ProjectContext，固定工程、Profile、范围、工作区、资料和实际能力。工具只能使用授权快照，不再自行读取环境变量或探测相邻资料。
-- 首个实现目标 `core-v1` 只使用源码、可选需求和 Read/Glob/Grep；业务资料、AST、Code Map、Hybrid 与 Contract 均禁用，即使机器上已有产物也不探测/使用。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；默认网页的 `mode=combined` 映射为 `core`，显式 `none/backbone/ast` 返回配置错误。`legacy-v1` 是未来对现有 coordinated 的显式适配，不是当前已开放名称。
+- 首个实现目标 `core-v1` 只使用源码、可选需求和 Read/Glob/Grep；业务资料、AST、Code Map、Hybrid 与 Contract 均禁用，即使机器上已有产物也不探测/使用。Core 仅在评测代码显式构造 Direct Runtime 时使用，在线入口不再读取 `BUSINESS_CODE_AGENT_PROFILE`；Core 的 `mode=combined` 映射为 `core`，显式 `none/backbone/ast` 返回配置错误。`legacy-v1` 是未来对现有 coordinated 的显式适配，不是当前已开放名称。
 - required/optional/disabled 是授权策略，ready/missing/stale/unavailable 是实际状态；optional 缺失/过期只收缩原 Profile 内可用能力，required 不可用明确失败，不自动换 Profile 或生成索引。
 - 能力扩展只增加提供者、工具/阅读指导及注册配置，不修改 Direct 核心循环。源码、需求/业务约定和结构导航保留不同证明能力，引用校验不是语义证明。
 - 工程、范围、Profile、可用资料/工具及其版本变化时重建模型会话，历史运行不补写新资料；同名仓库或版本不能跨工程复用。
@@ -37,7 +38,7 @@
 - `core-business-v1` 阶段 2 已实现可选 Business Context：资料由项目业务目录只读挂载，复用 Read/Glob/Grep；无专用业务搜索工具，无新调查循环。业务文档内容指纹变化会重建会话；业务资料不能当作源码已实现，也不能扩大本轮仓库授权。AST/Code Map/Hybrid/Contract 仍 disabled；真实模型 Core 与 Core+Business 效果对照尚未完成，工程测试通过不等于业务收益已验证。
 - 预期仓库必须来自配置和规范化 scope，由 `prepare_core` 逐一核验；任一必需仓库缺失/不可读须在模型前失败，错误与 execution/Trace 明确仓库 ID，不能以 File 工具已注册或部分仓库可读代替完整性检查。core 不构造 AstMaterial，不探测业务、Code Map、AST、Hybrid 或 Contract。
 - Core 已获得真实模型运行和小样本对照。Core 仍为显式 Profile，不参与默认链路（默认已是 Pi）；其生产答案质量验收尚未通过，不因默认切换而视为已验证。模拟模型、API 回归及供应商失败记录只用于验证工程行为。
-- Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；Direct 不继承其调查逻辑，生产默认切换及旧链删除另行确认。
+- Direct 通过验收前禁止删除旧 LangChainRuntime、Coordinator 或 Investigation；Direct 不继承其调查逻辑。在线入口已封存旧 Runtime 选择，旧链代码删除另行确认。
 
 下文 `combined`、`coordinated`、自动补查、既有 Profile/开关与资料模式约定继续服务 V1 及历史对照，不作为 V2 core 的隐含授权。资料来源边界、只读、手动生成、工程隔离、无限制生产调查与真实效果验证原则继续适用；V2 接口和迁移以以上三份文档为准。现有 `profile.py/materials.py/preparation.py` 准备工作不等于 V2 已完成。
 

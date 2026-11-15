@@ -17,11 +17,11 @@ V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构
 
 `claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
 
-阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；在线问答默认已切换为 Pi（2026-11-15），Core 不参与默认链路。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
+阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。Core 仅在评测代码显式构造 Direct Runtime 时使用；在线问答固定进入 Pi（2026-11-15），环境变量不再切换。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
 
 真实模型答案验收尚未完成：2026-11-13 对验证工程请求时供应商返回 403（额度耗尽），失败 Run/Event/Trace 已保存；不能用模拟模型测试或 API 回归代替答案质量验收。设计通过、整包有条件通过；阶段 1 验收与测试范围见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。
 
-后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链；默认 Pi 切换已由用户确认，硬封存/删除旧链另行确认。
+后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链代码；在线旧 Runtime 选择已封存，删除旧链另行确认。
 
 ## V1 目标
 
@@ -84,7 +84,7 @@ Python 负责：
 
 同包内使用相对 import；跨包使用绝对 import（`business_code_agent.<包>.<模块>`），使跨包依赖在代码中可见。领域包不反向 import `api`；`cli.py` 只做参数解析和装配，不承载业务逻辑。这些规则由 `tests/test_package_boundaries.py` 静态校验（禁止跨包相对 import、领域包反向引用 `api/`、HTTP 层直接依赖 `storage/`、`storage/` 与 `shared/` 依赖领域包），`tests/test_import_paths.py` 校验 import 目标文件存在；两者都不需要安装可选运行时依赖。
 
-`query/agent/pi/` 封装 Pi RPC 子进程、事件转换、会话文件和只读检索扩展；在线问答默认启用（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`），显式 `langchain` 仅历史对照。Pi 工作区位于注册工程 `pi/<conversation-id>`（兼容单工程同理），不改动 Legacy 的 `modes/{combined,none,backbone,ast}` 布局。
+`query/agent/pi/` 封装 Pi RPC 子进程、事件转换、会话文件和只读检索扩展；正常在线问答固定进入 Pi，旧 Profile／Runtime 环境变量不再切换在线入口，旧 Runtime 仅由评测代码显式注入。Pi 工作区位于注册工程 `pi/<conversation-id>`（兼容单工程同理），不改动 Legacy 的 `modes/{combined,none,backbone,ast}` 布局。
 
 `storage/connections.py` 提供不应用主库 schema 的通用 SQLite 连接工厂，供契约索引等独立快照库复用；独立快照不得走 `schema.connect()`，后者会创建并迁移主库表。HTTP 层不直接调用 `storage`：请求级主库连接由 `ProjectContext.open_db()` 提供。
 

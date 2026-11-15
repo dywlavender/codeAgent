@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -15,7 +14,7 @@ from business_code_agent.query.langchain_agent.coordinator import RetrievalCoord
 from business_code_agent.query.langchain_agent.files import SourceFiles
 from business_code_agent.query.langchain_agent.evidence import EvidenceCatalog
 from business_code_agent.query.navigation import NAVIGATION_FILE, build_navigation
-from business_code_agent.query.service import _default_runtime
+from business_code_agent.query.profile import resolve_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -282,8 +281,9 @@ class RetrievalCoordinatorTest(unittest.TestCase):
     def test_auto_index_selection_does_not_create_missing_index(self):
         from business_code_agent.query.materials import MaterialManifest
 
-        with patch.dict(os.environ, {"BUSINESS_CODE_AGENT_RUNTIME": "langchain"}, clear=True):
-            runtime = _default_runtime(index_root=self.root / "retrieval-index", project_id="A")
+        runtime = LangChainRuntime(
+            profile=resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain"}),
+            environment={}, index_root=self.root / "retrieval-index", project_id="A")
         preparation = runtime.prepare(workspace=self.workspace, materials=MaterialManifest.from_workspace(self.workspace))
         statuses = {tool.capability: (tool.policy, tool.status) for tool in preparation.tool_statuses}
         self.assertEqual(("optional", "unavailable"), statuses["search_code"])

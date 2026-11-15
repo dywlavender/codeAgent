@@ -87,7 +87,7 @@
 
 其他必验项：无可选解析/检索依赖也可导入 core；禁用能力探测函数「调用即失败」仍可问答；模型可自主跨授权仓库搜索；Profile/范围/实际工具和资料变化重建会话；取消与失败保留事件。固定结果测试提供者验证注册不改 Direct 循环，不扩展真实业务/结构能力。
 
-**已实现（2026-11-13）**：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py`、`query/agent/session.py` 及 QueryService core 分支。当时默认仍为 Legacy，`BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；2026-11-15 起在线默认已切换为 Pi（见第 10 节）。网页默认 `mode=combined` 映射为 `core`，显式旧模式拒绝。
+**已实现（2026-11-13）**：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py`、`query/agent/session.py` 及 QueryService core 分支。当时默认仍为 Legacy，`BUSINESS_CODE_AGENT_PROFILE=core-v1` 显式启用；2026-11-15 起在线 API 固定 Pi，Core 仅由评测代码显式构造 Direct Runtime 使用（见第 10 节）。Core 的网页 `mode=combined` 映射为 `core`，显式旧模式拒绝。
 
 **延后项**：完整运行期能力失效联动、全部结构版本联动、复杂 Evidence 生命周期、多级依赖/重绑定、AST/Contract 专属授权、高级检索动态状态管理，随阶段 2/3/后续对应能力实施。core 的路径授权、required 明确失败、基本原文引用和会话边界未因延后这些机制而省略。
 
@@ -316,7 +316,7 @@
 
 - 真实模型的五类问题（代码定位、方法逻辑、跨工程调用、配置/数据访问、连续追问）**尚未完成**，不能宣称答案质量或业务收益。
 - 未启动浏览器页面做 core 人工验收；API/服务层回归通过不等于前端实机通过。
-- 生产默认仍为 Legacy；切换需在配额可用后完成真实模型验收并单独确认。
+- 当时生产默认仍为 Legacy；切换需在配额可用后完成真实模型验收并单独确认。
 
 真实模型 core 验收仍待配额；随后只进入阶段 2 Business Context 工程实现（见第 9 节），不同时接入 AST/Hybrid/Contract，也不回退本次实现。
 
@@ -493,7 +493,7 @@ P1 修复：`RunTraceArchive.finish` 将 `usage.stopReason` 规范化到顶层�
 - 效果验收**未完全通过**：8 题完成数持平（5/8），调用数 -5.0%、耗时 -3.5%，确认引用率由 84.4% 升到 92.0%；但 `native-frontend` 由完成退化为预算收尾，说明改善有限且不稳定，不能宣称定位效率或自主收敛已有可重复收益。
 - 不把 `Grep(files)` 使用率作为成功标准：`native-product` 在 B 组未调用 Grep、仅用 Glob+Read 完成，属于合理工具选择；反过来，B 组 `native-frontend` 的 Glob 过多也是实际失败 Trace。
 - 真实模型结果只证明该 8 题、该模型、该预算下的表现；单题单次运行且温度 0.6，第一轮 3 题与第二轮其余 5 题运行时刻不同，供应商偶发连接错误/超时后已重试并保留成功运行。
-- 未验证项：core-business-v1 交互、完整 16 题、浏览器人工复核；生产默认仍为 Legacy，不进入 AST。
+- 未验证项：core-business-v1 交互、完整 16 题、浏览器人工复核；当时生产默认仍为 Legacy，不进入 AST。
 - 下一步按既定决策树执行**答案先行检查点**（约 50% 预算处生成结论/依据/缺口草稿，仅在引用可核验时接受），继续堆叠 Prompt 不作为优先方案。
 
 ### 2026-11-15 调查覆盖管理与 Answer Checkpoint（阶段 2.5 Commit 3）
@@ -534,7 +534,7 @@ A=当前代码检查点关闭，B=相同代码/工具/Prompt 开启检查点；`
 - 正向：`v2-strategy-code` B 组一次 14 次调用完成、关键文件 5/5、确认引用 14/14，检查点后不再调用工具；检查点作为进度整理器有可观察价值。
 - 退化：`native-lifecycle` 两次重复关键文件 4/6→3/6，均缺 `CommandWrapperBuilder`、`LoanApplicationApprovalCommandHandler`、`CommandHandlerProvider`，引用确认降至 4/12、5/11；`native-frontend` 完成 1/2→0/2。检查点合计耗时 355.8 秒，约占 B 组总耗时 27.5%，没有转化为时间收益。
 - 根因：检查点能整理已确认结论，但 `missing/partial` 与 `required/optional` 缺少稳定映射。`native-lifecycle` 把 `logCommandSource` 命令路由降为 optional，把 `LOAN_CREATED` 触发点列为 required；`v2-strategy-code` 第二次把授权仓库中不存在的产品配置列为 required，检查点后继续 11 次工具调用仍未解决。
-- 结论：属于接近情形 B、并带 C 部分特征的实验结果。**不验收自动结束，不进入 8 题扩展**；检查点默认关闭，生产默认仍为 Legacy。人工浏览未发现与源码直接冲突的新错误断言，但关键证据遗漏本身已构成 P0 退化；本轮未做逐条语义复核。
+- 结论：属于接近情形 B、并带 C 部分特征的实验结果。**不验收自动结束，不进入 8 题扩展**；检查点默认关闭，当时生产默认仍为 Legacy。人工浏览未发现与源码直接冲突的新错误断言，但关键证据遗漏本身已构成 P0 退化；本轮未做逐条语义复核。
 - 下一步：先改进缺口识别（`missing` aspect 必须对应 required gap 或说明不属于原问题；授权仓库中不存在的配置不得列为 required；required 缺口绑定原问题环节），再以同一 3 题、同一预算复验；关键文件覆盖和完成率同时不退化后，才考虑 8 题扩展。
 
 #### 2026-11-15 检查点 v2 修正与复验
@@ -564,7 +564,7 @@ A=当前代码检查点关闭，B=相同代码/工具/Prompt 开启检查点；`
 - 正向：`v2-strategy-code` B 组 2/2 完成、关键文件 10/10；A 组 1/2 完成、8/10，其中一次 11 次调用完成但缺两个关键文件。检查点帮助避免了“提前完成但证据不足”的一次运行。
 - 未改善：`native-frontend` 两组均 2/2 完成、8/8 关键文件，B 更慢；`native-lifecycle` 主样本检查点全部因连接错误未执行，B 0/2 完成、关键文件 8/12，A 0/2、9/12，主样本没有真正检验命令路由缺口。
 - 补充 lifecycle 运行：检查点完成后 16 次调用完成，但关键文件仅 3/6（缺 `CommandWrapperBuilder`、`ApprovalCommandHandler`、`CommandHandlerProvider`），答案却写“所有关键环节已确认到行级证据”。这是“完成但关键证据遗漏并过度声明”的 P0 反例，不能算检查点有效。
-- 结论：v2 修复了结构、会话和成本问题，完成数略升、调用略降，但关键覆盖和答案关键词未改善，lifecycle 的关键缺口场景仍失败，并出现提前收尾/过度声明。**不批准默认启用，不进入 8 题扩展；检查点保持默认关闭，生产默认仍为 Legacy。**
+- 结论：v2 修复了结构、会话和成本问题，完成数略升、调用略降，但关键覆盖和答案关键词未改善，lifecycle 的关键缺口场景仍失败，并出现提前收尾/过度声明。**不批准默认启用，不进入 8 题扩展；检查点保持默认关闭，当时生产默认仍为 Legacy。**
 - 后续调整见下节。检查点 v2 继续作为可复验的历史实验。
 
 ### 2026-11-15 Direct 证据与答案覆盖闭环
@@ -599,11 +599,12 @@ Question Contract v3 冻结，保留原问题和模型登记的目标，停止�
 
 本轮新增 Pi 作为在线问答的唯一调查循环，旧 LangChain 与 Direct 代码保留但不在 Pi 链路内复用。实现与证据见[Pi Runtime 实现记录](../records/2026-11/pi-runtime-unification-20261115.md)。
 
-- **入口**：在线问答默认选择 `pi-v1`（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`）；`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，Pi 失败不回退 LangChain。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 仅用于历史同题对照与评测，不在默认链路。
+- **入口**：正常 API 问答只进入 Pi；`resolve_online_profile()` 固定返回 `pi-v1`，旧 `BUSINESS_CODE_AGENT_PROFILE`／`BUSINESS_CODE_AGENT_RUNTIME` 不再能把在线问答切回 LangChain／Direct／Claude。历史评测只能显式构造旧 Runtime 并注入 `QueryService`。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，Pi 失败不回退。
+- **授权**：未指定范围时使用全部已登记仓库；显式空范围（例如系统没有任何关联仓库）在挂载前拒绝，不得回退为全部仓库。该项同时覆盖 Pi 与 Direct core 工作区。
 - **Pi 职责**：模型选择、工具决策、工具执行、上下文压缩、会话与 Agent Loop 均由 Pi 进程负责；CodeAgent 只准备授权工作区、资料清单、Run/Trace、取消、持久化和结果协议。
-- **工具**：只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接；Pi 自带 `grep`／`find` 默认不跟随符号链接，因此显式加载只读扩展 `extension/codeagent_search.js`，强制跟随授权链接并在执行前拦截越界路径。该扩展不是 OS 沙箱，不能把工作区 cwd 当作安全边界。
-- **会话**：CodeAgent `conversationId` 映射到工程数据目录 `pi-sessions/` 下的 Pi 会话文件；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建 Pi 会话。旧 LangChain 会话不直接复用，历史答案仍可查看。
-- **Trace**：Pi 事件转换为现有 `model`／`tool`／`status`／`compaction`／`text` 事件；模型调用在 `message_start` 即写入 running，`message_end` 补响应，取消时标记 cancelled。Trace 记录 Pi 版本、实际模型、工具、上下文压缩、token 和会话文件。
+- **工具**：只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接；只读扩展从授权真实根目录搜索并通过 `CODEAGENT_PI_MOUNTS` 映射回工作区路径，不使用全局 `--follow`，仓库内部软链接不会扩大授权范围。扩展仍在执行前拦截越界路径，但不是 OS 沙箱。
+- **会话**：CodeAgent `conversationId` 映射到工程数据目录 `pi-sessions/` 下的 Pi 会话文件；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档与需求使用内容指纹，源码仓库使用文件元数据修订号；资料变化会隔离旧会话。旧 LangChain 会话不直接复用，历史答案仍可查看。
+- **Trace 与引用**：Pi 事件转换为现有 `model`／`tool`／`status`／`compaction`／`text` 事件；模型调用在 `message_start` 即写入 running，`message_end` 补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，结果写入 usage／Trace，`semanticProof=false`；不新增模型评审。
 - **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（空为 Pi 默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
 
-验证：Pi 专项 21 项、全量后端 513 项及 91 个子测试通过；真实 API/SSE 已完成源码问答、同会话追问和取消三次运行。默认运行已于 2026-11-15 由用户确认切换为 Pi。该验证只证明链路可用，不证明相对旧链的答案质量收益；8／16 题同题同模型对照与现有模式验收仍未完成，旧 LangChain 显式入口暂留作对照，硬封存与删除另行确认。
+验证：Pi 专项 33 项、全量后端 526 项及 96 个子测试通过；真实 API/SSE 已完成源码问答、同会话追问和取消三次运行。验收修复后又完成一次默认 Pi 的真实 grep 冒烟（`RUN-bd5a78cf89db4950a534ed0b3f688bed`），返回 `repos/...` 与代码地图的工作区路径；并完成一次真实扩展加载检查。修复覆盖空范围拒绝、在线旧链封存、Pi 引用核验、资料版本会话隔离和搜索软链接边界。该验证只证明链路和授权／引用／会话工程行为可用，不证明相对旧链的答案质量收益；Codemode 真实运行、8／16 题同题同模型对照与现有模式验收仍未完成。

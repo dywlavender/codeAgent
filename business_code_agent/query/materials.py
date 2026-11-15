@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -56,7 +57,7 @@ class MaterialManifest:
 
     @classmethod
     def from_workspace(cls, workspace, repositories=None, *, allowed=MATERIAL_KINDS,
-                       mode=None, ast_version=None, ast_status=None):
+                       mode=None, ast_version=None, ast_status=None, versions=True):
         root = Path(workspace)
         kinds = set(allowed) & _MODE_MATERIALS.get(mode, set(MATERIAL_KINDS))
         context = "knowledge/business-context"
@@ -72,6 +73,11 @@ class MaterialManifest:
             if kind in kinds:
                 candidate = root / path
                 directory = candidate.resolve() if candidate.is_dir() else None
+                if versions and version is None and directory is not None:
+                    if kind == "source":
+                        version = _source_revision(directory)
+                    elif kind in {"business_context", "requirements", "code_map"}:
+                        version = _directory_revision(directory)
                 sources.append(MaterialSource(kind, label, path, directory,
                                               "available" if directory else unavailable,
                                               version, repository_id))
@@ -167,3 +173,42 @@ def _directory_revision(directory: Path) -> str | None:
         digest.update(b"\0")
         count += 1
     return f"sha256:{digest.hexdigest()[:16]}" if count else None
+
+
+_SOURCE_IGNORED_DIRS = {
+    ".git", ".idea", ".gradle", ".venv", "venv", "__pycache__",
+    "node_modules", "target", "build", "dist", "out",
+}
+
+
+def _source_revision(directory: Path) -> str | None:
+    """Cheap repository revision from names, sizes and mtimes.
+
+    Source repositories can be large, so session invalidation uses metadata
+    rather than reading every file. Business and requirement documents keep
+    the content hash above.
+    """
+    if not directory.is_dir():
+        return None
+    digest = hashlib.sha256()
+    count = 0
+    for current, dirnames, filenames in os.walk(directory):
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not name.startswith(".") and name not in _SOURCE_IGNORED_DIRS)
+        for name in sorted(filenames):
+            if name.startswith("."):
+                continue
+            path = Path(current) / name
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            digest.update(path.relative_to(directory).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(str(stat.st_size).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(stat.st_mtime_ns).encode("ascii"))
+            digest.update(b"\0")
+            count += 1
+    return f"meta-sha256:{digest.hexdigest()[:16]}" if count else None

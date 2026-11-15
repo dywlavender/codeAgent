@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
+
+from business_code_agent.query.agent.citations import verify_references
 
 
 Emit = Callable[[dict[str, Any]], None]
@@ -116,6 +118,7 @@ class PiEventAdapter:
         self.final_message: dict[str, Any] | None = None
         self.tool_started: dict[str, dict[str, Any]] = {}
         self.tool_finished: set[str] = set()
+        self.reads: list[dict[str, Any]] = []
         self.denied_tool: dict[str, Any] | None = None
         self.aborted = False
         self.settled = False
@@ -302,6 +305,7 @@ class PiEventAdapter:
         self.emit("tool", id=call_id, name=name, input=started.get("input") or {},
                   status=status, output=output, origin="model",
                   durationMs=record.get("durationMs"))
+        self._record_read(name, started.get("input"), output, status)
 
     def _tool_result_message(self, message: Mapping[str, Any]) -> None:
         call_id = str(message.get("toolCallId") or "")
@@ -314,6 +318,40 @@ class PiEventAdapter:
         self.emit("tool", id=call_id, name=str(message.get("toolName") or started.get("name") or ""),
                   input=started.get("input") or {}, status=status, output=output,
                   origin="model")
+        self._record_read(str(message.get("toolName") or started.get("name") or ""),
+                          started.get("input"), output, status)
+
+    def _record_read(self, name: Any, arguments: Any, output: str, status: str) -> None:
+        """Remember the line range a completed read actually delivered."""
+        if str(name).lower() != "read" or status != "completed" or not output:
+            return
+        raw_path = arguments.get("path") if isinstance(arguments, Mapping) else None
+        if not isinstance(raw_path, str) or not raw_path:
+            return
+        candidate = Path(raw_path)
+        if candidate.is_absolute():
+            try:
+                path_text = candidate.resolve().relative_to(self.workspace).as_posix()
+            except (OSError, ValueError):
+                return
+        else:
+            path_text = PurePosixPath(raw_path).as_posix()
+            if path_text.startswith("./"):
+                path_text = path_text[2:]
+        try:
+            start = int(arguments.get("offset", 1))
+        except (TypeError, ValueError):
+            start = 1
+        start = max(1, start)
+        lines = output.splitlines()
+        if not lines:
+            return
+        self.reads.append({
+            "path": path_text,
+            "lineStart": start,
+            "lineEnd": start + len(lines) - 1,
+            "content": output,
+        })
 
     def _compaction_end(self, record: Mapping[str, Any]) -> None:
         result = record.get("result") if isinstance(record.get("result"), Mapping) else {}
@@ -376,6 +414,7 @@ class PiEventAdapter:
         return str(value) if value else None
 
     def usage(self) -> dict[str, Any]:
+        verification = verify_references(self.answer(), self.reads)
         return {
             "modelCalls": self.model_calls,
             "toolCalls": self.tool_calls,
@@ -390,4 +429,6 @@ class PiEventAdapter:
             "piAborted": self.aborted,
             "compactions": self.compactions,
             "semanticProof": False,
+            "verification": verification,
+            "references": verification["references"],
         }

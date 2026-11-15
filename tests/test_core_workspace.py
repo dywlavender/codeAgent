@@ -84,6 +84,11 @@ class CoreWorkspaceTest(unittest.TestCase):
         with self.assertRaisesRegex(WorkspaceError, "未在项目配置中登记"):
             self.manager.prepare_core(run_id="RUN-unknown", repository_ids=["missing"])
 
+    def test_explicit_empty_repository_scope_is_rejected(self):
+        with self.assertRaisesRegex(WorkspaceError, "未包含任何代码仓库"):
+            self.manager.prepare_core(run_id="RUN-empty", repository_ids=[])
+        self.assertFalse((self.manager.root / "core" / "RUN-empty").exists())
+
     def test_selected_scope_can_run_when_another_configured_repository_is_absent(self):
         workspace = self.manager.prepare_core(run_id="RUN-scoped",
                                               repository_ids=["channel"])

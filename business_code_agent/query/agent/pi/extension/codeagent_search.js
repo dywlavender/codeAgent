@@ -3,8 +3,10 @@
  *
  * The project workspace exposes authorized repositories as directory symlinks.
  * Pi's built-in grep/find use ripgrep/fd without --follow, which silently hides
- * every file under those links. These replacements keep the same tool names and
- * add --follow, plus a pre-execution path guard for all read-only file tools.
+ * every file under those links. These replacements keep the same tool names but
+ * search the authorized real roots directly and map results back to workspace
+ * paths. Repository-internal symlinks are not followed, so a link inside a
+ * repository cannot widen the authorization scope.
  */
 
 import { spawn } from "node:child_process";
@@ -13,6 +15,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { mapResultLine, parseMounts, resolveSearchTargets } from "./search_mounts.js";
 
 const FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const BLOCKED_TOOLS = new Set(["bash", "powershell", "edit", "write"]);
@@ -30,6 +33,7 @@ function parseRoots() {
 const ROOTS = parseRoots();
 const WORKSPACE = path.resolve(process.env.CODEAGENT_PI_WORKSPACE || process.cwd());
 const ALLOWED = ROOTS.length ? ROOTS : [WORKSPACE];
+const MOUNTS = parseMounts(process.env.CODEAGENT_PI_MOUNTS || "{}", ALLOWED);
 
 function isWithin(target) {
   return ALLOWED.some((root) => {
@@ -167,7 +171,7 @@ export default function (pi) {
   pi.registerTool({
     name: "grep",
     label: "grep",
-    description: "Search file contents for a pattern. Follows authorized workspace links and returns file paths with line numbers.",
+    description: "Search file contents for a pattern. Searches authorized roots and returns workspace-relative paths with line numbers.",
     parameters: grepSchema,
     async execute(_toolCallId, params, signal) {
       const cwd = process.cwd();
@@ -176,35 +180,61 @@ export default function (pi) {
       if (reason) {
         return { content: [{ type: "text", text: `Access denied: ${reason}` }], details: { denied: true } };
       }
-      const args = ["--no-config", "--line-number", "--no-heading", "--with-filename",
-        "--color=never", "--hidden", "--follow"];
-      if (params.ignoreCase) args.push("--ignore-case");
-      if (params.literal) args.push("--fixed-strings");
-      if (params.glob) args.push("--glob", params.glob);
-      if (params.context && params.context > 0) args.push("--context", String(params.context));
-      args.push("--", params.pattern, searchPath);
-      const result = await run(executable("rg"), args, cwd, signal);
-      if (result.aborted) {
-        return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+      const plan = resolveSearchTargets(WORKSPACE, MOUNTS, searchPath);
+      if (!plan.targets.length) {
+        return { content: [{ type: "text", text: `Access denied: ${plan.reason}` }],
+          details: { denied: true } };
       }
-      if (result.code === 1 && !result.output.trim()) {
+      const limit = Math.max(1, params.limit || 100);
+      const lines = [];
+      let failure = "";
+      let truncated = false;
+      for (const target of plan.targets) {
+        if (signal?.aborted) {
+          return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+        }
+        const args = ["--no-config", "--line-number", "--no-heading", "--with-filename",
+          "--color=never", "--hidden"];
+        if (params.ignoreCase) args.push("--ignore-case");
+        if (params.literal) args.push("--fixed-strings");
+        if (params.glob) args.push("--glob", params.glob);
+        if (params.context && params.context > 0) args.push("--context", String(params.context));
+        args.push("--", params.pattern, target.target);
+        const result = await run(executable("rg"), args, target.cwd, signal);
+        if (result.aborted) {
+          return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+        }
+        if (result.code === 1 && !result.output.trim()) continue;
+        if (result.code !== 0) {
+          failure = failure || (result.error.trim() || `exit ${result.code}`);
+          continue;
+        }
+        truncated = truncated || result.truncated;
+        for (const line of result.output.trimEnd().split("\n").filter(Boolean)) {
+          lines.push(mapResultLine(line, target.prefix));
+        }
+        if (lines.length >= limit * 20) {
+          truncated = true;
+          break;
+        }
+      }
+      if (!lines.length) {
+        if (failure) {
+          return { content: [{ type: "text", text: `grep failed: ${failure}` }],
+            details: { error: true } };
+        }
         return { content: [{ type: "text", text: "No matches found" }], details: { matches: 0 } };
       }
-      if (result.code !== 0) {
-        return { content: [{ type: "text", text: `grep failed: ${result.error.trim() || `exit ${result.code}`}` }],
-          details: { error: true } };
-      }
-      const lines = result.output.trimEnd().split("\n").filter(Boolean);
-      const text = limited(lines, Math.max(1, params.limit || 100), "匹配数量达到上限");
+      const text = limited(lines, limit, "匹配数量达到上限");
       return { content: [{ type: "text", text }],
-        details: { matches: lines.length, truncated: result.truncated || lines.length > (params.limit || 100) } };
+        details: { matches: lines.length, truncated: truncated || lines.length > limit } };
     },
   });
 
   pi.registerTool({
     name: "find",
     label: "find",
-    description: "Find files by glob pattern. Follows authorized workspace links and returns paths relative to the search directory.",
+    description: "Find files by glob pattern. Searches authorized roots and returns workspace-relative paths.",
     parameters: findSchema,
     async execute(_toolCallId, params, signal) {
       const cwd = process.cwd();
@@ -213,31 +243,57 @@ export default function (pi) {
       if (reason) {
         return { content: [{ type: "text", text: `Access denied: ${reason}` }], details: { denied: true } };
       }
+      const plan = resolveSearchTargets(WORKSPACE, MOUNTS, searchPath);
+      if (!plan.targets.length) {
+        return { content: [{ type: "text", text: `Access denied: ${plan.reason}` }],
+          details: { denied: true } };
+      }
       const limit = Math.max(1, params.limit || 1000);
-      const args = ["--glob", "--color=never", "--hidden", "--follow",
-        "--max-results", String(limit)];
-      if (params.pattern.includes("/")) args.push("--full-path");
-      args.push("--", params.pattern, searchPath);
-      let result = await run(executable("fd"), args, cwd, signal);
-      if (result.code === -1 && /ENOENT|not found/i.test(result.error)) {
-        result = await run(executable("rg"),
-          ["--files", "--color=never", "--hidden", "--follow", "--glob", params.pattern, searchPath],
-          cwd, signal);
+      const lines = [];
+      let failure = "";
+      let truncated = false;
+      for (const target of plan.targets) {
+        if (signal?.aborted) {
+          return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+        }
+        const args = ["--glob", "--color=never", "--hidden",
+          "--max-results", String(limit)];
+        if (params.pattern.includes("/")) args.push("--full-path");
+        args.push("--", params.pattern, target.target);
+        let result = await run(executable("fd"), args, target.cwd, signal);
+        if (result.code === -1 && /ENOENT|not found/i.test(result.error)) {
+          result = await run(executable("rg"),
+            ["--files", "--color=never", "--hidden", "--glob", params.pattern, target.target],
+            target.cwd, signal);
+        }
+        if (result.aborted) {
+          return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+        }
+        if ((result.code === 0 || result.code === 1) && !result.output.trim()) continue;
+        if (result.code !== 0) {
+          failure = failure || (result.error.trim() || `exit ${result.code}`);
+          continue;
+        }
+        truncated = truncated || result.truncated;
+        for (const line of result.output.trimEnd().split("\n").filter(Boolean)) {
+          lines.push(mapResultLine(line, target.prefix));
+        }
+        if (lines.length >= limit * 2) {
+          truncated = true;
+          break;
+        }
       }
-      if (result.aborted) {
-        return { content: [{ type: "text", text: "Search aborted" }], details: { aborted: true } };
+      if (!lines.length) {
+        if (failure) {
+          return { content: [{ type: "text", text: `find failed: ${failure}` }],
+            details: { error: true } };
+        }
+        return { content: [{ type: "text", text: "No files found matching pattern" }],
+          details: { files: 0 } };
       }
-      if ((result.code === 1 || result.code === 0) && !result.output.trim()) {
-        return { content: [{ type: "text", text: "No files found matching pattern" }], details: { files: 0 } };
-      }
-      if (result.code !== 0) {
-        return { content: [{ type: "text", text: `find failed: ${result.error.trim() || `exit ${result.code}`}` }],
-          details: { error: true } };
-      }
-      const lines = result.output.trimEnd().split("\n").filter(Boolean);
       const text = limited(lines, limit, "文件数量达到上限");
       return { content: [{ type: "text", text }],
-        details: { files: lines.length, truncated: result.truncated || lines.length >= limit } };
+        details: { files: lines.length, truncated: truncated || lines.length >= limit } };
     },
   });
 

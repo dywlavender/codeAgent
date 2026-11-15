@@ -63,6 +63,8 @@ class PiQueryServiceTest(unittest.TestCase):
                  "localPath": str(self.root / "sources" / repository_id)}
                 for repository_id in ("a", "b")
             ],
+            "systems": [{"id": "empty-system", "name": "空系统"}],
+            "applications": [],
         }), encoding="utf-8")
         self.db_path = str(self.root / "knowledge.db")
         self.db = connect(self.db_path)
@@ -105,6 +107,66 @@ class PiQueryServiceTest(unittest.TestCase):
             "SELECT runtime,runtime_session_id,status FROM query_run WHERE id=?",
             (result["runId"],)).fetchone()
         self.assertEqual(("PI", result["sessionId"], "completed"), tuple(row))
+
+    def test_empty_system_scope_is_rejected_before_pi_starts(self):
+        service = self.service()
+        runs = []
+        with self.assertRaises(QueryConfigurationError) as caught:
+            service.query("empty scope", mode="none",
+                          scope={"systemIds": ["empty-system"]},
+                          run_callback=runs.append)
+        self.assertIn("未包含任何代码仓库", str(caught.exception))
+        self.assertEqual([], runs[0]["execution"]["repositoryIds"])
+        self.assertEqual("failed", service.get_run(runs[0]["runId"])["status"])
+        self.assertFalse((service.workspace_manager.root / "pi").exists())
+
+    def test_final_answer_citations_are_checked_against_delivered_reads(self):
+        service = self.service("citation")
+        result = service.query("cite", mode="none")
+        verification = result["usage"]["verification"]
+        self.assertFalse(verification["semanticProof"])
+        self.assertEqual(["repos/a/Main.java"], verification["readFiles"])
+        references = verification["references"]
+        self.assertEqual(
+            [("repos/a/Main.java", 2, 2, True),
+             ("repos/a/Main.java", 1, 2, True),
+             ("repos/b/Main.java", 1, 1, False),
+             ("missing/Other.java", 1, 1, False)],
+            [(item["path"], item["line"], item["lineEnd"], item["confirmed"])
+             for item in references],
+        )
+        self.assertEqual(["repos/b/Main.java:1", "missing/Other.java:1"],
+                         verification["unconfirmed"])
+        trace = service.get_trace(result["runId"])
+        self.assertEqual(verification, trace["run"]["usage"]["verification"])
+
+    def test_material_changes_start_a_new_pi_session(self):
+        service = self.service()
+        first = service.query("first", mode="backbone")
+        second = service.query("same", conversation_id=first["conversationId"],
+                               mode="backbone")
+        self.assertEqual(first["sessionId"], second["sessionId"])
+
+        (self.root / "business" / "terms.md").write_text(
+            "业务术语更新\n更多内容\n", encoding="utf-8")
+        third = service.query("business changed", conversation_id=first["conversationId"],
+                              mode="backbone")
+        self.assertNotEqual(second["sessionId"], third["sessionId"])
+        versions = {source["kind"]: source["version"]
+                    for source in third["execution"]["materials"]}
+        self.assertTrue(versions["business_context"].startswith("sha256:"))
+        self.assertTrue(versions["requirements"].startswith("sha256:"))
+
+        (self.root / "sources" / "a" / "Main.java").write_text(
+            "class Main { // changed\n}\n", encoding="utf-8")
+        fourth = service.query("source changed", conversation_id=first["conversationId"],
+                               mode="backbone")
+        self.assertNotEqual(third["sessionId"], fourth["sessionId"])
+        source_versions = {source["version"]
+                           for source in fourth["execution"]["materials"]
+                           if source["kind"] == "source"}
+        self.assertTrue(all(version.startswith("meta-sha256:")
+                            for version in source_versions))
 
     def test_follow_up_reuses_session_and_mode_change_starts_a_new_one(self):
         service = self.service()

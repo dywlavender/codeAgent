@@ -54,6 +54,12 @@ def legacy_langchain_profile(workflow, answer_mode, search_code, contract_trace)
 
 
 def resolve_profile(environment: Mapping[str, str]) -> AgentProfile:
+    """Resolve offline/evaluation profiles from explicit configuration.
+
+    The normal online entry uses :func:`resolve_online_profile` and always runs
+    Pi. This mapping remains for historical evaluation and for callers that
+    construct a legacy runtime explicitly.
+    """
     name = environment.get("BUSINESS_CODE_AGENT_PROFILE", "").strip()
     if name:
         profiles = {profile.id: profile for profile in (
@@ -79,6 +85,11 @@ def resolve_profile(environment: Mapping[str, str]) -> AgentProfile:
         raise ValueError("RETRIEVAL 仅支持 files、auto、hybrid，CONTRACTS 仅支持 off、auto、on")
     return legacy_langchain_profile(workflow, environment.get("BUSINESS_CODE_AGENT_ANSWER_MODE", "plain"),
                                     search_policy[retrieval], contract_policy[contracts])
+
+
+def resolve_online_profile(environment: Mapping[str, str]) -> AgentProfile:
+    """The normal online API entry is always Pi; legacy env cannot override it."""
+    return PI
 
 
 @dataclass(frozen=True)

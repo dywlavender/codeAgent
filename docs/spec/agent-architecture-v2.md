@@ -1,6 +1,6 @@
 # CodeAgent V2 架构设计
 
-状态：设计冻结；`core-v1` 阶段 1 最小主链与 `core-business-v1` 阶段 2 Business Context 工程接入已实现，可分别通过 `BUSINESS_CODE_AGENT_PROFILE=core-v1`、`core-business-v1` 显式启用；在线问答默认已切换为 Pi（2026-11-15），真实模型效果验收仍未完成。确认日期：2026-11-13。
+状态：设计冻结；`core-v1` 阶段 1 最小主链与 `core-business-v1` 阶段 2 Business Context 工程接入已实现，但只供评测代码显式构造 Direct Runtime 使用；正常在线问答固定为 Pi（2026-11-15），环境变量不再切换。真实模型效果验收仍未完成。确认日期：2026-11-13。
 
 `claudecode` 提交 `9a1c71e7c7bd7400d8d400475f51e47ccbca41f2` 的实际交付是「V2 设计 + V1 运行配置预备实现」，不是纯文档提交。Profile、资料清单、工具预检、执行快照与会话配置已进入该提交，另有 Runtime、API、schema 和轨迹前端配套改动；这些不是 V2 Direct Runtime。当前结论为：架构设计通过，整包提交有条件通过，验证范围与缺口见[迁移计划第 7 节](agent-migration-plan.md#7-本次验证与交付状态)。
 
@@ -185,8 +185,8 @@ Core 和 Business Context 已接入，Legacy 保留为生产默认。阶段 2 �
 
 ## 9. Pi Runtime 统一主链（2026-11-15）
 
-在线问答默认使用 `PiAgentRuntime`（`BUSINESS_CODE_AGENT_RUNTIME` 缺省 `pi`）。Pi 负责模型调用、工具选择与调度、上下文压缩和会话；CodeAgent 继续负责工程/资料授权、RunContext、Trace、取消、持久化和业务问答增强。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，失败不自动回退旧链。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 仅用于历史同题对照与评测。
+在线问答使用 `PiAgentRuntime`，正常 API 入口固定进入 Pi；旧 Profile／Runtime 环境变量不能再覆盖。Pi 负责模型调用、工具选择与调度、上下文压缩和会话；CodeAgent 继续负责工程/资料授权、RunContext、Trace、取消、持久化和业务问答增强。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`，失败不自动回退旧链。旧 Runtime 仅允许评测代码显式构造并注入。
 
-Pi 只开放 `read`、`grep`、`find`、`ls`、`codemode`。工作区仍通过软链接暴露授权仓库；Pi 自带搜索默认不跟随符号链接，因此加载只读扩展强制跟随授权链接并在执行前检查路径。工作区 cwd 不是 OS 安全边界，扩展也不替代进程级隔离。Pi 会话文件限定在工程数据目录，配置或资料身份变化时重建。实现与真实运行证据见[迁移计划第 10 节](agent-migration-plan.md#10-pi-runtime-统一问答主链2026-11-15已实现并默认启用)。
+Pi 只开放 `read`、`grep`、`find`、`ls`、`codemode`。工作区仍通过软链接暴露授权仓库；只读扩展从授权真实根目录搜索并通过 `CODEAGENT_PI_MOUNTS` 映射回工作区，不使用全局 `--follow`，仓库内部软链接不会扩大授权范围；执行前仍检查入口路径。工作区 cwd 不是 OS 安全边界，扩展也不替代进程级隔离。Pi 会话身份包含资料版本，业务文档变化或源码元数据变化时重建。最终答案引用按本轮交付的 `read` 原文核验路径与行区间，只证明原文交付，`semanticProof=false`。实现与真实运行证据见[迁移计划第 10 节](agent-migration-plan.md#10-pi-runtime-统一问答主链2026-11-15已实现并默认启用)。
 
-默认 Runtime 已切换为 Pi；旧 LangChain 与 Direct 仅保留显式历史对照。8／16 题同题同模型对照与现有模式验收仍未完成，不能据此宣称答案质量收益；硬封存 LangChain 在线入口、删除旧链，以及 Question Contract／Evidence Ledger／Answer Closure 如何消费 Pi 事件，仍按迁移计划分别验收。
+默认 Runtime 已切换为 Pi；旧 LangChain 与 Direct 仅保留显式评测入口。8／16 题同题同模型对照与现有模式验收仍未完成，不能据此宣称答案质量收益；删除旧链以及 Question Contract／Evidence Ledger／Answer Closure 如何消费 Pi 事件，仍按迁移计划分别验收。

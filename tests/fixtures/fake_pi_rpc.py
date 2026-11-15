@@ -161,6 +161,34 @@ def run_bad_path() -> None:
     emit({"type": "agent_settled", "aborted": bool(ABORT.wait(2))})
 
 
+def run_citation() -> None:
+    emit({"type": "agent_start"})
+    emit({"type": "message_end", "message": {"role": "user", "content": "cite question",
+                                              "timestamp": 1}})
+    call_id = f"call-{uuid.uuid4().hex}"
+    tool_call = (call_id, "read", {"path": "repos/a/Main.java", "offset": 1, "limit": 2})
+    emit({"type": "message_start", "message": assistant(stop="pending", tool_calls=[tool_call])})
+    emit({"type": "message_end", "message": assistant(stop="toolUse", tool_calls=[tool_call])})
+    emit({"type": "tool_execution_start", "toolCallId": call_id, "toolName": "read",
+          "args": {"path": "repos/a/Main.java", "offset": 1, "limit": 2}})
+    emit({"type": "tool_execution_end", "toolCallId": call_id, "toolName": "read",
+          "result": {"content": [{"type": "text",
+                                  "text": "class Main { // a\n}\n"}]},
+          "isError": False, "durationMs": 2})
+    emit({"type": "message_end", "message": {"role": "toolResult", "toolCallId": call_id,
+                                              "toolName": "read", "isError": False,
+                                              "content": [{"type": "text",
+                                                           "text": "class Main { // a\n}\n"}],
+                                              "timestamp": 2}})
+    final = assistant(
+        "提款入口在 repos/a/Main.java:2。完整方法见 repos/a/Main.java:1-2。\n"
+        "另见 repos/b/Main.java:1 和 missing/Other.java:1。")
+    emit({"type": "message_start", "message": assistant(stop="pending")})
+    emit({"type": "message_end", "message": final})
+    emit({"type": "agent_end", "messages": [final], "willRetry": False})
+    emit({"type": "agent_settled", "aborted": False})
+
+
 def run_cancellable() -> None:
     emit({"type": "agent_start"})
     emit({"type": "message_start", "message": assistant(stop="pending")})
@@ -180,6 +208,8 @@ def prompt_worker(scenario: str) -> None:
     append_session("prompt")
     if scenario == "normal":
         run_normal()
+    elif scenario == "citation":
+        run_citation()
     elif scenario == "error":
         run_error()
     elif scenario == "length":
