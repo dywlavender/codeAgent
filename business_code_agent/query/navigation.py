@@ -8,20 +8,26 @@ from pathlib import Path, PurePosixPath
 NAVIGATION_FILE = ".codeagent-project-navigation.json"
 
 
-def build_navigation(config, mounts, project_id, project_name):
+def build_navigation(config, mounts, project_id, project_name, *,
+                     system_ids=(), direct_repository_ids=()):
     systems = {s["id"]: s.get("name", s["id"]) for s in config.get("systems", [])}
+    selected_systems = set(system_ids)
+    directly_selected = set(direct_repository_ids)
     apps = []
     for app in config.get("applications", []):
         repository = app.get("repositoryId")
+        system = app.get("systemId", "")
         if repository not in mounts:
             continue
+        if selected_systems and system not in selected_systems and repository not in directly_selected:
+            continue
         relative = PurePosixPath(app.get("sourceRoot") or ".")
-        if relative.is_absolute() or ".." in relative.parts:
+        if relative.is_absolute() or ".." in relative.parts or "\\" in str(relative):
             continue
         apps.append({
             "id": app["id"], "name": app.get("name", app["id"]),
-            "systemId": app.get("systemId", ""),
-            "systemName": systems.get(app.get("systemId"), app.get("systemId", "")),
+            "systemId": system,
+            "systemName": systems.get(system, system),
             "repositoryId": repository, "mount": str(PurePosixPath(mounts[repository]) / relative),
             "type": app.get("type", "UNKNOWN").upper(),
         })

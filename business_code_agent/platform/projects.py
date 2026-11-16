@@ -81,6 +81,10 @@ class ProjectContext:
         return self.knowledge_root / "business-context"
 
     @property
+    def system_guides_root(self) -> Path:
+        return self.knowledge_root / "system-guides"
+
+    @property
     def code_map_root(self) -> Path:
         """Generated structural navigation material for this project."""
         return self.knowledge_root / "generated-code-map"
