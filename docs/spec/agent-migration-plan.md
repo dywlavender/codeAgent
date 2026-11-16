@@ -605,6 +605,6 @@ Question Contract v3 冻结，保留原问题和模型登记的目标，停止�
 - **工具**：只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接；只读扩展从授权真实根目录搜索并通过 `CODEAGENT_PI_MOUNTS` 映射回工作区路径，不使用全局 `--follow`，仓库内部软链接不会扩大授权范围。扩展仍在执行前拦截越界路径，但不是 OS 沙箱。
 - **会话**：CodeAgent `conversationId` 映射到工程数据目录 `pi-sessions/` 下的 Pi 会话文件；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档与需求使用内容指纹，源码仓库使用文件元数据修订号；资料变化会隔离旧会话。旧 LangChain 会话不直接复用，历史答案仍可查看。
 - **Trace 与引用**：Pi 事件转换为现有 `model`／`tool`／`status`／`compaction`／`text` 事件；模型调用在 `message_start` 即写入 running，`message_end` 补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，结果写入 usage／Trace，`semanticProof=false`；不新增模型评审。
-- **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（空为 Pi 默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
+- **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（默认 `deepseek/gpt-6-luna`；留空才使用 Pi 自身默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
 
 验证：Pi 专项 33 项、全量后端 526 项及 96 个子测试通过；真实 API/SSE 已完成源码问答、同会话追问和取消三次运行。验收修复后又完成一次默认 Pi 的真实 grep 冒烟（`RUN-bd5a78cf89db4950a534ed0b3f688bed`），返回 `repos/...` 与代码地图的工作区路径；并完成一次真实扩展加载检查。修复覆盖空范围拒绝、在线旧链封存、Pi 引用核验、资料版本会话隔离和搜索软链接边界。该验证只证明链路和授权／引用／会话工程行为可用，不证明相对旧链的答案质量收益；Codemode 真实运行、8／16 题同题同模型对照与现有模式验收仍未完成。

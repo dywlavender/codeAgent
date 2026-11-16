@@ -210,6 +210,12 @@ class PiRuntimeTest(unittest.TestCase):
         self.assertEqual("zcode/glm-5.3-flash", configured["configuredModel"])
         self.assertEqual("zcode/glm-5.3-flash", configured["selectedModel"])
 
+    def test_model_environment_sets_default_model(self):
+        runtime = self.runtime(environment={"BUSINESS_CODE_PI_MODEL": "deepseek/gpt-6-luna"})
+        self.assertEqual("deepseek/gpt-6-luna", runtime.model)
+        self.assertEqual("deepseek/gpt-6-luna",
+                         runtime.execution_settings()["requestedModel"])
+
     def test_with_model_rebinds_only_the_selected_run(self):
         runtime = self.runtime()
         selected = runtime.with_model("zcode/glm-5.3-flash")
