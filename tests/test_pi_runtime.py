@@ -74,6 +74,13 @@ class PiRuntimeTest(unittest.TestCase):
             command=[sys.executable, str(FAKE_PI)],
             session_root=self.root / "pi-sessions", **kwargs)
 
+    def test_system_prompt_requires_route_and_handler_chain(self):
+        context, prepared, _ = self.context_and_prepared(mode="none")
+        prompt = self.runtime()._system_prompt(context, prepared, mode="none")
+        self.assertIn("找到第一个入口", prompt)
+        self.assertIn("Handler/注册表", prompt)
+        self.assertIn("题目要求的各项都有源码依据后停止调查", prompt)
+
     def test_normal_run_translates_events_and_persists_session(self):
         context, prepared, _ = self.context_and_prepared()
         calls = []
@@ -90,6 +97,7 @@ class PiRuntimeTest(unittest.TestCase):
         self.assertEqual(1, result.usage["toolCalls"])
         self.assertEqual(["fake-model"], result.usage["reportedModels"])
         self.assertEqual("9.9.9", result.usage["piVersion"])
+        self.assertEqual(16, len(result.usage["systemPromptSha256"]))
         self.assertEqual("fake/fake-model", result.usage["actualModel"])
         self.assertEqual([1, 1, 2, 2], [call["attempt"] for call in calls])
         self.assertEqual(["running", "completed", "running", "completed"],

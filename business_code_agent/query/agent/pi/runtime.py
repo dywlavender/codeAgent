@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -163,8 +164,9 @@ class PiAgentRuntime:
         adapter = PiEventAdapter(emit, workspace=context.workspace,
                                  allowed_roots=allowed_roots,
                                  call_callback=call_callback)
-        command = self._command(root, existing, self._system_prompt(
-            context, prepared, mode=mode))
+        system_prompt = self._system_prompt(context, prepared, mode=mode)
+        command = self._command(root, existing, system_prompt)
+        system_prompt_hash = sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
         process_environment = {
             **self.environment,
             "CODEAGENT_PI_WORKSPACE": str(Path(context.workspace).resolve()),
@@ -274,6 +276,7 @@ class PiAgentRuntime:
             process.close()
 
         usage = adapter.usage()
+        usage["systemPromptSha256"] = system_prompt_hash
         usage["piVersion"] = version
         usage["actualModel"] = actual_model or None
         usage["piSessionFile"] = str(session_file)
@@ -375,6 +378,13 @@ class PiAgentRuntime:
             "不要求固定流程；已知文件直接 read，需要定位时用 grep/find/ls，"
             "可用 codemode 并行读取和过滤大输出。\n"
             "- 没有 edit、write、bash，不要尝试修改文件或执行命令。\n"
+            "- 先确认问题要求哪些关系（入口、路由/命令/事件、实现、状态变化、例外），"
+            "逐项核实；找到第一个入口或只看到“命令总线/服务层”等概括，"
+            "不代表关系已经说明，要继续定位实际分发、注册或处理器代码。\n"
+            "- 对分层框架沿实际链路核实：Spring 的 Controller → Command/事件 → "
+            "Handler/注册表 → Service/状态机；Angular 的组件 → Service → 拦截器/路由。"
+            "定位类名、注解或注册表优先用 grep/find；不确定模块路径时先 ls 顶层模块。\n"
+            "- 题目要求的各项都有源码依据后停止调查并作答；不要为补充背景扩大范围。\n"
             "- 源码是当前实现的依据；业务知识解释术语和业务约定；需求说明目标；"
             "代码地图和 AST 只用于定位，不直接证明实现。\n"
             "- 关键结论必须给出真实文件路径和行号；未确认的内容明确标注为未核实或证据缺口。\n"
