@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-16T03:06:22.670296+00:00",
-  "batch": "validation-projects/complex-loan/.data/pi-baseline-glm53flash-20261115",
+  "generatedAt": "2026-11-16T04:36:10.505019+00:00",
+  "batch": "validation-projects/complex-loan/evaluations/pi-baseline-glm53flash-20261115/raw-traces",
   "runs": [
     {
       "caseId": "native-frontend",
@@ -21,10 +21,9 @@
         "readCalls": 20,
         "searchCalls": 19,
         "emptySearches": 2,
-        "candidateFiles": 334,
+        "candidateFiles": 237,
         "unreadCandidates": [
           "repos/mifos-web-repo/src/app/accounting/common-resolvers/loan-products.resolver.ts",
-          "repos/mifos-web-repo/src/app/loans/",
           "repos/mifos-web-repo/src/app/loans/common-resolvers/glim-loan-template.resolver.ts",
           "repos/mifos-web-repo/src/app/loans/common-resolvers/loan-arrear-delinquency.resolver.ts",
           "repos/mifos-web-repo/src/app/loans/common-resolvers/loan-buy-down-fees-data.resolver.ts",
@@ -46,15 +45,16 @@
           "repos/mifos-web-repo/src/app/loans/common-resolvers/loans-account-template.resolver.ts",
           "repos/mifos-web-repo/src/app/loans/common-resolvers/loans-account-transaction.resolver.ts",
           "repos/mifos-web-repo/src/app/loans/common-resolvers/loans-transaction-reciept.resolver.ts",
-          "repos/mifos-web-repo/src/app/loans/create-loans-account/",
           "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.html",
           "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.scss",
-          "repos/mifos-web-repo/src/app/loans/custom-dialog/loan-delinquency-action-dialog/",
           "repos/mifos-web-repo/src/app/loans/custom-dialog/loan-delinquency-action-dialog/loan-delinquency-action-dialog.component.html",
           "repos/mifos-web-repo/src/app/loans/custom-dialog/loan-delinquency-action-dialog/loan-delinquency-action-dialog.component.scss",
-          "repos/mifos-web-repo/src/app/loans/custom-dialog/loan-delinquency-action-dialog/loan-delinquency-action-dialog.component.ts"
+          "repos/mifos-web-repo/src/app/loans/custom-dialog/loan-delinquency-action-dialog/loan-delinquency-action-dialog.component.ts",
+          "repos/mifos-web-repo/src/app/loans/custom-dialog/loans-account-add-collateral-dialog/loans-account-add-collateral-dialog.component.html",
+          "repos/mifos-web-repo/src/app/loans/custom-dialog/loans-account-add-collateral-dialog/loans-account-add-collateral-dialog.component.scss",
+          "repos/mifos-web-repo/src/app/loans/custom-dialog/loans-account-add-collateral-dialog/loans-account-add-collateral-dialog.component.ts"
         ],
-        "unreadCandidateCount": 325,
+        "unreadCandidateCount": 228,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 5,
         "invalidInvestigationProxy": 7,
@@ -69,39 +69,45 @@
           "requirements": 2
         },
         "references": {
-          "total": 47,
+          "total": 45,
           "confirmed": 22,
-          "searchSeen": 20,
+          "searchSeen": 18,
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 5,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "loans-account-template.resolver.ts",
-            "loans.service.ts:653",
-            "loans.service.ts:521-524",
-            "loans.service.ts:190-192",
-            "loans.service.ts:339-342",
-            "reject-loan.component.ts:87",
-            "loan-approval.component.ts:198-203",
-            "tasks.service.ts:93-95",
-            "tasks.service.ts:60-62",
-            "disburse-to-savings-account.component.ts:108",
-            "loan-disbursal.component.ts:150-155",
-            "tasks.service.ts:68-70",
-            "loans.service.ts:238-241",
-            "prepay-loan.component.ts:133",
-            "loans.service.ts:45-66",
-            "prepay-loan.component.ts:179",
-            "loans.service.ts:339-342",
-            "loans.service.ts:238-241",
-            "http.service.ts",
-            "settings.service.ts",
-            "login.component.ts:101-103",
-            "web-app.component.ts:227-229",
-            "tenant-selector.component.ts:43-44",
-            "authentication.interceptor.ts",
-            "authentication.service.ts"
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:653",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:521-524",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:190-192",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:339-342",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts:87",
+            "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:198-203",
+            "repos/mifos-web-repo/src/app/tasks/tasks.service.ts:93-95",
+            "repos/mifos-web-repo/src/app/tasks/tasks.service.ts:60-62",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse-to-savings-account/disburse-to-savings-account.component.ts:108",
+            "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:150-155",
+            "repos/mifos-web-repo/src/app/tasks/tasks.service.ts:68-70",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:238-241",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts:133",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:45-66",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts:179",
+            "repos/mifos-web-repo/src/app/core/http/http.service.ts",
+            "repos/mifos-web-repo/src/app/settings/settings.service.ts",
+            "repos/mifos-web-repo/src/app/login/login.component.ts:101-103",
+            "repos/mifos-web-repo/src/app/web-app.component.ts:227-229",
+            "repos/mifos-web-repo/src/app/shared/tenant-selector/tenant-selector.component.ts:43-44",
+            "repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts",
+            "repos/mifos-web-repo/src/app/core/authentication/authentication.service.ts"
           ],
           "readFiles": [
             "knowledge/business-context/cross-system.md",
@@ -523,7 +529,7 @@
               "pattern": "**/*loan*",
               "path": "repos/mifos-web-repo"
             },
-            "candidates": 291,
+            "candidates": 228,
             "readCandidates": 6
           },
           {
@@ -534,7 +540,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "context": 6
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -545,7 +551,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "loanActionButtons|submitLoanActionButton"
             },
-            "candidates": 8,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -567,7 +573,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts",
               "pattern": "loanService\\."
             },
-            "candidates": 5,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -578,7 +584,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "getLoansAccountTemplate|getApproveAssociationsDetails|getLoanDelinquencyDataForTemplate|buildLoanRequestPayload"
             },
-            "candidates": 6,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -589,7 +595,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "getLoanPrepayLoanActionTemplate|getLoansAccountTemplate|getLoanAccountResource"
             },
-            "candidates": 5,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -600,7 +606,7 @@
               "path": "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts",
               "pattern": "approveLoans|applyCommand|tasksService\\."
             },
-            "candidates": 6,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -622,7 +628,7 @@
               "path": "repos/mifos-web-repo/src/app/tasks/tasks.service.ts",
               "pattern": "submitBatchData|ToBeApproved|ToBeDisbursed"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -633,7 +639,7 @@
               "path": "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts",
               "pattern": "command=disburse|submitBatchData"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -655,7 +661,7 @@
               "pattern": "getLoanApprovalTemplate",
               "context": 5
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -666,7 +672,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts",
               "pattern": "loanService\\."
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -677,7 +683,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse-to-savings-account",
               "pattern": "loanService\\."
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1214,7 +1220,7 @@
         "readCalls": 16,
         "searchCalls": 18,
         "emptySearches": 1,
-        "candidateFiles": 78,
+        "candidateFiles": 73,
         "unreadCandidates": [
           "repos/mifos-web-repo/src/app/organization/bulk-loan-reassignmnet/bulk-loan-reassignmnet.component.ts",
           "repos/mifos-web-repo/src/app/organization/organization.service.ts",
@@ -1247,7 +1253,7 @@
           "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/waive-interest/waive-interest.component.ts",
           "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts"
         ],
-        "unreadCandidateCount": 67,
+        "unreadCandidateCount": 62,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 3,
         "invalidInvestigationProxy": 4,
@@ -1269,27 +1275,35 @@
           "fileReadNotRange": 1,
           "unseen": 0,
           "pathOnly": 2,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [
             "repos/mifos-web-repo/src/app/login/login.component.ts:99-103"
           ],
           "unconfirmed": [
-            "src/app/loans/loans.service.ts",
-            "loans-account-template.resolver.ts:25",
-            "loans-account-schedule-step.component.ts:59",
-            "reject-loan.component.ts:87",
-            "withdrawn-by-client.component.ts:90",
-            "assign-loan-officer.component.ts:88",
-            "undo-approval.component.ts:38",
-            "disburse-to-savings-account.component.ts:108",
-            "prepay-loan.component.ts:179",
-            "make-repayment.component.ts:191",
-            "make-repayment.component.ts:75",
-            "recovery-repayment.component.ts:146",
-            "settings.service.ts:86-88",
-            "login.component.ts:99-103",
-            "environment.ts",
-            "account-transfers.service.ts:127-146",
-            "channel-service-repo/.../ChannelController.java:38"
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts",
+            "repos/mifos-web-repo/src/app/loans/common-resolvers/loans-account-template.resolver.ts:25",
+            "repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-schedule-step/loans-account-schedule-step.component.ts:59",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts:87",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/withdrawn-by-client/withdrawn-by-client.component.ts:90",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/assign-loan-officer/assign-loan-officer.component.ts:88",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/undo-approval/undo-approval.component.ts:38",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse-to-savings-account/disburse-to-savings-account.component.ts:108",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts:179",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/make-repayment/make-repayment.component.ts:191",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/make-repayment/make-repayment.component.ts:75",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/recovery-repayment/recovery-repayment.component.ts:146",
+            "repos/mifos-web-repo/src/app/settings/settings.service.ts:86-88",
+            "repos/mifos-web-repo/src/app/login/login.component.ts:99-103",
+            "repos/mifos-web-repo/src/environments/environment.ts",
+            "repos/mifos-web-repo/src/app/account-transfers/account-transfers.service.ts:127-146",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:38"
           ],
           "readFiles": [
             "repos/mifos-web-repo/proxy.conf.js",
@@ -1369,7 +1383,7 @@
             "read": false,
             "firstRound": null,
             "ranges": [],
-            "cited": false
+            "cited": true
           },
           {
             "key": "repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts",
@@ -1684,7 +1698,7 @@
               "pattern": "command",
               "context": 3
             },
-            "candidates": 6,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2268,15 +2282,8 @@
         "readCalls": 21,
         "searchCalls": 20,
         "emptySearches": 0,
-        "candidateFiles": 161,
+        "candidateFiles": 75,
         "unreadCandidates": [
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-30-  getLoanActionTemplate(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-57-  getLoanForeclosureActionTemplate(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-69-  getLoanAccountResource(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-238-  submitLoanActionButton(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-249-  getReAgePreview(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-267-  getReAmortizePreview(loanId",
-          "repos/mifos-web-repo/src/app/loans/loans.service.ts-279-  getLoanScreenReportsData()",
           "repos/mifos-web-repo/src/app/loans/loans-view/account-details/account-details.component.ts",
           "repos/mifos-web-repo/src/app/loans/loans-view/charges-tab/charges-tab.component.ts",
           "repos/mifos-web-repo/src/app/loans/loans-view/datatable-tab/datatable-tab.component.ts",
@@ -2299,9 +2306,16 @@
           "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-credit-balance-refund/loan-credit-balance-refund.component.ts",
           "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reaging/loan-reaging.component.ts",
           "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reaging/re-age-preview-dialog/re-age-preview-dialog.component.ts",
-          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reamortize/loan-reamortize.component.ts"
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reamortize/loan-reamortize.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reamortize/re-amortize-preview-dialog/re-amortize-preview-dialog.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-reschedule/loan-reschedule.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loan-screen-reports/loan-screen-reports.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/loans-account-close/loans-account-close.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/recovery-repayment/recovery-repayment.component.ts",
+          "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts"
         ],
-        "unreadCandidateCount": 153,
+        "unreadCandidateCount": 67,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 6,
         "invalidInvestigationProxy": 6,
@@ -2315,46 +2329,53 @@
           "requirements": 1
         },
         "references": {
-          "total": 53,
+          "total": 52,
           "confirmed": 23,
           "searchSeen": 22,
           "fileReadNotRange": 1,
           "unseen": 0,
-          "pathOnly": 7,
+          "pathOnly": 6,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [
             "repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts:26-43"
           ],
           "unconfirmed": [
             "repos/mifos-web-repo/src/app/loans/loans.service.ts",
-            "loans.service.ts:427-433",
-            "loans.service.ts:653",
-            "create-loans-account.component.ts:167",
-            "loans.service.ts:460-462",
-            "create-loans-account.component.ts:183",
-            "loans-routing.module.ts:77-79",
-            "loans.service.ts:521-524",
-            "loan-action-button.resolver.ts",
-            "loans.service.ts:190-193",
-            "loans.service.ts:104-107",
-            "approve-loan.component.ts",
-            "loans.service.ts:339-342",
-            "reject-loan.component.ts:87",
-            "undo-approval.component.ts:38",
-            "loans.service.ts:30-38",
-            "loans.service.ts:33-35",
-            "disburse-to-savings-account.component.ts:108",
-            "loan-action-button.resolver.ts",
-            "loans.service.ts:238-241",
-            "prepay-loan.component.ts:179",
-            "prepay-loan.component.ts:188",
-            "core/http/api-prefix.interceptor.ts:26-43",
-            "core.module.ts",
-            "login.component.ts:101-103",
-            "web-app.component.ts:226-228",
-            "shared/tenant-selector/tenant-selector.component.ts:43-45",
-            "app.module.ts:131-134",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:427-433",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:653",
+            "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:167",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:460-462",
+            "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:183",
+            "repos/mifos-web-repo/src/app/loans/loans-routing.module.ts:77-79",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:521-524",
+            "repos/mifos-web-repo/src/app/loans/common-resolvers/loan-action-button.resolver.ts",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:190-193",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:104-107",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:339-342",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts:87",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/undo-approval/undo-approval.component.ts:38",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:30-38",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:33-35",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse-to-savings-account/disburse-to-savings-account.component.ts:108",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts:238-241",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts:179",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/prepay-loan/prepay-loan.component.ts:188",
+            "repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts:26-43",
+            "repos/mifos-web-repo/src/app/core/core.module.ts",
+            "repos/mifos-web-repo/src/app/login/login.component.ts:101-103",
+            "repos/mifos-web-repo/src/app/web-app.component.ts:226-228",
+            "repos/mifos-web-repo/src/app/shared/tenant-selector/tenant-selector.component.ts:43-45",
+            "repos/mifos-web-repo/src/app/app.module.ts:131-134",
             "core/authentication/authentication.guard.ts",
-            "proxy.conf.js"
+            "repos/mifos-web-repo/proxy.conf.js"
           ],
           "readFiles": [
             "repos/mifos-web-repo/env.sample",
@@ -2389,7 +2410,7 @@
             "read": false,
             "firstRound": null,
             "ranges": [],
-            "cited": false
+            "cited": true
           },
           {
             "key": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
@@ -2782,7 +2803,7 @@
               "context": 3,
               "limit": 80
             },
-            "candidates": 8,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2803,7 +2824,7 @@
               "pattern": "loanActionButtons|createLoan|guarantor|^\\s+return this\\.http\\.post",
               "context": 4
             },
-            "candidates": 14,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2814,7 +2835,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "context": 6
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2825,7 +2846,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts",
               "context": 2
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2836,7 +2857,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "createLoansAccount|getLoansAccountTemplateResource|buildLoanRequestPayload"
             },
-            "candidates": 11,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2858,7 +2879,7 @@
               "path": "repos/mifos-web-repo/src/app/app.module.ts",
               "pattern": "HTTP_INTERCEPTORS|ApiPrefixInterceptor|AuthenticationInterceptor|provideHttpClient|withInterceptors"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2881,7 +2902,7 @@
               "path": "repos/mifos-web-repo/src/app",
               "pattern": "setTenantIdentifier\\(|setServer\\(|\\.server ="
             },
-            "candidates": 7,
+            "candidates": 6,
             "readCandidates": 1
           },
           {
@@ -2892,7 +2913,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "getLoanDelinquencyDataForTemplate|getApproveAssociationsDetails|getLoanAccountResource\\("
             },
-            "candidates": 6,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2903,7 +2924,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions",
               "pattern": "loanActionButtons\\(|submitLoanActionButton\\("
             },
-            "candidates": 36,
+            "candidates": 16,
             "readCandidates": 3
           },
           {
@@ -2915,7 +2936,7 @@
               "pattern": "actions|create-loans-account|approve|disburse|repayment",
               "limit": 60
             },
-            "candidates": 7,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2937,7 +2958,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-routing.module.ts",
               "pattern": "CreateLoansAccountComponent$|path: 'create'|LoanAccountActionsComponent,"
             },
-            "candidates": 15,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2948,7 +2969,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "getLoanApprovalTemplate|getLoanTemplate\\("
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -2971,7 +2992,7 @@
               "pattern": "approve|submit",
               "glob": "*.ts"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -2993,7 +3014,7 @@
               "path": "repos/mifos-web-repo/src/app/core/authentication/authentication.service.ts",
               "pattern": "post\\('/authentication'|post\\(`/twofactor"
             },
-            "candidates": 5,
+            "candidates": 1,
             "readCandidates": 1
           }
         ],
@@ -3595,19 +3616,27 @@
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 2,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "repos/mifos-web-repo/src/app/loans/loans.service.ts",
-            "loans-account-details-step.component.ts:189",
-            "loans-account-schedule-step.component.ts:59",
-            "repos/fineract-repo/.../loanaccount/api/LoansApiResource.java:188",
-            "reject-loan.component.ts:87",
-            "withdrawn-by-client.component.ts:90",
-            "disburse-to-savings-account.component.ts:108",
-            "repos/fineract-repo/.../api/LoanTransactionsApiResource.java:87",
-            "core/http/http.service.ts",
-            "fineract-repo/.../security/filter/TenantAwareBasicAuthenticationFilter.java:71",
-            "FineractClient.java:39"
+            "repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-details-step/loans-account-details-step.component.ts:189",
+            "repos/mifos-web-repo/src/app/loans/loans-account-stepper/loans-account-schedule-step/loans-account-schedule-step.component.ts:59",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java:188",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/reject-loan/reject-loan.component.ts:87",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/withdrawn-by-client/withdrawn-by-client.component.ts:90",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse-to-savings-account/disburse-to-savings-account.component.ts:108",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoanTransactionsApiResource.java:87",
+            "repos/mifos-web-repo/src/app/core/http/http.service.ts",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/infrastructure/security/filter/TenantAwareBasicAuthenticationFilter.java:71",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:39"
           ],
           "readFiles": [
             "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/infrastructure/security/filter/TenantAwareBasicAuthenticationFilter.java",
@@ -4891,7 +4920,7 @@
         "readCalls": 51,
         "searchCalls": 107,
         "emptySearches": 35,
-        "candidateFiles": 317,
+        "candidateFiles": 283,
         "unreadCandidates": [
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/MiddleApplication.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java",
@@ -4924,7 +4953,7 @@
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentController.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrderRepository.java"
         ],
-        "unreadCandidateCount": 290,
+        "unreadCandidateCount": 256,
         "repeatedToolCalls": 4,
         "searchesWithoutRead": 16,
         "invalidInvestigationProxy": 55,
@@ -4955,18 +4984,26 @@
           "requirements": 3
         },
         "references": {
-          "total": 45,
-          "confirmed": 40,
+          "total": 43,
+          "confirmed": 38,
           "searchSeen": 2,
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 3,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
-            "RepaymentController.java:34-38",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentController.java:34-38",
             "repos/mifos-web-repo/src/app/loans/loans-view/loan-accounts-button-config.ts:72-75",
-            "loans.service.ts",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts",
             "2.md"
           ],
           "readFiles": [
@@ -5889,7 +5926,7 @@
               "context": 2,
               "limit": 20
             },
-            "candidates": 3,
+            "candidates": 4,
             "readCandidates": 0
           },
           {
@@ -5901,7 +5938,7 @@
               "context": 4,
               "limit": 30
             },
-            "candidates": 15,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -5935,7 +5972,7 @@
               "context": 3,
               "limit": 15
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -5971,7 +6008,7 @@
               "context": 4,
               "limit": 25
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6456,7 +6493,7 @@
               "limit": 20,
               "glob": "**/main/**/*.java"
             },
-            "candidates": 3,
+            "candidates": 2,
             "readCandidates": 1
           },
           {
@@ -6468,7 +6505,7 @@
               "context": 3,
               "limit": 25
             },
-            "candidates": 3,
+            "candidates": 2,
             "readCandidates": 1
           },
           {
@@ -6503,8 +6540,8 @@
               "limit": 20,
               "glob": "**/main/**/*.java"
             },
-            "candidates": 1,
-            "readCandidates": 1
+            "candidates": 2,
+            "readCandidates": 2
           },
           {
             "round": 80,
@@ -6588,7 +6625,7 @@
               "context": 1,
               "limit": 15
             },
-            "candidates": 6,
+            "candidates": 4,
             "readCandidates": 0
           },
           {
@@ -6600,7 +6637,7 @@
               "context": 3,
               "limit": 20
             },
-            "candidates": 7,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -6624,7 +6661,7 @@
               "context": 3,
               "limit": 20
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6648,7 +6685,7 @@
               "context": 3,
               "limit": 25
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6660,7 +6697,7 @@
               "context": 6,
               "limit": 15
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6672,7 +6709,7 @@
               "context": 5,
               "limit": 15
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6684,7 +6721,7 @@
               "context": 8,
               "limit": 10
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -9487,7 +9524,7 @@
         "readCalls": 28,
         "searchCalls": 53,
         "emptySearches": 8,
-        "candidateFiles": 104,
+        "candidateFiles": 82,
         "unreadCandidates": [
           "repos/fineract-repo/fineract-e2e-tests-core/src/test/java/org/apache/fineract/test/data/LoanStatus.java",
           "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/group/api/GroupsApiResourceSwagger.java",
@@ -9520,7 +9557,7 @@
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitService.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductConfig.java"
         ],
-        "unreadCandidateCount": 86,
+        "unreadCandidateCount": 64,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 14,
         "invalidInvestigationProxy": 22,
@@ -9546,24 +9583,32 @@
           "requirements": 2
         },
         "references": {
-          "total": 35,
-          "confirmed": 25,
+          "total": 31,
+          "confirmed": 21,
           "searchSeen": 8,
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 2,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
-            "LoanScheduleAssembler.java:1507",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/service/LoanScheduleAssembler.java:1507",
             "repos/mifos-web-repo/src/app/loans/loans.service.ts:339-342",
-            "Loan.java:906-908",
-            "disburse.component.ts:157",
-            "LoanTransactionsApiResource.java:566",
-            "DrawdownService.java",
-            "ExternalResultController.java:55-64",
-            "CompensationTask.java:68",
-            "ChannelController.java:33"
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java:906-908",
+            "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse/disburse.component.ts:157",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoanTransactionsApiResource.java:566",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java:55-64",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java:68",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java:33"
           ],
           "readFiles": [
             "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelApplicationRecord.java",
@@ -10322,7 +10367,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoanTransactionsApiResource.java",
               "pattern": "CommandParameterUtil.is\\(commandParam"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10346,7 +10391,7 @@
               "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java",
               "pattern": "@(Get|Post)Mapping|@RequestMapping|onPaymentResult"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10358,7 +10403,7 @@
               "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
               "pattern": "book\\(|queryAndSettle|TO_BOOK|RETRY_NEEDED|Scheduled"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -10426,7 +10471,7 @@
               "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java",
               "pattern": "repayLoan|getRepaymentAllocation|onDeductionResult|public void book"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -10486,7 +10531,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "loanAction|command"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10510,7 +10555,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "contextUrl|`/loans/\\$\\{loanId\\}`|\\$\\{command\\}"
             },
-            "candidates": 8,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10522,7 +10567,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "sqLoanTransaction|submitLoan|void submit|saveLoan"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10546,7 +10591,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "getApproveAssociationsDetails"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10558,7 +10603,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "loanActionButtons\\("
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -10592,7 +10637,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse",
               "pattern": "loanActionButtons|'disburse'"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           }
         ],
@@ -11552,7 +11597,7 @@
         "readCalls": 21,
         "searchCalls": 61,
         "emptySearches": 16,
-        "candidateFiles": 107,
+        "candidateFiles": 89,
         "unreadCandidates": [
           "repos/fineract-repo/fineract-e2e-tests-core/src/test/java/org/apache/fineract/test/data/LoanStatus.java",
           "repos/fineract-repo/fineract-provider/src/test/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachineTest.java",
@@ -11585,7 +11630,7 @@
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/SimulatorProperties.java",
           "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanRefundService.java"
         ],
-        "unreadCandidateCount": 89,
+        "unreadCandidateCount": 71,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 14,
         "invalidInvestigationProxy": 30,
@@ -11615,29 +11660,35 @@
           "requirements": 3
         },
         "references": {
-          "total": 54,
-          "confirmed": 39,
-          "searchSeen": 13,
+          "total": 50,
+          "confirmed": 37,
+          "searchSeen": 11,
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 2,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
-            "CreditApplicationOrder.java:17",
-            "LoanScheduleAssembler.java:1507",
-            "LoanAccountDomainServiceJpa.java:877",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditApplicationOrder.java:17",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/service/LoanScheduleAssembler.java:1507",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java:877",
             "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
-            "Loan.java:560",
-            "SimulatorController.java:35",
-            "LimitService.java:163",
-            "LimitService.java:131",
-            "LoanApplicationWritePlatformServiceJpaRepositoryImpl.java:557",
-            "LoanScheduleAssembler.java:1507",
-            "CreditService.java:104-115",
-            "RepaymentController.java:34",
-            "LimitService.java:191",
-            "LoanAccountDomainServiceJpa.java:877"
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java:560",
+            "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorController.java:35",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitService.java:163",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitService.java:131",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java:557",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java:104-115",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentController.java:34",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitService.java:191"
           ],
           "readFiles": [
             "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
@@ -12267,7 +12318,7 @@
               "context": 4,
               "limit": 60
             },
-            "candidates": 16,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -12301,7 +12352,7 @@
               "context": 3,
               "limit": 40
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -12337,7 +12388,7 @@
               "context": 10,
               "limit": 40
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -12466,7 +12517,7 @@
               "context": 5,
               "limit": 25
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {

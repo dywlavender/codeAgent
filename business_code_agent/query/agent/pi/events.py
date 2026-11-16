@@ -7,7 +7,8 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
-from business_code_agent.query.agent.citations import verify_references
+from business_code_agent.query.agent.citations import (normalize_answer_paths,
+                                                       verify_references)
 
 
 Emit = Callable[[dict[str, Any]], None]
@@ -235,6 +236,8 @@ class PiEventAdapter:
             "startedAt": message.get("timestamp") or int(time.time() * 1000),
             "durationMs": message.get("durationMs"),
             "elapsedMs": round((time.monotonic() - self.started) * 1000, 3),
+            "recordKind": "message_summary",
+            "requestSnapshotAvailable": False,
             "messages": [],
             "tools": [],
             "responses": [],
@@ -267,6 +270,8 @@ class PiEventAdapter:
             "phase": "investigation",
             "startedAt": int(time.time() * 1000),
             "elapsedMs": round((time.monotonic() - self.started) * 1000, 3),
+            "recordKind": "message_summary",
+            "requestSnapshotAvailable": False,
             "messages": [],
             "tools": [],
             "responses": [],
@@ -396,7 +401,8 @@ class PiEventAdapter:
         for message in reversed(self.assistant_messages):
             text = message_text(message).strip()
             if text:
-                return text
+                return normalize_answer_paths(text, self.reads,
+                                              workspace=self.workspace)
         return ""
 
     @property

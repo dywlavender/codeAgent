@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 
@@ -31,8 +32,10 @@ class PiEvaluationMetricsTest(unittest.TestCase):
                         "semanticProof": False,
                         "readFiles": ["repos/a/X.java"],
                         "references": [
-                            {"path": "repos/a/X.java", "confirmed": True},
-                            {"path": "repos/b/Y.java", "confirmed": False},
+                            {"path": "repos/a/X.java", "line": 10, "lineEnd": 10,
+                             "matchedPath": "repos/a/X.java", "confirmed": True},
+                            {"path": "repos/b/Y.java", "line": 3, "lineEnd": 3,
+                             "confirmed": False},
                         ],
                         "unconfirmed": ["repos/b/Y.java"],
                     },
@@ -139,6 +142,133 @@ class PiEvaluationMetricsTest(unittest.TestCase):
         refs = evaluate_pi.analyze_trace(trace)["references"]
         self.assertEqual(1, refs["searchSeen"])
         self.assertEqual(0, refs["unseen"])
+
+    def test_archived_answer_is_reparsed_for_reference_counts(self):
+        trace = {
+            "run": {
+                "workspace": "/tmp/workspace",
+                "answer": "见 [X.java:1](/tmp/workspace/repos/a/X.java:1)。",
+                "usage": {"verification": {"references": [
+                    {"path": "X.java", "line": 1, "lineEnd": 1, "confirmed": True},
+                    {"path": "repos/a/X.java", "line": 1, "lineEnd": 1,
+                     "confirmed": True},
+                ]}},
+            },
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-1", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 1, "limit": 2},
+                    "output": "line1\nline2\n"}},
+            ],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(1, refs["total"])
+        self.assertEqual(1, refs["confirmed"])
+
+    def test_grep_context_lines_do_not_become_candidate_paths(self):
+        trace = {
+            "run": {"workspace": "/tmp/workspace", "usage": {}},
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-1", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/a", "pattern": "needle"},
+                    "output": ("repos/a/X.java-260-              data: value\n"
+                               "repos/a/X.java:261:  needle();\n")}},
+            ],
+        }
+        metrics = evaluate_pi.analyze_trace(trace)
+        self.assertEqual(1, metrics["candidateFiles"])
+        self.assertEqual(["repos/a/X.java"], metrics["unreadCandidates"])
+
+    def test_label_and_target_references_are_deduplicated(self):
+        trace = {
+            "run": {
+                "workspace": "/tmp/workspace",
+                "usage": {"verification": {"references": [
+                    {"path": "X.java", "line": 10, "lineEnd": 10,
+                     "matchedPath": "repos/a/X.java", "fileRead": True,
+                     "confirmed": True},
+                    {"path": "/tmp/workspace/repos/a/X.java", "line": 10,
+                     "lineEnd": 10, "matchedPath": None, "fileRead": False,
+                     "confirmed": False},
+                ]}},
+            },
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-1", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 10, "limit": 2},
+                    "output": "line1\nline2\n"}},
+            ],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(1, refs["total"])
+        self.assertEqual(1, refs["confirmed"])
+        self.assertEqual(1, refs["formatIssues"]["absolute"])
+        self.assertEqual(0, refs["formatIssues"]["unresolved"])
+
+    def test_reference_format_counts_unrooted_and_duplicated_paths(self):
+        trace = {
+            "run": {"workspace": "/tmp/workspace", "usage": {"verification": {
+                "references": [
+                    {"path": "/tmp/workspace/repos/a/X.java", "line": 1,
+                     "lineEnd": 1, "confirmed": False},
+                    {"path": "/other/repos/a/Y.java", "line": 2, "lineEnd": 2,
+                     "confirmed": False},
+                    {"path": "/tmp/workspace/repos/project/pi/CONV-1/repos/a/Z.java",
+                     "line": 3, "lineEnd": 3, "confirmed": False},
+                ]}}},
+            "events": [{"eventType": "model", "payload": {"attempt": 1}}],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(3, refs["total"])
+        self.assertEqual(3, refs["formatIssues"]["absolute"])
+        self.assertEqual(1, refs["formatIssues"]["unrooted"])
+        self.assertEqual(1, refs["formatIssues"]["duplicated"])
+        self.assertEqual(2, refs["formatIssues"]["malformed"])
+        self.assertEqual(0, refs["formatIssues"]["unresolved"])
+
+    def test_review_requires_verdict_quote_and_evidence(self):
+        checks = ["检查项"]
+        review = {"reviewSchemaVersion": 2, "checksReview": [{
+            "index": 1, "check": "检查项", "verdict": "partial",
+            "answerQuotes": ["答案原句"], "evidence": ["repos/a/X.java:10"],
+            "reason": "只覆盖部分路径"}]}
+        evaluate_pi.check_review(review, checks, answer="答案原句，见 repos/a/X.java:10。")
+        missing_quote = json.loads(json.dumps(review))
+        missing_quote["checksReview"][0]["answerQuotes"] = []
+        with self.assertRaises(ValueError):
+            evaluate_pi.check_review(missing_quote, checks, answer="答案原句")
+        missing_verdict = json.loads(json.dumps(review))
+        missing_verdict["checksReview"][0]["verdict"] = None
+        with self.assertRaises(ValueError):
+            evaluate_pi.check_review(missing_verdict, checks, answer="答案原句")
+        wrong_quote = json.loads(json.dumps(review))
+        wrong_quote["checksReview"][0]["answerQuotes"] = ["答案中没有的句子"]
+        with self.assertRaises(ValueError):
+            evaluate_pi.check_review(wrong_quote, checks, answer="答案原句")
+
+    def test_review_command_writes_per_run_and_batch_checks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            batch = Path(folder)
+            run = batch / "runs" / "native-frontend-none-r1"
+            run.mkdir(parents=True)
+            result = {"caseId": "native-frontend", "mode": "none", "repeat": 1,
+                      "runId": "RUN-1", "modelActual": "m", "status": "completed",
+                      "checks": ["检查项"], "issues": [],
+                      "answer": "答案原句，见 repos/a/X.java:10。"}
+            (run / "result.json").write_text(json.dumps(result), encoding="utf-8")
+            (run / "review.json").write_text(json.dumps({
+                "reviewSchemaVersion": 2, "checksReview": [{
+                    "index": 1, "check": "检查项", "verdict": "pass",
+                    "answerQuotes": ["答案原句"], "evidence": ["repos/a/X.java:10"],
+                    "reason": "已核实"}], "issues": []}), encoding="utf-8")
+            evaluate_pi.command_review(Namespace(batch=batch, allow_unreviewed=False))
+            self.assertIn("通过", (run / "checks.md").read_text(encoding="utf-8"))
+            self.assertIn("native-frontend", (batch / "checks.md").read_text(
+                encoding="utf-8"))
 
     def test_resume_requires_matching_batch_config(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -1113,7 +1113,11 @@ class QueryService:
                 snapshot = json.loads(path.read_text(encoding="utf-8"))
                 if snapshot.get("projectId") == self.project_id:
                     value.update({k: v for k, v in snapshot.items() if k not in {"projectId", "runId", "run", "events"}})
-                    value.update(historical=False, modelSnapshotAvailable=bool(snapshot.get("calls")),
+                    calls = snapshot.get("calls") or []
+                    full = any(call.get("messages") or call.get("tools") for call in calls)
+                    value.update(historical=False, modelCallRecordsAvailable=bool(calls),
+                                 requestSnapshotAvailable=full,
+                                 modelSnapshotAvailable=full,
                                  runtimeEvents=snapshot.get("events", []))
         return value
 

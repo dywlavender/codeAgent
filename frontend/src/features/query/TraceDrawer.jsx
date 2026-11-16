@@ -65,6 +65,7 @@ export function TraceDrawer({ projectId, runId, onClose }) {
         {trace.run.durationMs > 0 && <span>{(trace.run.durationMs / 1000).toFixed(2)} 秒</span>}
       </div><code>{runId}</code></div>
       {trace.historical && <Alert type="info" showIcon title="历史运行仅保留已有事件，未归档的模型请求无法补回。" />}
+      {trace.requestSnapshotAvailable === false && !trace.historical && <Alert type="info" showIcon title="本轨迹只保存模型调用摘要，未保存每轮完整请求 messages/tools。" />}
       {trace.run.error && <Alert type="error" showIcon title={trace.run.error} />}
       <Tabs defaultActiveKey="timeline" items={[
         { key: "timeline", label: "调用过程", children: <>

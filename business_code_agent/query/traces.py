@@ -32,9 +32,20 @@ class RunTraceArchive:
 
     def start(self, run, workspace):
         self.workspace = Path(workspace).resolve()
-        self.value = {"schemaVersion": 1, "runId": self.run_id, "projectId": self.project_id,
-                      "run": run, "calls": [], "events": [], "modelSnapshotAvailable": False,
-                      "snapshotStage": "langchain_before_provider_serialization", "semanticProof": False}
+        pi_runtime = str(run.get("runtime") or "").upper() == "PI"
+        self.value = {
+            "schemaVersion": 1, "runId": self.run_id, "projectId": self.project_id,
+            "run": run, "calls": [], "events": [],
+            "modelCallRecordsAvailable": False,
+            "requestSnapshotAvailable": False,
+            "modelSnapshotAvailable": False,
+            "snapshotStage": ("pi_message_summary" if pi_runtime
+                              else "langchain_before_provider_serialization"),
+            "snapshotNote": ("Pi 每次模型调用只记录阶段、工具名、响应文本和用量摘要，"
+                             "不保存完整请求 messages/tools。" if pi_runtime else
+                             "LangChain 在 provider 序列化前保存完整模型请求。"),
+            "semanticProof": False,
+        }
         self.write()
 
     def event(self, event):
@@ -55,7 +66,11 @@ class RunTraceArchive:
                 break
         else:
             self.value["calls"].append(entry)
-        self.value["modelSnapshotAvailable"] = bool(self.value["calls"])
+        calls = self.value["calls"]
+        full = any(item.get("messages") or item.get("tools") for item in calls)
+        self.value["modelCallRecordsAvailable"] = bool(calls)
+        self.value["requestSnapshotAvailable"] = full
+        self.value["modelSnapshotAvailable"] = full
         self.write()
 
     def refresh(self):
@@ -69,7 +84,11 @@ class RunTraceArchive:
                 self.value[key] = snapshot[key]
         # Runtime events have precise timing; the archive also retains all API events.
         self.value["runtimeEvents"] = snapshot.get("events", [])
-        self.value["modelSnapshotAvailable"] = bool(snapshot.get("calls"))
+        calls = snapshot.get("calls") or []
+        full = any(call.get("messages") or call.get("tools") for call in calls)
+        self.value["modelCallRecordsAvailable"] = bool(calls)
+        self.value["requestSnapshotAvailable"] = full
+        self.value["modelSnapshotAvailable"] = full
 
     def update_run(self, **fields):
         self.value.setdefault("run", {}).update(fields)
@@ -97,5 +116,7 @@ class RunTraceArchive:
                 raise ValueError("调用轨迹不属于当前工程或运行")
             return {**value, "run": {**value.get("run", {}), **run}}
         return {"schemaVersion": 1, "runId": self.run_id, "projectId": self.project_id, "run": run,
-                "calls": [], "events": run["events"], "modelSnapshotAvailable": False,
+                "calls": [], "events": run["events"],
+                "modelCallRecordsAvailable": False, "requestSnapshotAvailable": False,
+                "modelSnapshotAvailable": False, "snapshotStage": "events_only",
                 "historical": True, "semanticProof": False}

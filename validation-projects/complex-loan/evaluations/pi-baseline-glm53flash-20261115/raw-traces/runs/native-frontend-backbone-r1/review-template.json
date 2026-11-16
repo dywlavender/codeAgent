@@ -1,4 +1,6 @@
 {
+  "reviewSchemaVersion": 2,
+  "reviewStatus": "unreviewed",
   "caseId": "native-frontend",
   "mode": "backbone",
   "repeat": 1,
@@ -13,40 +15,52 @@
   ],
   "checksReview": [
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 1,
+      "check": "创建：create-loans-account.component.ts 的 submit() → loansService.createLoansAccount → POST /loans",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 2,
+      "check": "审批/放款：loanActionButtons(loanId, 'approve'|'disburse', data) → POST /loans/{loanId}?command=...",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 3,
+      "check": "还款：make-repayment.component.ts 解析模板交易类型 → submitLoanActionButton(loanId, data, command) → POST /loans/{loanId}/transactions?command=repayment",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 4,
+      "check": "ApiPrefixInterceptor 统一拼接 /fineract-provider/api/v1 前缀；AuthenticationInterceptor 注入 Fineract-Platform-TenantId 头与 Basic/Bearer 认证",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 5,
+      "check": "各业务域一个 service 文件（如 loans.service.ts），地址配置在 src/environments/environment.ts，可被运行时 window.env 覆盖",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 6,
+      "check": "前端只组装与发送请求，业务规则全部在后端",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     }
   ],
   "issues": []

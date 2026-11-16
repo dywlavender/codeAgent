@@ -76,6 +76,24 @@ class QueryTraceTest(unittest.TestCase):
         shutil.rmtree(service.workspace_manager.root)
         self.assertEqual(trace["calls"], self.service().get_trace(run_id)["calls"])
 
+    def test_pi_trace_distinguishes_call_summary_from_request_snapshot(self):
+        workspace = self.root / "pi-trace-workspace"
+        workspace.mkdir()
+        archive = RunTraceArchive(self.root / "query-traces", "RUN-pi-summary",
+                                  project_id="alpha")
+        archive.start({"runId": "RUN-pi-summary", "runtime": "PI", "status": "running"},
+                      workspace)
+        archive.record_call({"attempt": 1, "recordKind": "message_summary",
+                             "requestSnapshotAvailable": False,
+                             "messages": [], "tools": [], "responses": [],
+                             "usage": [], "status": "completed"})
+        value = json.loads(archive.path.read_text())
+        self.assertFalse(value["modelSnapshotAvailable"])
+        self.assertFalse(value["requestSnapshotAvailable"])
+        self.assertTrue(value["modelCallRecordsAvailable"])
+        self.assertEqual("pi_message_summary", value["snapshotStage"])
+        self.assertEqual("message_summary", value["calls"][0]["recordKind"])
+
     def test_archive_finish_promotes_usage_stop_reason(self):
         workspace = self.root / "workspace"
         workspace.mkdir()

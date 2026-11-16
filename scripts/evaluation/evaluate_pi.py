@@ -22,6 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from business_code_agent.platform.env import load_env_file
+from business_code_agent.query.agent.citations import (canonical_citation_path,
+                                                       match_reference_path,
+                                                       verify_references)
 from business_code_agent.query.agent.pi import PiAgentRuntime
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import QueryService
@@ -61,6 +64,44 @@ def _project_id(config: Path) -> str:
 
 
 _GREP_LINE = re.compile(r"^(?P<path>.+?)(?P<sep>[:-])(?P<line>\d+)(?P=sep)")
+_FILE_NAME = re.compile(r"\.[A-Za-z0-9][A-Za-z0-9._-]{0,12}$")
+
+
+def _candidate_path(line: str, tool: str, relative) -> str | None:
+    """Extract a file path from one grep/find output line.
+
+    Grep context lines use ``path-260- content``; only the leading path may be
+    treated as a candidate, never the content after the line number.
+    """
+    text = str(line or "").strip()
+    if not text or text.startswith(("No matches", "no matches", "Found ", "（", "(")):
+        return None
+    if tool == "grep":
+        match = _GREP_LINE.match(text)
+        if not match:
+            return None
+        path = match.group("path")
+    else:
+        path = text
+    path = relative(path)
+    if (not path or path.startswith(("No ", "error", "Error"))
+            or any(char.isspace() for char in path)
+            or not _FILE_NAME.search(path)):
+        return None
+    return path
+
+
+def format_reference_text(entry: dict) -> str:
+    path = str(entry.get("path") or "")
+    line = entry.get("line")
+    if line is None:
+        return path
+    try:
+        start = int(line)
+        end = int(entry.get("lineEnd") or line)
+    except (TypeError, ValueError):
+        return path
+    return f"{path}:{start}" if end == start else f"{path}:{start}-{end}"
 
 
 def _matches_key(path: str, key: str) -> bool:
@@ -89,17 +130,7 @@ def analyze_trace(trace: dict, keys=()) -> dict:
     workspace = str(run.get("workspace") or "").rstrip("/")
 
     def relative(value: str) -> str:
-        path = str(value or "").replace("\\", "/")
-        if workspace:
-            if path.startswith(workspace + "/"):
-                path = path[len(workspace) + 1:]
-            else:
-                absolute = path if path.startswith("/") else "/" + path
-                if absolute.startswith(workspace + "/"):
-                    path = absolute[len(workspace) + 1:]
-        if path.startswith("./"):
-            path = path[2:]
-        return path
+        return canonical_citation_path(value, workspace)
 
     tools: dict[str, dict] = {}
     ordered: list[dict] = []
@@ -135,6 +166,7 @@ def analyze_trace(trace: dict, keys=()) -> dict:
             call["output"] = str(payload.get("output") or "")
 
     reads: dict[str, dict] = {}
+    read_outputs: list[dict] = []
     search_calls = []
     candidates: dict[str, dict] = {}
     repeated = {}
@@ -165,6 +197,9 @@ def analyze_trace(trace: dict, keys=()) -> dict:
                 entry["rounds"].append(call["round"])
             if lines:
                 entry["ranges"].append([start, start + len(lines) - 1])
+                read_outputs.append({"path": path, "content": output,
+                                     "lineStart": start,
+                                     "lineEnd": start + len(lines) - 1})
             entry["contentChars"] += len(output)
             continue
         if name not in {"grep", "find"} or call["status"] != "completed":
@@ -172,16 +207,9 @@ def analyze_trace(trace: dict, keys=()) -> dict:
         output = call.get("output") or ""
         found = []
         for line in output.splitlines():
-            text = line.strip()
-            if not text or text.startswith(("No matches", "no matches", "Found ", "（", "(")):
-                continue
-            path = text.split(":", 1)[0].strip() if name == "grep" else text
-            path = relative(path)
-            if not path or path.startswith(("No ", "error", "Error")):
-                continue
-            if name == "grep" and (":" not in text or "/" not in path and "." not in path):
-                continue
-            found.append(path)
+            path = _candidate_path(line, name, relative)
+            if path:
+                found.append(path)
         search_calls.append({
             "round": call["round"],
             "name": name,
@@ -232,34 +260,38 @@ def analyze_trace(trace: dict, keys=()) -> dict:
             repo["searches"] += 1
 
     references = (usage.get("verification") or {})
-    reference_items = references.get("references") or []
+    answer = str(run.get("answer") or "")
+    if answer:
+        # Re-parse the archived answer so old traces use the same deduplication
+        # and path rules as current production verification.
+        reference_items = verify_references(
+            answer, read_outputs, workspace=workspace)["references"]
+    else:
+        reference_items = references.get("references") or []
     search_lines: dict[str, set[int]] = {}
     for call in ordered:
         if call["name"] != "grep" or call["status"] != "completed":
             continue
         for line in (call.get("output") or "").splitlines():
-            match = _GREP_LINE.match(line)
+            match = _GREP_LINE.match(line.strip())
             if match:
-                search_lines.setdefault(relative(match.group("path")), set()).add(
-                    int(match.group("line")))
+                path = relative(match.group("path"))
+                if path and not any(char.isspace() for char in path):
+                    search_lines.setdefault(path, set()).add(int(match.group("line")))
+
+    known_paths = set(reads) | set(search_lines)
 
     def resolve_path(value: str) -> str:
         value = relative(value)
-        if not value or value in reads or value in search_lines:
+        if not value:
             return value
-        for candidate in list(reads) + [path for path in search_lines if path not in reads]:
-            if candidate.endswith("/" + value):
-                return candidate
-        if "..." in value or "…" in value:
-            expression = re.escape(value.replace("…", "...")).replace(r"\.\.\.", ".*")
-            matcher = re.compile(r"(?:^|/)" + expression + r"$")
-            for candidate in list(reads) + [path for path in search_lines if path not in reads]:
-                if matcher.search(candidate):
-                    return candidate
-        return value
+        return match_reference_path(value, known_paths) or value
 
     reference_counts = {"confirmed": 0, "searchSeen": 0, "fileReadNotRange": 0,
                         "unseen": 0, "pathOnly": 0}
+    format_counts = {"absolute": 0, "unrooted": 0, "duplicated": 0,
+                     "unresolved": 0, "malformed": 0}
+    workspace_prefix = f"{workspace}/" if workspace else ""
 
     def read_covers(ranges, start: int, end: int) -> bool:
         cursor = start
@@ -273,30 +305,79 @@ def analyze_trace(trace: dict, keys=()) -> dict:
                 return True
         return False
 
-    unseen_references = []
+    def path_flags(raw: str) -> set[str]:
+        text = str(raw or "")
+        flags = set()
+        if (text.startswith("/") or text.startswith(
+                ("private/", "tmp/", "Users/", "var/", "home/", "opt/", "root/",
+                 "workspaces/"))
+                or "/workspaces/" in text):
+            flags.add("absolute")
+            prefixes = tuple(prefix for prefix in (
+                workspace_prefix, workspace_prefix.lstrip("/")) if prefix)
+            if prefixes and not text.startswith(prefixes):
+                flags.add("unrooted")
+        if any(text.count(marker) > 1
+               for marker in ("repos/", "requirements/", "knowledge/")):
+            flags.add("duplicated")
+        canonical = canonical_citation_path(text, workspace)
+        if (canonical == text and "absolute" in flags) or canonical.startswith(
+                ("private/", "tmp/", "Users/", "var/", "home/", "opt/", "root/",
+                 "workspaces/")):
+            flags.add("unresolved")
+        return flags
+
+    deduped: dict[tuple, dict] = {}
     for item in reference_items:
-        if item.get("confirmed"):
-            reference_counts["confirmed"] += 1
-            continue
-        path = resolve_path(str(item.get("matchedPath") or item.get("path") or ""))
+        raw_values = [str(value) for value in item.get("rawPaths") or [] if value]
+        raw = str(item.get("path") or "")
+        if not raw_values and raw:
+            raw_values = [raw]
+        path = resolve_path(str(item.get("matchedPath") or raw))
         line = item.get("line")
+        try:
+            start = int(line) if line is not None else None
+            end = int(item.get("lineEnd") or line) if line is not None else None
+        except (TypeError, ValueError):
+            start = end = None
+        key = (path, start, end)
+        entry = deduped.setdefault(key, {
+            "path": path, "line": line, "lineEnd": item.get("lineEnd"),
+            "fileRead": bool(item.get("fileRead")), "confirmed": False,
+            "rawPaths": set(),
+        })
+        entry["rawPaths"].update(raw_values)
+        entry["fileRead"] = entry["fileRead"] or bool(item.get("fileRead"))
+        entry["confirmed"] = entry["confirmed"] or bool(item.get("confirmed"))
+
+    unseen_references = []
+    for entry in deduped.values():
+        path = entry["path"]
+        line = entry.get("line")
         if line is None:
             reference_counts["pathOnly"] += 1
             continue
         try:
             start = int(line)
-            end = int(item.get("lineEnd") or line)
+            end = int(entry.get("lineEnd") or line)
         except (TypeError, ValueError):
             reference_counts["pathOnly"] += 1
             continue
-        entry = reads.get(path)
-        if entry and read_covers(entry.get("ranges") or [], start, end):
+        flags = set()
+        for raw in entry["rawPaths"]:
+            flags |= path_flags(raw)
+        for flag in flags:
+            format_counts[flag] += 1
+        if flags & {"unrooted", "duplicated", "unresolved"}:
+            format_counts["malformed"] += 1
+        read_entry = reads.get(path)
+        if read_entry and read_covers(read_entry.get("ranges") or [], start, end):
             reference_counts["confirmed"] += 1
             continue
         if any(start <= number <= end for number in search_lines.get(path) or ()):
             reference_counts["searchSeen"] += 1
             continue
-        if item.get("fileRead"):
+        if entry.get("fileRead") or path in reads:
             reference_counts["fileReadNotRange"] += 1
         else:
             reference_counts["unseen"] += 1
@@ -306,9 +387,8 @@ def analyze_trace(trace: dict, keys=()) -> dict:
     key_round = None
     for key in keys:
         matched = [entry for path, entry in reads.items() if _matches_key(path, key)]
-        cited = [str(item.get("matchedPath") or item.get("path") or "")
-                 for item in reference_items
-                 if _matches_key(str(item.get("matchedPath") or item.get("path") or ""), key)]
+        cited = [entry["path"] for entry in deduped.values()
+                 if _matches_key(entry["path"], key)]
         key_rows.append({
             "key": key,
             "read": bool(matched),
@@ -346,14 +426,17 @@ def analyze_trace(trace: dict, keys=()) -> dict:
         "repos": repos,
         "materialReads": roots(path for path in reads if not path.startswith("repos/")),
         "references": {
-            "total": len(reference_items),
+            "total": len(deduped),
             "confirmed": reference_counts["confirmed"],
             "searchSeen": reference_counts["searchSeen"],
             "fileReadNotRange": reference_counts["fileReadNotRange"],
             "unseen": reference_counts["unseen"],
             "pathOnly": reference_counts["pathOnly"],
+            "formatIssues": format_counts,
+            "unresolvedFormat": format_counts["unresolved"],
             "unseenReferences": unseen_references[:30],
-            "unconfirmed": references.get("unconfirmed") or [],
+            "unconfirmed": [format_reference_text(entry) for entry in deduped.values()
+                            if not entry["confirmed"]][:30],
             "readFiles": references.get("readFiles") or [],
             "semanticProof": references.get("semanticProof"),
         },
@@ -465,10 +548,18 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
     }
     _write(output / "result.json", record)
     (output / "review-template.json").write_text(json.dumps({
+        "reviewSchemaVersion": 2,
+        "reviewStatus": "unreviewed",
         "caseId": case["id"], "mode": mode, "repeat": repeat,
         "question": case["question"], "checks": case.get("checks") or [],
-        "checksReview": [{"met": None, "candidateQuote": "", "reason": "", "evidence": ""}
-                         for _ in case.get("checks") or []],
+        "checksReview": [{
+            "index": index,
+            "check": check,
+            "verdict": None,
+            "answerQuotes": [],
+            "evidence": [],
+            "reason": "",
+        } for index, check in enumerate(case.get("checks") or [], 1)],
         "issues": [],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     return record
@@ -494,8 +585,10 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
                  for result in results],
     }
     _write(batch / "summary.json", summary)
+    batch_label = (f"{batch.parent.name}/{batch.name}"
+                   if batch.name == "raw-traces" else batch.name)
     lines = ["# Pi 真实问答评测", "",
-             f"- 批次：`{batch.name}`",
+             f"- 批次：`{batch_label}`",
              f"- 生成时间：{summary['generatedAt']}",
              f"- 运行数：{len(results)}", "",
              "> 工具/搜索指标是确定性计数或启发式代理，不是答案正确性评分；"
@@ -506,8 +599,8 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
     for case_id, rows in groups.items():
         first = rows[0]
         lines.extend([f"## {case_id}", "", f"**问题**：{first['question']}", ""])
-        lines.extend(["| 组 | 重复 | 状态 | 模型 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用 确认/搜索见/未交付 |",
-                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["| 组 | 重复 | 状态 | 模型 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用 总数/确认/搜索见/未交付 | 格式 绝对/缺段/重复/未解析/错误 |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
         for row in rows:
             metrics = row.get("metrics") or {}
             refs = metrics.get("references") or {}
@@ -526,8 +619,14 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
                 f"{metrics.get('emptySearches', '—')} | {metrics.get('searchesWithoutRead', '—')} | "
                 f"{metrics.get('repeatedToolCalls', '—')} | "
                 f"{metrics.get('totalTokens', '—')} | {row.get('elapsedSeconds', '—')} | "
-                f"{refs.get('confirmed', '—')}/{refs.get('searchSeen', '—')}/"
-                f"{not_delivered if not_delivered is not None else '—'} |")
+                f"{refs.get('total', '—')}/{refs.get('confirmed', '—')}/"
+                f"{refs.get('searchSeen', '—')}/"
+                f"{not_delivered if not_delivered is not None else '—'} | "
+                f"{(refs.get('formatIssues') or {}).get('absolute', '—')}/"
+                f"{(refs.get('formatIssues') or {}).get('unrooted', '—')}/"
+                f"{(refs.get('formatIssues') or {}).get('duplicated', '—')}/"
+                f"{(refs.get('formatIssues') or {}).get('unresolved', '—')}/"
+                f"{(refs.get('formatIssues') or {}).get('malformed', '—')} |")
         lines.extend(["", "**评测检查项（仅评测器）**", ""])
         lines.extend(f"{index}. {check}" for index, check in enumerate(first.get("checks") or [], 1))
         for row in rows:
@@ -553,12 +652,17 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
                     f"{metrics.get('searchesAfterLastKey')} 次、模型调用 "
                     f"{metrics.get('modelCallsAfterLastKey')} 次")
             refs = metrics.get("references") or {}
-            if refs.get("unconfirmed"):
+            issues = refs.get("formatIssues") or {}
+            if refs.get("total"):
                 lines.append(
-                    f"- 读取原文未核实引用 {refs.get('confirmed')}/{refs.get('total')}，"
-                    f"其中搜索输出可见 {refs.get('searchSeen')}、"
+                    f"- 引用（去重）：{refs.get('total')} 条；读取确认 "
+                    f"{refs.get('confirmed')}、搜索可见 {refs.get('searchSeen')}、"
                     f"读取文件但行区间未交付 {refs.get('fileReadNotRange')}、"
-                    f"其它未出现 {refs.get('unseen')}、无行号 {refs.get('pathOnly')}")
+                    f"未出现 {refs.get('unseen')}、无行号 {refs.get('pathOnly')}；"
+                    f"绝对临时路径 {issues.get('absolute', 0)} 条（缺段 "
+                    f"{issues.get('unrooted', 0)}、重复根 {issues.get('duplicated', 0)}）、"
+                    f"无法归一化 {issues.get('unresolved', 0)} 条；"
+                    f"其中格式错误 {issues.get('malformed', 0)} 条")
             if refs.get("unseenReferences"):
                 lines.append("- 未交付引用（读取原文与搜索输出均未出现）：" + "、".join(
                     str(item) for item in refs["unseenReferences"][:10]))
@@ -586,6 +690,124 @@ def check_resume(output: Path, expected: dict) -> None:
     mismatched = [key for key, value in expected.items() if stored.get(key) != value]
     if mismatched:
         raise ValueError("--resume 配置与已有批次不一致：" + "、".join(mismatched))
+
+
+VERDICTS = {"pass": "通过", "partial": "部分通过", "fail": "未通过"}
+
+
+def check_review(review: dict, checks: list[str], answer: str | None = None) -> list[dict]:
+    if review.get("reviewSchemaVersion") != 2:
+        raise ValueError("复核文件 reviewSchemaVersion 必须为 2")
+    items = review.get("checksReview") or []
+    if len(items) != len(checks):
+        raise ValueError(f"复核项数量 {len(items)} 与检查项数量 {len(checks)} 不一致")
+    for index, (item, check) in enumerate(zip(items, checks), 1):
+        if item.get("index") not in (None, index):
+            raise ValueError(f"第 {index} 个复核项编号不一致")
+        if item.get("check") and item["check"] != check:
+            raise ValueError(f"第 {index} 个复核项与题库检查项不一致")
+        if item.get("verdict") not in VERDICTS:
+            raise ValueError(f"第 {index} 个检查项未判定，只能是 pass/partial/fail")
+        quotes = [str(value).strip() for value in item.get("answerQuotes") or []
+                  if str(value).strip()]
+        evidence = [str(value).strip() for value in item.get("evidence") or []
+                    if str(value).strip()]
+        if item["verdict"] in {"pass", "partial"} and not quotes:
+            raise ValueError(f"第 {index} 个检查项缺少答案原句")
+        if item["verdict"] in {"pass", "partial"} and not evidence:
+            raise ValueError(f"第 {index} 个检查项缺少源码/资料依据")
+        if any(value.startswith("/") for value in evidence):
+            raise ValueError(f"第 {index} 个检查项的证据必须是工程相对路径")
+        if answer is not None:
+            normalized = str(answer).replace("\r\n", "\n")
+            for quote in quotes:
+                if quote not in normalized:
+                    raise ValueError(
+                        f"第 {index} 个检查项的答案原句未在 answer.md 中找到：{quote[:40]}")
+        if not str(item.get("reason") or "").strip():
+            raise ValueError(f"第 {index} 个检查项缺少说明")
+    return items
+
+
+def _review_markdown(result: dict, items: list[dict]) -> str:
+    counts = {key: sum(1 for item in items if item["verdict"] == key) for key in VERDICTS}
+    lines = [
+        f"# 逐项检查复核：{result['caseId']} / {result['mode']} / r{result['repeat']}",
+        "",
+        f"- Run：`{result.get('runId') or '—'}`；模型：{result.get('modelActual') or '—'}；"
+        f"状态：{result.get('status') or '—'}",
+        f"- 结论：通过 {counts['pass']}、部分通过 {counts['partial']}、"
+        f"未通过 {counts['fail']}",
+        "",
+    ]
+    for index, item in enumerate(items, 1):
+        lines.extend([
+            f"## {index}. {item['check']}",
+            "",
+            f"**结论：{VERDICTS[item['verdict']]}**",
+            "",
+            "答案原句：",
+            *[f"> {quote}" for quote in item.get("answerQuotes") or []],
+            "",
+            "源码/资料依据：",
+            *[f"- {value}" for value in item.get("evidence") or []],
+            "",
+            f"说明：{item.get('reason')}",
+            "",
+        ])
+    issues = result.get("issues") or []
+    if issues:
+        lines.extend(["## 其它问题", "", *[f"- {issue}" for issue in issues], ""])
+    return "\n".join(lines)
+
+
+def _batch_review_markdown(rows: list[tuple[dict, list[dict]]]) -> str:
+    lines = ["# Pi 逐项检查复核汇总", "",
+             "| 案例 | 模式 | 重复 | 通过 | 部分通过 | 未通过 |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for result, items in rows:
+        counts = {key: sum(1 for item in items if item["verdict"] == key)
+                  for key in VERDICTS}
+        lines.append(f"| {result['caseId']} | {result['mode']} | {result['repeat']} | "
+                     f"{counts['pass']} | {counts['partial']} | {counts['fail']} |")
+    lines.append("")
+    for result, items in rows:
+        lines.extend([f"## {result['caseId']} / {result['mode']} / r{result['repeat']}", ""])
+        for index, item in enumerate(items, 1):
+            quote = " … ".join(item.get("answerQuotes") or [])
+            evidence = "；".join(item.get("evidence") or [])
+            lines.append(f"{index}. **{VERDICTS[item['verdict']]}** — {item['check']}")
+            lines.append(f"   - 答案：{quote or '—'}")
+            lines.append(f"   - 依据：{evidence or '—'}")
+            lines.append(f"   - 说明：{item.get('reason')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def command_review(args) -> int:
+    batch = args.batch.expanduser().resolve()
+    rows = []
+    for folder in sorted(batch.glob("runs/*")):
+        result_path = folder / "result.json"
+        if not result_path.is_file():
+            continue
+        result = _load(result_path)
+        review_path = folder / "review.json"
+        if not review_path.is_file():
+            if args.allow_unreviewed:
+                continue
+            raise ValueError(f"缺少已完成的 review.json：{folder}")
+        review = _load(review_path)
+        items = check_review(review, result.get("checks") or [],
+                             answer=result.get("answer") or "")
+        result["issues"] = review.get("issues") or []
+        (folder / "checks.md").write_text(_review_markdown(result, items), encoding="utf-8")
+        rows.append((result, items))
+    if not rows:
+        raise ValueError("没有可生成复核报告的运行")
+    (batch / "checks.md").write_text(_batch_review_markdown(rows), encoding="utf-8")
+    print(f"已生成：{batch / 'checks.md'}")
+    return 0
 
 
 def command_run(args) -> int:
@@ -698,9 +920,14 @@ def main() -> int:
     report = sub.add_parser("report", help="从已有 runs 重新生成汇总")
     report.add_argument("--batch", type=Path, required=True)
     report.add_argument("--keys-file", type=Path)
+    review = sub.add_parser("review", help="校验逐项复核并生成 checks.md")
+    review.add_argument("--batch", type=Path, required=True)
+    review.add_argument("--allow-unreviewed", action="store_true",
+                        help="跳过还没有 review.json 的运行")
     args = parser.parse_args()
+    actions = {"run": command_run, "report": command_report, "review": command_review}
     try:
-        return command_run(args) if args.action == "run" else command_report(args)
+        return actions[args.action](args)
     except (ValueError, OSError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2

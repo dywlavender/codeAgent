@@ -1,7 +1,7 @@
 # Pi 真实问答评测
 
-- 批次：`pi-gpt6luna-smoke-20261116`
-- 生成时间：2026-11-16T03:06:23.618487+00:00
+- 批次：`pi-gpt6luna-smoke-20261116/raw-traces`
+- 生成时间：2026-11-16T04:36:11.359549+00:00
 - 运行数：1
 
 > 工具/搜索指标是确定性计数或启发式代理，不是答案正确性评分；结论可信度仍需按 checks 阅读答案与 Trace。
@@ -10,9 +10,9 @@
 
 **问题**：Mifos X 前端在创建贷款申请、发起审批、放款和还款时，分别调用哪些服务方法和后端接口？API 地址前缀、租户标识和认证是如何统一处理的？
 
-| 组 | 重复 | 状态 | 模型 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用 确认/搜索见/未交付 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| none | 1 | completed | deepseek/gpt-6-luna | 2/8 | 6 | 5/4 | 13 | 11 | 2 | 6 | 62/61 | 0 | 4 | 0 | 187615 | 436.14 | 9/21/4 |
+| 组 | 重复 | 状态 | 模型 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用 总数/确认/搜索见/未交付 | 格式 绝对/缺段/重复/未解析/错误 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 1 | completed | deepseek/gpt-6-luna | 2/8 | 6 | 5/4 | 13 | 11 | 2 | 6 | 23/22 | 0 | 4 | 0 | 187615 | 436.14 | 15/4/11/0 | 15/2/2/0/4 |
 
 **评测检查项（仅评测器）**
 
@@ -28,9 +28,8 @@
 - 状态：completed；Run：`RUN-15f5f10f342446a983b182877e312798`；实际模型：deepseek/gpt-6-luna；Pi：1.5.0
 - 未读取的关键文件：repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts、repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse/disburse.component.ts、repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/make-repayment/make-repayment.component.ts、repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts、repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts、repos/mifos-web-repo/src/environments/environment.ts
 - 最后关键文件轮次：6；之后工具 5 次、搜索 4 次、模型调用 7 次
-- 读取原文未核实引用 9/34，其中搜索输出可见 21、读取文件但行区间未交付 0、其它未出现 4、无行号 0
-- 未交付引用（读取原文与搜索输出均未出现）：private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:460、private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238、repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28、repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:47
-- 未读候选（启发式）：repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts、repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts-260-              data、repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts-261-              backgroundColor、repos/mifos-web-repo/src/app/collections/individual-collection-sheet/individual-collection-sheet.component.ts、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-171-      data、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-197-    listSelectedAccounts.forEach((element、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-200-      const batchData = { requestId、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-224-      this.loans = this.loans.filter((account、repos/mifos-web-repo/src/app/templates/template-parameter-labels.ts
+- 引用（去重）：15 条；读取确认 4、搜索可见 11、读取文件但行区间未交付 0、未出现 0、无行号 0；绝对临时路径 15 条（缺段 2、重复根 2）、无法归一化 0 条；其中格式错误 4 条
+- 未读候选（启发式）：repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts、repos/mifos-web-repo/src/app/collections/individual-collection-sheet/individual-collection-sheet.component.ts、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts、repos/mifos-web-repo/src/app/templates/template-parameter-labels.ts、repos/mifos-web-repo/src/app/templates/create-edit-template/create-edit-template.component.ts、repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts、repos/mifos-web-repo/src/app/tasks/tasks.service.ts、repos/mifos-web-repo/src/app/home/activities.ts、repos/mifos-web-repo/src/app/savings/savings-account-stepper/savings-account-preview-step/savings-account-preview-step.component.ts、repos/mifos-web-repo/src/app/savings/savings-account-stepper/savings-account-charges-step/savings-account-charges-step.component.ts
 - 工具时序：R1 codemode {"code": "const r = await Promise.all([\n  tools.ls({path:'repos/mifos-web-repo' → error；R2 ls {"limit": 200, "path": "repos/mifos-web-repo"} → completed；R3 grep {"context": 2, "glob": "*.ts", "ignoreCase": true, "limit": 100, "literal": fals → completed；R4 grep {"context": 2, "glob": "*.ts", "ignoreCase": false, "limit": 100, "literal": fal → completed；R5 read {"limit": 240, "offset": 1, "path": "repos/mifos-web-repo/src/app/loans/create-l → completed；R6 read {"limit": 260, "offset": 1, "path": "repos/mifos-web-repo/src/app/loans/loans.se → completed；R7 grep {"context": 3, "glob": "loans.service.ts", "ignoreCase": false, "limit": 50, "li → completed；R8 grep {"context": 2, "glob": "loans.service.ts", "ignoreCase": false, "limit": 20, "li → completed；R10 read {"limit": 100, "offset": 430, "path": "repos/mifos-web-repo/src/app/loans/loans. → completed；R11 grep {"context": 3, "glob": "*.ts", "ignoreCase": true, "limit": 100, "literal": fals → completed；R12 grep {"context": 3, "glob": "*.ts", "ignoreCase": true, "limit": 80, "literal": false → completed
 
 已核实的调用链如下。这里的“创建”是提交贷款申请；审批、放款和还款都基于已创建的 `loanId`。

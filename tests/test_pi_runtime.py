@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.agent.pi import PiAgentRuntime, PiConfigurationError
-from business_code_agent.query.agent.pi.events import denied_tool_path
+from business_code_agent.query.agent.pi.events import PiEventAdapter, denied_tool_path
 from business_code_agent.query.capabilities import prepare_pi_capabilities
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.materials import MaterialManifest, MaterialSource
@@ -73,6 +73,19 @@ class PiRuntimeTest(unittest.TestCase):
             profile=PI, environment=environment,
             command=[sys.executable, str(FAKE_PI)],
             session_root=self.root / "pi-sessions", **kwargs)
+
+    def test_answer_rewrites_temporary_citation_paths(self):
+        workspace = self.root / "answer-workspace"
+        workspace.mkdir()
+        adapter = PiEventAdapter(lambda event: None, workspace=workspace,
+                                 allowed_roots=())
+        adapter.reads = [{"path": "repos/a/Main.java", "content": "line1\n",
+                          "lineStart": 1, "lineEnd": 1}]
+        adapter.assistant_messages = [{
+            "role": "assistant",
+            "content": f"见 [Main.java:1]({workspace}/repos/a/Main.java:1)。",
+        }]
+        self.assertEqual("见 [Main.java:1](repos/a/Main.java:1)。", adapter.answer())
 
     def test_system_prompt_requires_route_and_handler_chain(self):
         context, prepared, _ = self.context_and_prepared(mode="none")

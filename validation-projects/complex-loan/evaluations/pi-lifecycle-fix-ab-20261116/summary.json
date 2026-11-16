@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-16T03:06:23.135244+00:00",
-  "batch": "validation-projects/complex-loan/.data/pi-lifecycle-fix-ab-20261116",
+  "generatedAt": "2026-11-16T04:36:11.121883+00:00",
+  "batch": "validation-projects/complex-loan/evaluations/pi-lifecycle-fix-ab-20261116/raw-traces",
   "runs": [
     {
       "caseId": "native-lifecycle",
@@ -21,7 +21,7 @@
         "readCalls": 47,
         "searchCalls": 71,
         "emptySearches": 12,
-        "candidateFiles": 308,
+        "candidateFiles": 262,
         "unreadCandidates": [
           "repos/fineract-repo/fineract-e2e-tests-core/src/test/java/org/apache/fineract/test/data/LoanStatus.java",
           "repos/fineract-repo/fineract-e2e-tests-core/src/test/java/org/apache/fineract/test/messaging/event/loan/LoanStatusChangedEvent.java",
@@ -36,7 +36,6 @@
           "repos/fineract-repo/fineract-provider/src/test/java/org/apache/fineract/portfolio/loanaccount/service/LoanStatusChangeHistoryListenerTest.java",
           "repos/fineract-repo/integration-tests/src/test/java/org/apache/fineract/integrationtests/common/loans/LoanStatusChecker.java",
           "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResourceSwagger.java",
-          "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java-1316-        Long resolvedLoanId = loanId == null ? loanReadPlatformService.getResolvedLoanId(loanExternalId)",
           "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/CapitalizedIncomeWritePlatformServiceImpl.java",
           "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/starter/ProgressiveLoanAccountConfiguration.java",
           "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanLifecycleStateMachine.java",
@@ -52,12 +51,13 @@
           "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/rescheduleloan/service/LoanRescheduleRequestWritePlatformServiceImpl.java",
           "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/CapitalizedIncomeAdjustmentCommandHandler.java",
           "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/AddCapitalizedIncomeCommandHandler.java",
-          "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/AddBuyDownFeeCommandHandler.java"
+          "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/AddBuyDownFeeCommandHandler.java",
+          "repos/fineract-repo/fineract-progressive-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/BuyDownFeeAdjustmentCommandHandler.java"
         ],
-        "unreadCandidateCount": 284,
+        "unreadCandidateCount": 237,
         "repeatedToolCalls": 0,
-        "searchesWithoutRead": 29,
-        "invalidInvestigationProxy": 41,
+        "searchesWithoutRead": 28,
+        "invalidInvestigationProxy": 40,
         "repos": {
           "fineract-repo": {
             "reads": 16,
@@ -87,6 +87,14 @@
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 0,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [],
           "readFiles": [],
@@ -755,7 +763,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
               "pattern": "String stateTransitions\\(final Long loanId"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -860,7 +868,7 @@
               "path": "repos/fineract-repo",
               "pattern": "submitApplication|approveApplication|LOAN_CREATED|LOAN_APPROVED|stateMachine"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -897,7 +905,7 @@
               "path": "repos/fineract-repo",
               "pattern": "assembleLoanApproval|LOAN_APPROVED, loan|LOAN_DISBURSED, loan|LOAN_CREATED, loan"
             },
-            "candidates": 3,
+            "candidates": 4,
             "readCandidates": 2
           },
           {
@@ -923,7 +931,7 @@
               "path": "repos/fineract-repo",
               "pattern": "LoanStatus\\.SUBMITTED_AND_PENDING_APPROVAL"
             },
-            "candidates": 4,
+            "candidates": 3,
             "readCandidates": 0
           },
           {
@@ -1104,7 +1112,7 @@
               "path": "repos/mifos-web-repo",
               "pattern": "approve|disburse"
             },
-            "candidates": 11,
+            "candidates": 2,
             "readCandidates": 0
           },
           {
@@ -1117,7 +1125,7 @@
               "path": "repos/mifos-web-repo/src/app/loans",
               "pattern": "approve|disburse"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1130,7 +1138,7 @@
               "path": "repos/mifos-web-repo/src/app/loans",
               "pattern": "loanAction\\("
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1142,7 +1150,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loans-view.component.ts",
               "pattern": "Approve Loan|Disburse"
             },
-            "candidates": 12,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1168,8 +1176,8 @@
               "path": "repos/mifos-web-repo/src/app/loans",
               "pattern": "'Approve Loan'|'Disburse'"
             },
-            "candidates": 6,
-            "readCandidates": 0
+            "candidates": 3,
+            "readCandidates": 1
           },
           {
             "round": 53,
@@ -1181,7 +1189,7 @@
               "path": "repos/mifos-web-repo/src/app/loans",
               "pattern": "Approve'|'Approve|actions/approve"
             },
-            "candidates": 4,
+            "candidates": 3,
             "readCandidates": 0
           },
           {
@@ -1192,7 +1200,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts",
               "pattern": "command|approve"
             },
-            "candidates": 10,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1203,7 +1211,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "loanActionButtons"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1275,7 +1283,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
               "pattern": "validateAccountStatus\\(loan, LoanEvent\\.LOAN_DISBURSED\\)|isNotValidDisbursement|cannot.disburse|disbursement.in"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -1503,7 +1511,7 @@
               "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java",
               "pattern": "onDeductionResult|repayLoan|getRepaymentAllocation|SUCCESS"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1515,7 +1523,7 @@
               "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
               "pattern": "queryAndSettle|book|PROCESSING|RETRY_NEEDED"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -1539,7 +1547,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoanTransactionsApiResource.java",
               "pattern": "@Path\\(\"/v1/loans|command.*repayment|is\\(commandParam, \"repayment\"\\)"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           }
         ],
@@ -2948,6 +2956,14 @@
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 0,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [],
           "readFiles": [],
@@ -3035,7 +3051,7 @@
         "readCalls": 34,
         "searchCalls": 64,
         "emptySearches": 16,
-        "candidateFiles": 153,
+        "candidateFiles": 144,
         "unreadCandidates": [
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/MiddleApplication.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java",
@@ -3068,7 +3084,7 @@
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/SimulatorProperties.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractProperties.java"
         ],
-        "unreadCandidateCount": 127,
+        "unreadCandidateCount": 118,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 10,
         "invalidInvestigationProxy": 26,
@@ -3098,23 +3114,31 @@
           "requirements": 3
         },
         "references": {
-          "total": 40,
-          "confirmed": 31,
+          "total": 39,
+          "confirmed": 30,
           "searchSeen": 8,
           "fileReadNotRange": 0,
           "unseen": 0,
           "pathOnly": 1,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [],
           "unconfirmed": [
             "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java:14-18",
             "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditApplicationOrder.java:17",
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
-            "CreditService.java:54-92",
-            "ExternalResultController.java:59-91",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java:54-92",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java:59-91",
             "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java:63-71",
-            "LoanWritePlatformServiceJpaRepositoryImpl.java:314-323",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java:314-323",
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanRepaymentCommandHandler.java:36",
-            "LoanDownPaymentHandlerServiceImpl.java:169"
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanDownPaymentHandlerServiceImpl.java:169"
           ],
           "readFiles": [
             "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
@@ -4084,7 +4108,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
               "pattern": "private String stateTransitions"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -4191,7 +4215,7 @@
               "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
               "pattern": "public void disburse|validateActivityNotBeforeClientOrGroupTransferDate|isDisbursed"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -4223,7 +4247,7 @@
               "path": "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java",
               "pattern": "submitPayment|callback|SUCCESS|REJECTED"
             },
-            "candidates": 4,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -4298,7 +4322,7 @@
               "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanDownPaymentHandlerServiceImpl.java",
               "pattern": "handleRepaymentOrRecoveryOrWaiverTransaction|determineAndTransition|REPAID_IN_FULL|LOAN_REPAYMENT"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -5567,7 +5591,7 @@
         "readCalls": 41,
         "searchCalls": 86,
         "emptySearches": 30,
-        "candidateFiles": 185,
+        "candidateFiles": 166,
         "unreadCandidates": [
           "repos/fineract-repo/fineract-e2e-tests-core/src/test/java/org/apache/fineract/test/data/LoanStatus.java",
           "repos/fineract-repo/fineract-investor/src/main/java/org/apache/fineract/investor/service/CreateExternalAssetOwnerLoanProductAttributeHandler.java",
@@ -5600,7 +5624,7 @@
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java",
           "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/Ids.java"
         ],
-        "unreadCandidateCount": 160,
+        "unreadCandidateCount": 141,
         "repeatedToolCalls": 0,
         "searchesWithoutRead": 22,
         "invalidInvestigationProxy": 52,
@@ -5630,21 +5654,29 @@
           "requirements": 3
         },
         "references": {
-          "total": 38,
-          "confirmed": 32,
+          "total": 37,
+          "confirmed": 31,
           "searchSeen": 4,
           "fileReadNotRange": 0,
           "unseen": 1,
           "pathOnly": 1,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
           "unseenReferences": [
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/serialization/LoanTransactionValidatorImpl.java:177-182"
           ],
           "unconfirmed": [
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
-            "LoanApplicationValidator.java:2153-2159",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/serialization/LoanApplicationValidator.java:2153-2159",
             "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/serialization/LoanTransactionValidatorImpl.java:177-182",
-            "fineract-core/.../provider/CommandHandlerProvider.java:91",
-            "LoanApplicationWritePlatformServiceJpaRepositoryImpl.java:133-176",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java:91",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java:133-176",
             "repos/mifos-web-repo/src/app/loans/loans.service.ts:339-342"
           ],
           "readFiles": [
@@ -5739,7 +5771,7 @@
             "read": false,
             "firstRound": null,
             "ranges": [],
-            "cited": false
+            "cited": true
           },
           {
             "key": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java",
@@ -6399,7 +6431,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
               "pattern": "public CommandProcessingResult disburseLoan|public CommandProcessingResult approveApplication|saveLoanOrNullFetcherAndCascadeReturn|LoanEvent.LOAN_APPROVED|LoanEvent.LOAN_DISBURSED"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -6810,7 +6842,7 @@
               "path": "repos/mifos-web-repo",
               "pattern": "disburse"
             },
-            "candidates": 11,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -6823,7 +6855,7 @@
               "path": "repos/mifos-web-repo/src",
               "pattern": "'disburse'|\"disburse\""
             },
-            "candidates": 4,
+            "candidates": 3,
             "readCandidates": 0
           },
           {
@@ -6835,7 +6867,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
               "pattern": "loanActionButtons"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -6869,7 +6901,7 @@
               "path": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts",
               "pattern": "loanActionButtons|'approve'"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 0
           },
           {
@@ -7022,7 +7054,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
               "pattern": "private String stateTransitions|@Path(\"\\{loanId\\}\")\\s*$|stateTransitions\\(loanId"
             },
-            "candidates": 2,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -7046,7 +7078,7 @@
               "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/serialization/LoanApplicationValidator.java",
               "pattern": "validateForCreate\\(final JsonCommand|approvedOnDate != null|APPROVED_ON_DATE"
             },
-            "candidates": 3,
+            "candidates": 1,
             "readCandidates": 1
           },
           {
@@ -7213,7 +7245,7 @@
               "path": "repos/loan-middle-repo/src/main/java",
               "pattern": "approve|APPROVE"
             },
-            "candidates": 3,
+            "candidates": 2,
             "readCandidates": 1
           },
           {

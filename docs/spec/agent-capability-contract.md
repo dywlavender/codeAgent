@@ -363,7 +363,7 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 工作目录仍是只读授权视图，但软链接不是安全边界。`grep`／`find` 默认不跟随符号链接；只读扩展不再请求全局 `--follow`，而是从本轮授权真实根目录分别检索，并通过 `CODEAGENT_PI_MOUNTS` 把结果路径映射回工作区。仓库内部指向其他目录的软链接因此不会被遍历。扩展同时在 `tool_call` 前拦截越界路径、主目录路径和指向授权范围外的入口符号链接；`codemode` 的内层工具调用同样受检。该扩展不是 OS 沙箱，不能替代进程级隔离；工作区只挂载本轮授权的仓库和资料。范围展开为空时在调用模型前拒绝，`None` 与空数组不得混用。
 
-Pi 的工具决策与调用顺序由模型决定；CodeAgent 的 Capability 只提供授权资料、状态和阅读指导。Pi 事件转换为既有 `model`／`tool`／`status`／`compaction`／`text` Trace 事件，模型调用在开始时写入 running、结束时补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，写入 usage／Trace；该核验只证明原文交付，`semanticProof` 保持 false。Pi 失败直接保存失败 Run 和 Trace，不自动回退旧 Runtime。
+Pi 的工具决策与调用顺序由模型决定；CodeAgent 的 Capability 只提供授权资料、状态和阅读指导。Pi 事件转换为既有 `model`／`tool`／`status`／`compaction`／`text` Trace 事件，模型调用在开始时写入 running、结束时补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，写入 usage／Trace；该核验只证明原文交付，`semanticProof` 保持 false。引用按独立 `path+line` 去重，Markdown 链接不得因文字和目标各匹配一次而重复计数；最终答案展示前只把临时绝对路径规范为工程相对路径，不改写模型原文。Pi 失败直接保存失败 Run 和 Trace，不自动回退旧 Runtime。
 
 Pi 会话身份包含资料版本：业务文档、需求和代码地图使用内容指纹，源码仓库使用文件名、大小和修改时间生成的元数据修订号；版本变化时重建会话。
 
@@ -413,7 +413,7 @@ class AgentRuntime(Protocol):
 
 事件继续使用现有 `eventType/subtype/payload` 信封；新增细节放 payload，不要求改前端。服务分配单调 sequence，Runtime 分配稳定 eventId/toolCallId；流式事件和 RuntimeResult.events 中同 ID 只持久化一次。至少记录 run/context、capability_status、model_request、model_response、tool_use、tool_result、verification、error、stop，并区分 `origin=model` 与 Legacy 的 `origin=workflow`。Direct 不产生程序自动调查工具调用。
 
-公开请求/响应、工具 schema、完整实际结果、来源与停止原因持续写工程 Trace。`usage.references` 保存引用与 Evidence ID；`usage.verification` 保存来源检查结果、缺口和 `semanticProof=false`；`usage.execution` 保存 Profile 定义、起始/实际能力状态、资料、会话指纹和运行设置。禁止记录认证头、密钥和模型私有思考。先持久化事件再向客户端发送；客户端断开不删除记录，写入失败不得报告成功。
+公开请求/响应、工具 schema、完整实际结果、来源与停止原因持续写工程 Trace。`usage.references` 保存引用与 Evidence ID；`usage.verification` 保存来源检查结果、缺口和 `semanticProof=false`；`usage.execution` 保存 Profile 定义、起始/实际能力状态、资料、会话指纹和运行设置。Pi 的 Trace 只保存模型调用摘要（阶段、工具名、响应文本、usage），以 `recordKind=message_summary`、`requestSnapshotAvailable=false` 标示，不能把空的 `messages/tools` 标记为完整请求快照。禁止记录认证头、密钥和模型私有思考。先持久化事件再向客户端发送；客户端断开不删除记录，写入失败不得报告成功。
 
 引用检查只核对已交付原文/行号/版本，不能在校验阶段从磁盘补证据、隐式调用工具或重新进入调查循环。无效引用保留校验失败及未确认提示，不能以通过格式检查宣称语义正确。答案应分别陈述当前实现、需求目标、业务约定及结构线索；冲突分别说明，不让一种证据覆盖另一种。
 

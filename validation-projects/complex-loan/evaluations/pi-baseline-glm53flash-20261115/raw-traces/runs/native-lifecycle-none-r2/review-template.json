@@ -1,4 +1,6 @@
 {
+  "reviewSchemaVersion": 2,
+  "reviewStatus": "unreviewed",
   "caseId": "native-lifecycle",
   "mode": "none",
   "repeat": 2,
@@ -12,34 +14,44 @@
   ],
   "checksReview": [
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 1,
+      "check": "状态定义在 LoanStatus 枚举（fineract-core 模块），列出 SUBMITTED_AND_PENDING_APPROVAL(100)、APPROVED(200)、ACTIVE(300)、CLOSED_OBLIGATIONS_MET(600) 等关键状态",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 2,
+      "check": "流转校验在 DefaultLoanLifecycleStateMachine（fineract-loan 模块），按 LoanEvent 事件判定，不是在 REST 层硬编码",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 3,
+      "check": "LOAN_APPROVED 只允许从 SUBMITTED_AND_PENDING_APPROVAL 转入 APPROVED；LOAN_DISBURSED 从 APPROVED（或结清后）转入 ACTIVE",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 4,
+      "check": "创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     },
     {
-      "met": null,
-      "candidateQuote": "",
-      "reason": "",
-      "evidence": ""
+      "index": 5,
+      "check": "command 经 CommandWrapperBuilder 构造为 entity=LOAN 的命令，按 @CommandType 注解路由到对应 Handler（如 LoanApplicationApprovalCommandHandler）",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
     }
   ],
   "issues": []
