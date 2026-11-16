@@ -76,6 +76,83 @@ class PiEvaluationMetricsTest(unittest.TestCase):
         self.assertEqual({"a": {"reads": 1, "searches": 1},
                           "b": {"reads": 0, "searches": 2}}, metrics["repos"])
 
+    def test_reference_provenance_separates_search_seen_and_unseen(self):
+        trace = {
+            "run": {
+                "workspace": "/tmp/workspace",
+                "usage": {"modelCalls": 1, "verification": {
+                    "semanticProof": False,
+                    "references": [
+                        {"path": "repos/a/X.java", "line": 1, "lineEnd": 1,
+                         "matchedPath": "repos/a/X.java", "fileRead": True,
+                         "confirmed": True},
+                        {"path": "Y.java", "line": 7, "lineEnd": 7,
+                         "matchedPath": "repos/b/Y.java", "fileRead": False,
+                         "confirmed": False},
+                        {"path": "Z.java", "line": 3, "lineEnd": 3,
+                         "matchedPath": "repos/b/Z.java", "fileRead": False,
+                         "confirmed": False},
+                        {"path": "notes.md", "line": None, "lineEnd": None,
+                         "matchedPath": None, "fileRead": False,
+                         "confirmed": False},
+                    ],
+                }},
+            },
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-1", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 1, "limit": 2},
+                    "output": "line1\nline2\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-1", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/b", "pattern": "needle"},
+                    "output": "repos/b/Y.java:7:  needle();\nrepos/b/Y.java-8-  next();\n"}},
+            ],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(4, refs["total"])
+        self.assertEqual(1, refs["confirmed"])
+        self.assertEqual(1, refs["searchSeen"])
+        self.assertEqual(1, refs["unseen"])
+        self.assertEqual(1, refs["pathOnly"])
+        self.assertEqual(0, refs["fileReadNotRange"])
+        self.assertEqual(["repos/b/Z.java:3"], refs["unseenReferences"])
+
+    def test_reference_ellipsis_path_matches_delivered_search_line(self):
+        trace = {
+            "run": {"usage": {"verification": {"references": [{
+                "path": "fineract-core/.../CommandHandlerProvider.java",
+                "line": 91, "lineEnd": 91, "matchedPath": None,
+                "fileRead": False, "confirmed": False,
+            }]}}},
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-1", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/fineract-repo", "pattern": "getHandler"},
+                    "output": "repos/fineract-repo/fineract-core/src/main/java/org/apache/"
+                              "fineract/commands/provider/CommandHandlerProvider.java:91:"
+                              "  public NewCommandSourceHandler getHandler(...\n"}},
+            ],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(1, refs["searchSeen"])
+        self.assertEqual(0, refs["unseen"])
+
+    def test_resume_requires_matching_batch_config(self):
+        with tempfile.TemporaryDirectory() as folder:
+            batch = Path(folder)
+            expected = {"requestedModel": "m", "cases": ["a"], "modes": ["none"],
+                        "repeats": 2, "thinking": None}
+            with self.assertRaises(ValueError):
+                evaluate_pi.check_resume(batch, expected)
+            (batch / "batch.json").write_text(json.dumps({**expected, "requestedModel": "x"}))
+            with self.assertRaises(ValueError):
+                evaluate_pi.check_resume(batch, expected)
+            (batch / "batch.json").write_text(json.dumps(expected))
+            evaluate_pi.check_resume(batch, expected)
+
     def test_plan_merges_suites_without_calling_models(self):
         root = Path(__file__).resolve().parents[1]
         evaluations = root / "validation-projects" / "complex-loan" / "evaluations"

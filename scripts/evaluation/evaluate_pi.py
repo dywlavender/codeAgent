@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -57,6 +58,9 @@ def _project_config(suite_path: Path, suite: dict, override: Path | None) -> Pat
 def _project_id(config: Path) -> str:
     value = _load(config)
     return str((value.get("project") or {}).get("id") or "").strip() or "evaluation"
+
+
+_GREP_LINE = re.compile(r"^(?P<path>.+?)(?P<sep>[:-])(?P<line>\d+)(?P=sep)")
 
 
 def _matches_key(path: str, key: str) -> bool:
@@ -224,7 +228,60 @@ def analyze_trace(trace: dict, keys=()) -> dict:
 
     references = (usage.get("verification") or {})
     reference_items = references.get("references") or []
+    search_lines: dict[str, set[int]] = {}
+    for call in ordered:
+        if call["name"] != "grep" or call["status"] != "completed":
+            continue
+        for line in (call.get("output") or "").splitlines():
+            match = _GREP_LINE.match(line)
+            if match:
+                search_lines.setdefault(relative(match.group("path")), set()).add(
+                    int(match.group("line")))
+
+    def resolve_path(value: str) -> str:
+        value = relative(value)
+        if not value or value in reads or value in search_lines:
+            return value
+        for candidate in list(reads) + [path for path in search_lines if path not in reads]:
+            if candidate.endswith("/" + value):
+                return candidate
+        if "..." in value or "…" in value:
+            expression = re.escape(value.replace("…", "...")).replace(r"\.\.\.", ".*")
+            matcher = re.compile(r"(?:^|/)" + expression + r"$")
+            for candidate in list(reads) + [path for path in search_lines if path not in reads]:
+                if matcher.search(candidate):
+                    return candidate
+        return value
+
+    reference_counts = {"confirmed": 0, "searchSeen": 0, "fileReadNotRange": 0,
+                        "unseen": 0, "pathOnly": 0}
+    unseen_references = []
+    for item in reference_items:
+        if item.get("confirmed"):
+            reference_counts["confirmed"] += 1
+            continue
+        path = resolve_path(str(item.get("matchedPath") or item.get("path") or ""))
+        line = item.get("line")
+        if line is None:
+            reference_counts["pathOnly"] += 1
+            continue
+        try:
+            start = int(line)
+            end = int(item.get("lineEnd") or line)
+        except (TypeError, ValueError):
+            reference_counts["pathOnly"] += 1
+            continue
+        if any(start <= number <= end for number in search_lines.get(path) or ()):
+            reference_counts["searchSeen"] += 1
+            continue
+        if item.get("fileRead"):
+            reference_counts["fileReadNotRange"] += 1
+        else:
+            reference_counts["unseen"] += 1
+        unseen_references.append(f"{path}:{start}" if end == start
+                                 else f"{path}:{start}-{end}")
     key_rows = []
+    key_round = None
     for key in keys:
         matched = [entry for path, entry in reads.items() if _matches_key(path, key)]
         cited = [str(item.get("matchedPath") or item.get("path") or "")
@@ -238,6 +295,18 @@ def analyze_trace(trace: dict, keys=()) -> dict:
             "ranges": [item for entry in matched for item in entry.get("ranges") or []][:12],
             "cited": bool(cited),
         })
+    if key_rows and all(item["read"] for item in key_rows):
+        key_round = max(item["firstRound"] or 0 for item in key_rows)
+    last_key_round = max((item["firstRound"] or 0 for item in key_rows if item["read"]),
+                         default=None)
+    tools_after_keys = sum(1 for call in ordered if key_round is not None
+                           and (call.get("round") or 0) > key_round)
+    searches_after_keys = sum(1 for call in search_calls if key_round is not None
+                              and (call.get("round") or 0) > key_round)
+    tools_after_last_key = sum(1 for call in ordered if last_key_round is not None
+                               and (call.get("round") or 0) > last_key_round)
+    searches_after_last_key = sum(1 for call in search_calls if last_key_round is not None
+                                  and (call.get("round") or 0) > last_key_round)
     return {
         "modelCalls": usage.get("modelCalls") or len(trace.get("calls") or []),
         "toolCalls": len(ordered),
@@ -256,7 +325,12 @@ def analyze_trace(trace: dict, keys=()) -> dict:
         "materialReads": roots(path for path in reads if not path.startswith("repos/")),
         "references": {
             "total": len(reference_items),
-            "confirmed": sum(1 for item in reference_items if item.get("confirmed")),
+            "confirmed": reference_counts["confirmed"],
+            "searchSeen": reference_counts["searchSeen"],
+            "fileReadNotRange": reference_counts["fileReadNotRange"],
+            "unseen": reference_counts["unseen"],
+            "pathOnly": reference_counts["pathOnly"],
+            "unseenReferences": unseen_references[:30],
             "unconfirmed": references.get("unconfirmed") or [],
             "readFiles": references.get("readFiles") or [],
             "semanticProof": references.get("semanticProof"),
@@ -268,6 +342,18 @@ def analyze_trace(trace: dict, keys=()) -> dict:
         "keyFiles": key_rows,
         "keyFilesRead": sum(1 for item in key_rows if item["read"]),
         "keyFilesTotal": len(key_rows),
+        "allKeyFilesRound": key_round,
+        "lastKeyFileRound": last_key_round,
+        "toolsAfterAllKeys": tools_after_keys,
+        "searchesAfterAllKeys": searches_after_keys,
+        "modelCallsAfterAllKeys": ((round_no - key_round)
+                                   if round_no is not None and key_round is not None
+                                   else None),
+        "toolsAfterLastKey": tools_after_last_key,
+        "searchesAfterLastKey": searches_after_last_key,
+        "modelCallsAfterLastKey": ((round_no - last_key_round)
+                                   if round_no is not None and last_key_round is not None
+                                   else None),
         "reads": [
             {"path": path, **entry}
             for path, entry in sorted(reads.items(),
@@ -398,24 +484,28 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
     for case_id, rows in groups.items():
         first = rows[0]
         lines.extend([f"## {case_id}", "", f"**问题**：{first['question']}", ""])
-        lines.extend(["| 组 | 重复 | 状态 | 模型 | 关键文件 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用确认 |",
-                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["| 组 | 重复 | 状态 | 模型 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 候选/未读 | 空搜索 | 无读取搜索 | 重复调用 | Token | 耗时 s | 引用 确认/搜索见/未交付 |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"])
         for row in rows:
             metrics = row.get("metrics") or {}
             refs = metrics.get("references") or {}
             key_text = (f"{metrics.get('keyFilesRead', 0)}/{metrics.get('keyFilesTotal', 0)}"
                         if metrics.get("keyFilesTotal") else "—")
+            not_delivered = ((refs.get("fileReadNotRange") or 0) + (refs.get("unseen") or 0)
+                             if refs else None)
             lines.append(
                 f"| {row['mode']} | {row['repeat']} | {row['status']} | "
                 f"{row.get('modelActual') or row.get('modelRequested') or '—'} | "
-                f"{key_text} | "
+                f"{key_text} | {metrics.get('lastKeyFileRound', '—')} | "
+                f"{metrics.get('toolsAfterLastKey', '—')}/{metrics.get('searchesAfterLastKey', '—')} | "
                 f"{metrics.get('modelCalls', '—')} | {metrics.get('toolCalls', '—')} | "
                 f"{metrics.get('uniqueReadFiles', '—')} | {metrics.get('searchCalls', '—')} | "
                 f"{metrics.get('candidateFiles', '—')}/{metrics.get('unreadCandidateCount', '—')} | "
                 f"{metrics.get('emptySearches', '—')} | {metrics.get('searchesWithoutRead', '—')} | "
                 f"{metrics.get('repeatedToolCalls', '—')} | "
                 f"{metrics.get('totalTokens', '—')} | {row.get('elapsedSeconds', '—')} | "
-                f"{refs.get('confirmed', '—')}/{refs.get('total', '—')} |")
+                f"{refs.get('confirmed', '—')}/{refs.get('searchSeen', '—')}/"
+                f"{not_delivered if not_delivered is not None else '—'} |")
         lines.extend(["", "**评测检查项（仅评测器）**", ""])
         lines.extend(f"{index}. {check}" for index, check in enumerate(first.get("checks") or [], 1))
         for row in rows:
@@ -428,10 +518,28 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
             missing = [item["key"] for item in metrics.get("keyFiles") or [] if not item["read"]]
             if missing:
                 lines.append("- 未读取的关键文件：" + "、".join(missing))
+            if metrics.get("allKeyFilesRound") is not None:
+                lines.append(
+                    f"- 关键文件齐备轮次：{metrics['allKeyFilesRound']}；之后工具 "
+                    f"{metrics.get('toolsAfterAllKeys')} 次、搜索 "
+                    f"{metrics.get('searchesAfterAllKeys')} 次、模型调用 "
+                    f"{metrics.get('modelCallsAfterAllKeys')} 次")
+            elif metrics.get("lastKeyFileRound") is not None:
+                lines.append(
+                    f"- 最后关键文件轮次：{metrics['lastKeyFileRound']}；之后工具 "
+                    f"{metrics.get('toolsAfterLastKey')} 次、搜索 "
+                    f"{metrics.get('searchesAfterLastKey')} 次、模型调用 "
+                    f"{metrics.get('modelCallsAfterLastKey')} 次")
             refs = metrics.get("references") or {}
             if refs.get("unconfirmed"):
-                lines.append("- 未核实引用：" + "、".join(
-                    str(item) for item in refs["unconfirmed"][:15]))
+                lines.append(
+                    f"- 读取原文未核实引用 {refs.get('confirmed')}/{refs.get('total')}，"
+                    f"其中搜索输出可见 {refs.get('searchSeen')}、"
+                    f"读取文件但行区间未交付 {refs.get('fileReadNotRange')}、"
+                    f"其它未出现 {refs.get('unseen')}、无行号 {refs.get('pathOnly')}")
+            if refs.get("unseenReferences"):
+                lines.append("- 未交付引用（读取原文与搜索输出均未出现）：" + "、".join(
+                    str(item) for item in refs["unseenReferences"][:10]))
             if metrics.get("unreadCandidates"):
                 lines.append("- 未读候选（启发式）：" + "、".join(
                     str(item) for item in metrics["unreadCandidates"][:10]))
@@ -445,6 +553,17 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
     report = "\n".join(lines) + "\n"
     (batch / "summary.md").write_text(report, encoding="utf-8")
     return summary
+
+
+def check_resume(output: Path, expected: dict) -> None:
+    """Validate that an existing batch can be continued with the same inputs."""
+    path = output / "batch.json"
+    if not path.is_file():
+        raise ValueError("--resume 需要批次目录中的 batch.json")
+    stored = _load(path)
+    mismatched = [key for key, value in expected.items() if stored.get(key) != value]
+    if mismatched:
+        raise ValueError("--resume 配置与已有批次不一致：" + "、".join(mismatched))
 
 
 def command_run(args) -> int:
@@ -484,18 +603,31 @@ def command_run(args) -> int:
             ensure_ascii=False, indent=2))
         return 0
     if output.exists() and any(output.iterdir()):
-        raise ValueError(f"输出目录非空，请保留原批次并使用新目录：{output}")
+        if not args.resume:
+            raise ValueError(f"输出目录非空，请保留原批次并使用新目录：{output}")
+        check_resume(output, {
+            "projectConfig": str(project_config), "projectId": project_id,
+            "cases": [case["id"] for case in cases], "modes": modes,
+            "repeats": args.repeats, "requestedModel": args.model,
+            "timeoutSeconds": args.timeout, "thinking": args.thinking,
+        })
     output.mkdir(parents=True, exist_ok=True)
-    _write(output / "batch.json", {
-        "suites": suites, "projectConfig": str(project_config),
-        "projectId": project_id, "cases": [case["id"] for case in cases],
-        "modes": modes, "repeats": args.repeats, "requestedModel": args.model,
-        "timeoutSeconds": args.timeout, "thinking": args.thinking,
-        "keysFile": str(args.keys_file) if args.keys_file else None,
-        "startedAt": _now(),
-    })
+    if not args.resume:
+        _write(output / "batch.json", {
+            "suites": suites, "projectConfig": str(project_config),
+            "projectId": project_id, "cases": [case["id"] for case in cases],
+            "modes": modes, "repeats": args.repeats, "requestedModel": args.model,
+            "timeoutSeconds": args.timeout, "thinking": args.thinking,
+            "keysFile": str(args.keys_file) if args.keys_file else None,
+            "startedAt": _now(),
+        })
     for index, (case, mode, repeat) in enumerate(plan, 1):
         folder = output / "runs" / f"{_safe_name(case['id'])}-{_safe_name(mode)}-r{repeat}"
+        if args.resume and (folder / "result.json").is_file():
+            print(f"[{index}/{len(plan)}] 已完成，跳过：{folder.name}", flush=True)
+            continue
+        if folder.is_dir() and any(folder.iterdir()):
+            raise ValueError(f"运行目录存在未完成文件，请人工确认后再续跑：{folder}")
         folder.mkdir(parents=True, exist_ok=True)
         print(f"[{index}/{len(plan)}] {case['id']} mode={mode} repeat={repeat}", flush=True)
         record = run_one(case, mode=mode, repeat=repeat, model=args.model,
@@ -538,6 +670,8 @@ def main() -> int:
     run.add_argument("--timeout", type=float, default=900)
     run.add_argument("--thinking")
     run.add_argument("--output", type=Path, required=True)
+    run.add_argument("--resume", action="store_true",
+                     help="续跑已有批次，只执行缺少 result.json 的运行")
     run.add_argument("--plan", action="store_true", help="只打印运行计划，不调用模型")
     report = sub.add_parser("report", help="从已有 runs 重新生成汇总")
     report.add_argument("--batch", type=Path, required=True)
