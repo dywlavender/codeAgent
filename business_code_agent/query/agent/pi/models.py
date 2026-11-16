@@ -1,4 +1,4 @@
-"""Read Pi's own model catalog through RPC for the online model selector.
+"""Discover Pi models and issue isolated text completions through RPC.
 
 The catalog belongs to Pi: providers, credentials and available models are
 resolved by the CLI, not by CodeAgent. Only safe display fields leave this
@@ -7,6 +7,8 @@ module so provider endpoints and credentials never reach the browser.
 
 from __future__ import annotations
 
+import os
+import shlex
 import tempfile
 import time
 import uuid
@@ -15,6 +17,7 @@ from typing import Any, Mapping, Sequence
 
 from business_code_agent.query.runtime import RuntimeErrorBase
 
+from .events import message_text
 from .process import PiProcess, PiProcessError
 
 
@@ -86,6 +89,58 @@ def read_model_catalog(command: Sequence[str], environment: Mapping[str, str], *
     actual = state_data.get("model") if isinstance(state_data.get("model"), Mapping) else {}
     return normalize_catalog(model_data, configured_model=configured_model,
                              actual_model=full_model_id(actual))
+
+
+def complete_text(system_prompt: str, prompt: str, *, timeout: float = 120.0) -> str:
+    """Run one Pi prompt with an empty workspace, no tools and no session."""
+    command = shlex.split(os.environ.get("BUSINESS_CODE_PI_COMMAND", "pi"))
+    if not command:
+        raise RuntimeErrorBase("Pi CLI 命令为空")
+    model = os.environ.get("BUSINESS_CODE_PI_MODEL", "").strip()
+    with tempfile.TemporaryDirectory(prefix="codeagent-pi-completion-") as folder:
+        args = [
+            *command, "--mode", "rpc", "--no-session", "--no-tools",
+            "--no-extensions", "--no-context-files", "--no-mcp", "--no-skills",
+            "--no-prompt-templates", "--no-themes", "--no-approve",
+            "--system-prompt", system_prompt, "--thinking", "off",
+        ]
+        if model:
+            args.extend(["--model", model])
+        process = PiProcess(args, cwd=Path(folder))
+        try:
+            process.start()
+            if model:
+                try:
+                    state = _request(process, "get_state", timeout=20.0).get("data") or {}
+                except RuntimeErrorBase as exc:
+                    raise RuntimeErrorBase("Pi 无法读取模型状态，请检查模型配置。") from exc
+                selected = state.get("model") or {}
+                if model not in {full_model_id(selected), selected.get("id")}:
+                    raise RuntimeErrorBase("Pi 未选中配置的模型，请检查 BUSINESS_CODE_PI_MODEL。")
+            process.send({"id": "complete", "type": "prompt", "message": prompt})
+            return _completion_result(process, timeout)
+        except PiProcessError as exc:
+            raise RuntimeErrorBase("Pi 建议生成服务未能启动或已停止，请检查 Pi 配置。") from exc
+        finally:
+            process.close()
+
+
+def _completion_result(process: PiProcess, timeout: float) -> str:
+    deadline = time.monotonic() + timeout
+    while (remaining := deadline - time.monotonic()) > 0:
+        record = process.receive(timeout=remaining)
+        if record is None:
+            break
+        if record.get("type") == "response" and record.get("id") == "complete" and not record.get("success"):
+            raise RuntimeErrorBase("Pi 拒绝了建议请求，请检查模型配置。")
+        if record.get("type") == "agent_end" and not record.get("willRetry"):
+            messages = record.get("messages") or []
+            assistant = next((item for item in reversed(messages) if item.get("role") == "assistant"), {})
+            answer = message_text(assistant).strip()
+            if assistant.get("stopReason") in {"stop", "end_turn"} and answer:
+                return answer
+            raise RuntimeErrorBase("Pi 未能返回完整建议，请检查模型服务后重试。")
+    raise RuntimeErrorBase("Pi 建议生成超时，请重试。")
 
 
 def _request(process: PiProcess, kind: str, *, timeout: float) -> Mapping[str, Any]:

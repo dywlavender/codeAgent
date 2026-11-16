@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Typography } from "antd";
 import { request, RequestAborted } from "../../lib/api.js";
+import { BusinessContextSuggestion } from "./BusinessContextSuggestion.jsx";
 
 const FILES = "/api/knowledge/context/files";
 const filePath = (name) => `${FILES}/${encodeURIComponent(name)}`;
@@ -14,6 +15,7 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
   const [pending, setPending] = useState("load");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   const creating = document?.content === null;
   const dirty = document && (creating ? Boolean(name || draft) : draft !== document.content);
@@ -23,11 +25,16 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
     setName(next?.name ?? "");
     setDraft(next?.content ?? "");
     setSaved(false);
+    setChecking(false);
   }
 
   function showError(reason) {
     if (reason instanceof RequestAborted) return;
     setError(reason.message);
+    checkAdminAccess(reason);
+  }
+
+  function checkAdminAccess(reason) {
     if (isAdminError(reason)) onRequireUnlock?.();
   }
 
@@ -75,7 +82,7 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
     showDocument({ name: "", content: null });
   }
 
-  async function save() {
+  async function save(content) {
     setPending("save");
     setError("");
     setSaved(false);
@@ -83,13 +90,15 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
       const result = await request(filePath(name.trim()), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ previousContent: document.content, content: draft }),
+        body: JSON.stringify({ previousContent: document.content, content }),
       });
       setFiles((folder) => ({ ...folder, items: [...new Set([...folder.items, result.name])].sort() }));
       showDocument(result);
       setSaved(true);
     } catch (reason) {
-      showError(reason);
+      if (checking) checkAdminAccess(reason);
+      else showError(reason);
+      return reason.message;
     } finally {
       setPending("");
     }
@@ -126,13 +135,18 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
               readOnly={!files.editable || Boolean(pending)} rows={16}
               style={{ fontFamily: "var(--font-code)" }}
               onChange={(event) => { setDraft(event.target.value); setSaved(false); }} />
-            {files.editable && <Flex justify="end">
-              <Button type="primary" onClick={save} loading={pending === "save"}
+            {files.editable && <Flex justify="end" gap={8} wrap>
+              {!creating && <Button onClick={() => setChecking(true)}
+                disabled={dirty || !draft.trim() || Boolean(pending)}>检查并提出修改建议</Button>}
+              <Button type="primary" onClick={() => save(draft)} loading={pending === "save"}
                 disabled={!dirty || !name.trim() || Boolean(pending)}>保存</Button>
             </Flex>}
           </Flex>
         </Card>
       ) : files && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无业务文档" />}
+      {checking && <BusinessContextSuggestion document={document} onClose={() => setChecking(false)}
+        onEdit={(content) => { setDraft(content); setSaved(false); setChecking(false); }}
+        onPublish={save} onError={checkAdminAccess} publishing={pending === "save"} />}
     </Flex>
   );
 }

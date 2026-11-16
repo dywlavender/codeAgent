@@ -157,6 +157,57 @@ class KnowledgeAdminApiTest(unittest.TestCase):
                 finally:
                     server.shutdown(); server.server_close(); thread.join(timeout=2)
 
+    def test_suggestions_use_only_the_selected_section_until_confirmed_save(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            knowledge = root / "business"
+            knowledge.mkdir()
+            document = knowledge / "rules.md"
+            original = "# 提款规则\n\n## 审核\n\n审核范围。\n\n## 例外\n\n原例外。\n"
+            document.write_text(original, encoding="utf-8")
+            config = root / "project.json"
+            config.write_text(json.dumps({"knowledge": {"businessContextRoot": "business"}}))
+            server = make_server(str(root / "knowledge.db"), port=0, project_config=str(config))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}/api/knowledge/context"
+            try:
+                payload = {"name": "rules.md", "previousContent": original,
+                           "note": "已确认审核适用范围更新。", "sectionStart": 3}
+                suggestion = {
+                    "action": "revise", "reason": "业务负责人已确认。",
+                    "replacement": "## 审核\n\n已确认的新范围。",
+                    "basis": ["已确认审核适用范围更新。"], "pendingQuestions": [],
+                }
+                response = "\u200b建议如下\n```json\n" + json.dumps(suggestion, ensure_ascii=False) + "\n```"
+                with patch("business_code_agent.api.server.complete_text",
+                           return_value=response) as complete:
+                    result = _json_request(f"{base}/suggest", payload)
+                    self.assertEqual("## 审核\n\n审核范围。\n\n", result["original"])
+                    model_input = json.loads(complete.call_args.args[1])
+                    self.assertEqual({"original": result["original"],
+                                      "additionalMaterial": payload["note"]}, model_input)
+                    self.assertEqual(original, document.read_text())
+                    approved = "# 提款规则\n\n## 审核\n\n已确认的新范围。\n\n## 例外\n\n原例外。\n"
+                    self.assertEqual(approved, result["proposalContent"])
+                    _json_request(f"{base}/files/rules.md",
+                                  {"previousContent": original, "content": approved}, method="PUT")
+                    with self.assertRaises(HTTPError) as stale:
+                        _json_request(f"{base}/suggest", payload)
+                    self.assertEqual(409, stale.exception.code)
+                    stale.exception.close()
+                    self.assertEqual(1, complete.call_count)
+                uncertain = {**suggestion, "action": "needs_confirmation", "pendingQuestions": ["业务口径？"]}
+                with patch("business_code_agent.api.server.complete_text",
+                           return_value=json.dumps(uncertain, ensure_ascii=False)):
+                    result = _json_request(f"{base}/suggest", {
+                        **payload, "previousContent": approved, "note": "代码删去了审核分支。"})
+                    self.assertEqual("needs_confirmation", result["action"])
+                    self.assertIsNone(result["proposalContent"])
+                    self.assertEqual(approved, document.read_text())
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=2)
+
 
 def _json_request(url: str, body: dict | None = None, token: str | None = None, *,
                   method: str = "POST") -> dict:

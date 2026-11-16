@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import threading
 from pathlib import Path
 
 
 _save_lock = threading.Lock()
+_heading = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$")
+_fence = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class BusinessContextConflict(ValueError):
@@ -28,7 +31,7 @@ class BusinessContextFiles:
         return {"items": items, "editable": self.editable}
 
     def read(self, name: str) -> dict:
-        return {"name": name, "content": self._path(name).read_bytes().decode("utf-8")}
+        return self._document(name, self._path(name).read_bytes().decode("utf-8"))
 
     def save(self, name: str, *, previous: str | None, content: str) -> dict:
         if not self.editable:
@@ -45,7 +48,11 @@ class BusinessContextFiles:
                 raise BusinessContextConflict("文档已更新。请重新打开最新原文，再合并你的修改。")
             if current != content:
                 self._replace(path, content)
-        return {"name": name, "content": content}
+        return self._document(name, content)
+
+    @staticmethod
+    def _document(name: str, content: str) -> dict:
+        return {"name": name, "content": content, "sections": markdown_sections(content)}
 
     def _path(self, name: str) -> Path:
         if (not isinstance(name, str) or not name.endswith(".md")
@@ -71,3 +78,25 @@ class BusinessContextFiles:
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def markdown_sections(content: str) -> list[dict]:
+    """Return inclusive line ranges, including each heading's subsections."""
+    lines = content.splitlines()
+    headings = []
+    fence = ""
+    for number, line in enumerate(lines, 1):
+        marker = _fence.match(line)
+        if marker:
+            if not fence:
+                fence = marker[1]
+            elif marker[1].startswith(fence) and not line[marker.end():].strip():
+                fence = ""
+            continue
+        if not fence and (match := _heading.match(line.lstrip("\ufeff"))):
+            headings.append((number, len(match[1]), match[2]))
+    sections = []
+    for index, (start, level, title) in enumerate(headings):
+        end = next((line - 1 for line, depth, _ in headings[index + 1:] if depth <= level), len(lines))
+        sections.append({"title": title, "startLine": start, "endLine": end})
+    return sections

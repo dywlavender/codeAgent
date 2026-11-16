@@ -35,6 +35,14 @@ knowledge/generated-code-map/
 
 管理员接口使用 `/api/projects/<projectId>/knowledge/context/files` 列出文档，并在路径后附编码后的 Markdown 相对路径读取或保存。保存请求包含 `content` 和打开时的 `previousContent`，新建文件时后者为 `null`。原文变化返回 HTTP 409。
 
+## AI 修订建议
+
+管理员可对已保存的文档选择整份或一个章节，填写变更说明、相关需求或代码调查结果。建议使用默认 Pi 模型，输入限于所选原文和补充材料。建议列出修改说明、建议正文、依据及待确认事项。生成建议后可在原文编辑器继续调整，或审阅后点击「确认并保存」。
+
+业务依据可注明来源及确认状态。需求表示目标，源码调查用于发现当前实现差异。只有授权业务方确认后，才能把推测写成业务约定。「待业务确认」的建议保留核对事项，管理员仍可回到原文独立修订。
+
+`POST /api/projects/<projectId>/knowledge/context/suggest` 接受 `name`、`previousContent`、`note` 和可选的章节起始行 `sectionStart`。带修改的建议返回完整待保存稿 `proposalContent`，发布使用同一 Markdown 保存接口。
+
 ## 推荐内容
 
 ### 业务术语

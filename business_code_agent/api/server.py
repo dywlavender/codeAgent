@@ -16,7 +16,10 @@ from business_code_agent.evaluation.service import EvaluationService
 from business_code_agent.codeintel.ast.service import AstService
 from business_code_agent.evaluation.retrieval_service import RetrievalEvaluationService
 from business_code_agent.knowledge.business_context import BusinessContextConflict, BusinessContextFiles
+from business_code_agent.knowledge.suggestions import InvalidSuggestion, suggest
 from business_code_agent.platform.projects import ProjectContext, ProjectRegistry, ProjectRegistryError
+from business_code_agent.query.agent.pi.models import complete_text
+from business_code_agent.query.runtime import RuntimeErrorBase
 from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryRuntimeError, QueryService
 from business_code_agent.query.workspace import WorkspaceManager
 
@@ -279,6 +282,23 @@ def make_server(
                     return
 
                 path, context = self._project_route(parsed)
+                if path == "/api/knowledge/context/suggest":
+                    if not self._require_admin(context):
+                        return
+                    body = self._body()
+                    try:
+                        suggestion = suggest(
+                            business_context_for(context), name=body["name"],
+                            previous=body["previousContent"], note=body["note"],
+                            section_start=body.get("sectionStart"), complete=complete_text,
+                        )
+                    except FileNotFoundError:
+                        self._json(404, {"error": "业务文档不存在"})
+                    except (InvalidSuggestion, RuntimeErrorBase) as exc:
+                        self._json(502, {"error": str(exc)})
+                    else:
+                        self._json(200, suggestion)
+                    return
                 project_config = str(context.config_path) if context.config_path else None
                 evaluations = evaluation_for(context)
                 ast = ast_for(context)
@@ -423,6 +443,8 @@ def make_server(
                                               scope=scope, mode=mode, model=model))
             except QueryBusyError as exc:
                 self._json(409, {"error": str(exc), "runId": exc.run_id, "code": "CONVERSATION_BUSY"})
+            except BusinessContextConflict as exc:
+                self._json(409, {"error": str(exc)})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
                 if stream_started:
                     try:
