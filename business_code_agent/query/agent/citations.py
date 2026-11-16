@@ -17,7 +17,7 @@ CITATION = re.compile(
 )
 
 
-def verify_references(answer: str, reads) -> dict:
+def verify_references(answer: str, reads, *, workspace=None) -> dict:
     """Check cited paths and line ranges against this run's delivered reads."""
     by_path: dict[str, list[dict]] = {}
     for data in reads:
@@ -27,9 +27,15 @@ def verify_references(answer: str, reads) -> dict:
         if not path:
             continue
         by_path.setdefault(str(path), []).append(data)
+    root = str(workspace).rstrip("/") if workspace else ""
     references = []
     for match in CITATION.finditer(answer or ""):
-        cited = match.group(1).lstrip("/")
+        cited = match.group(1)
+        if root:
+            candidate = cited if cited.startswith("/") else "/" + cited
+            if candidate.startswith(root + "/"):
+                cited = candidate[len(root) + 1:]
+        cited = cited.lstrip("/")
         if cited.startswith("./"):
             cited = cited[2:]
         line = int(match.group(2)) if match.group(2) else None

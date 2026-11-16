@@ -414,7 +414,8 @@ class PiEventAdapter:
         return str(value) if value else None
 
     def usage(self) -> dict[str, Any]:
-        verification = verify_references(self.answer(), self.reads)
+        verification = verify_references(self.answer(), self.reads,
+                                         workspace=self.workspace)
         return {
             "modelCalls": self.model_calls,
             "toolCalls": self.tool_calls,

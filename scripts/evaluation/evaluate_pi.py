@@ -90,8 +90,13 @@ def analyze_trace(trace: dict, keys=()) -> dict:
 
     def relative(value: str) -> str:
         path = str(value or "").replace("\\", "/")
-        if workspace and path.startswith(workspace + "/"):
-            path = path[len(workspace) + 1:]
+        if workspace:
+            if path.startswith(workspace + "/"):
+                path = path[len(workspace) + 1:]
+            else:
+                absolute = path if path.startswith("/") else "/" + path
+                if absolute.startswith(workspace + "/"):
+                    path = absolute[len(workspace) + 1:]
         if path.startswith("./"):
             path = path[2:]
         return path
@@ -255,6 +260,19 @@ def analyze_trace(trace: dict, keys=()) -> dict:
 
     reference_counts = {"confirmed": 0, "searchSeen": 0, "fileReadNotRange": 0,
                         "unseen": 0, "pathOnly": 0}
+
+    def read_covers(ranges, start: int, end: int) -> bool:
+        cursor = start
+        for low, high in sorted((int(a), int(b)) for a, b in ranges):
+            if high < cursor:
+                continue
+            if low > cursor:
+                return False
+            cursor = high + 1
+            if cursor > end:
+                return True
+        return False
+
     unseen_references = []
     for item in reference_items:
         if item.get("confirmed"):
@@ -270,6 +288,10 @@ def analyze_trace(trace: dict, keys=()) -> dict:
             end = int(item.get("lineEnd") or line)
         except (TypeError, ValueError):
             reference_counts["pathOnly"] += 1
+            continue
+        entry = reads.get(path)
+        if entry and read_covers(entry.get("ranges") or [], start, end):
+            reference_counts["confirmed"] += 1
             continue
         if any(start <= number <= end for number in search_lines.get(path) or ()):
             reference_counts["searchSeen"] += 1
