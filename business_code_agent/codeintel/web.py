@@ -104,10 +104,6 @@ class WebIndexer(JavaIndexer):
         lines = content.splitlines() or [""]
         module_name = path.stem
         module_kind = "PAGE" if any(part.lower() in {"page", "pages", "view", "views"} for part in path.parts) else "COMPONENT"
-        module_qualified = f"{relative}::{module_name}"
-        module_id = stable_id("SYM", file_id, module_qualified, "1")
-        self._symbol(module_id, file_id, module_kind, module_qualified, module_name, 1, len(lines))
-
         starts: dict[tuple[int, str], None] = {}
         for match in FUNCTION_RE.finditer(content):
             starts[(_line_number(content, match.start()), match.group(1) or match.group(2))] = None
@@ -115,6 +111,11 @@ class WebIndexer(JavaIndexer):
             name = match.group(1)
             if name not in {"if", "for", "while", "switch", "catch", "function"}:
                 starts[(_line_number(content, match.start()), name)] = None
+        # A declaration on line one can have the same name as its module.
+        module_qualified = relative if (1, module_name) in starts else f"{relative}::{module_name}"
+        module_id = stable_id("SYM", file_id, module_qualified, "1")
+        self._symbol(module_id, file_id, module_kind, module_qualified, module_name, 1, len(lines))
+
         ordered = sorted(starts)
         functions: list[tuple[int, int, str, str]] = []
         for index, (start, name) in enumerate(ordered):

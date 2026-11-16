@@ -27,7 +27,7 @@ def _iso_mtime(latest: float) -> str | None:
 
 
 def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
-                 content_digest: bool = True) -> dict:
+                 content_digest: bool = True, write_cache: bool = True) -> dict:
     """Return a comparable source stamp for the given repositories.
 
     ``content_digest=True`` aggregates per-file SHA-256 digests so touching a
@@ -82,7 +82,7 @@ def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
     if content_digest:
         stamp["contentDigest"] = (hashlib.sha256("".join(sorted(digests)).encode("utf-8")).hexdigest()
                                   if digests else None)
-    if cache_dirty and cache_path:
+    if cache_dirty and cache_path and write_cache:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
@@ -91,14 +91,16 @@ def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
     return stamp
 
 
-def current_stamp(saved_stamp, repositories: list[tuple[str, Path]], cache_path=None) -> dict:
+def current_stamp(saved_stamp, repositories: list[tuple[str, Path]], cache_path=None, *,
+                  write_cache: bool = True) -> dict:
     """Compute the stamp comparable against one saved AST metadata stamp.
 
     Versions generated before content digests existed keep comparing via the
     legacy mtime stamp, so their status does not change until regeneration.
     """
     if saved_stamp and "contentDigest" in saved_stamp:
-        return source_stamp(repositories, cache_path=cache_path, content_digest=True)
+        return source_stamp(repositories, cache_path=cache_path, content_digest=True,
+                            write_cache=write_cache)
     return source_stamp(repositories, cache_path=cache_path, content_digest=False)
 
 
@@ -120,7 +122,8 @@ class AstMaterial:
         self.index_path = self.root / "index.json"
 
     def _index(self) -> dict:
-        return _read_json(self.index_path, {"status": "missing", "currentVersionId": None})
+        value = _read_json(self.index_path, None)
+        return value if isinstance(value, dict) else {"status": "missing", "currentVersionId": None}
 
     def status(self) -> dict:
         """Report the snapshot state, re-checking the source stamp saved at generation."""
@@ -147,10 +150,11 @@ class AstMaterial:
             raise ValueError("请先准备项目配置中的本地代码仓库")
         return repositories
 
-    def _current_source_stamp(self, saved_stamp=None) -> dict | None:
+    def _current_source_stamp(self, saved_stamp=None, *, write_cache: bool = True) -> dict | None:
         try:
             return current_stamp(saved_stamp, self._source_repositories(saved_stamp),
-                                 cache_path=self.root / "source-stamp-cache.json")
+                                 cache_path=self.root / "source-stamp-cache.json",
+                                 write_cache=write_cache)
         except (OSError, KeyError, TypeError, ValueError):
             return None
 
@@ -162,4 +166,4 @@ class AstMaterial:
         metadata = _read_json(self.versions_root / version_id / "metadata.json", {})
         if not directory.is_dir():
             return None
-        return version_id, metadata, directory
+        return version_id, metadata if isinstance(metadata, dict) else {}, directory
