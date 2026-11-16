@@ -1,18 +1,5 @@
 # 项目协作指引
 
-## Direct 上下文管理（2026-11-15）
-
-- 优先在现有 Python Direct Runtime 中完善上下文，再分别验收文件工具和调查进展。Token 预算包含系统提示、工具定义、请求内容和输出预留，沿用 `BUSINESS_CODE_AGENT_CONTEXT_CHARS` 作为字符上限。
-- `BUSINESS_CODE_AGENT_CONTEXT_TOKENS` 显式启用同一循环内的上下文压缩。保留原问题和最近完整工具批次，优先收缩旧搜索的大结果。摘要调用计入调查耗时、模型调用和 token。预算紧张时可直接收缩上下文。
-- 调查摘要保留结论线索、未确认问题与已读路径。ReadLedger 在本轮恢复原文；最终引用检查依据交给答题模型的原文。跨轮复用摘要前核对会话范围和源文件版本。工具范围与结束决定仍由现有 Profile 和 Direct 循环负责。
-
-## Direct 调查证据与收尾（2026-11-15）
-
-- Question Contract v3 冻结。Direct 使用它保存原问题和模型登记的目标，逐字引文用于关联，分句与词面规则不参与收尾判定。
-- Evidence Ledger 关联用户目标、模型结论、实际交付的 Read 原文及必要关系。必要连接有单独的源码依据，两端文件的存在不足以确认连接。ReadLedger 继续负责已读区间及原文恢复。
-- Answer Closure 在同一 Direct 循环内核对资料类型、引用区间和已登记关系。提交若混用有效与无效引用，可向原模型退回一次，让它拆出有依据的结论和缺口。`BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED=true` 显式启用，Answer Checkpoint v2 保持默认关闭。
-- 执行终态、已登记目标覆盖和原问题完整性分别记录。答题质量以同题、同冻结资料、同模型的真实对照为依据。验证与后续边界见[迁移计划](docs/spec/agent-migration-plan.md)。
-
 ## Pi Runtime 统一问答主链（2026-11-15）
 
 - 在线问答默认使用 `PiAgentRuntime`，正常 API 入口固定进入 Pi；`BUSINESS_CODE_AGENT_PROFILE`／`BUSINESS_CODE_AGENT_RUNTIME` 不能再把在线问答切回 LangChain/Direct/Claude。旧 Runtime 只允许评测代码显式构造并注入。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`。Pi 负责模型、工具决策与调度、上下文压缩、会话和 Agent Loop；CodeAgent 只负责授权、RunContext、Trace、取消、持久化和业务问答增强。
@@ -23,7 +10,20 @@
 - Pi 最终答案的引用会按本轮实际交付的 `read` 原文核验路径与行区间，记录在 usage/Trace；`semanticProof=false`，核验通过不等于语义正确。空范围展开后没有仓库时，必须在调用模型前拒绝，不能回退为全部仓库。
 - Pi 回答末尾的“目标覆盖”小节由模型逐条声明问题关系及其证据；`usage.investigation.goalCoverage` 只把模型标为 `[已核实]` 且该条所有带行号引用都被本轮 `read` 确认（至少一条）的目标计为 verified，缺少交付证据的声明降为 unverified；全部 verified 才把 `complete` 记为 true，未声明时为 null。该标记不是语义证明，也不能替代人工 checks；停止判断以未完成目标为依据，不以关键文件数量或工具次数阈值为准。
 - Pi 真实问答评测使用 `scripts/evaluation/evaluate_pi.py`，直接调用生产 `QueryService` 与 `PiAgentRuntime`；题库 checks 只留在评测侧，答案、Trace、模型/资料版本和调查计数写入独立批次。搜索与未读候选只是代理指标，不是答案正确性评分。引用按独立源码引用去重（同一 path+line 只计一次），Markdown 链接只按目标或可匹配标签生成一条记录；grep 上下文行不得作为候选文件。逐项复核用 `review` 命令生成 `checks.md`，结论固定为 pass/partial/fail，并附答案原句与工程相对证据。该命令只校验复核结构、判定词、答案原句是否出现在 `answer.md`，以及证据是否为工程相对路径；它不打开证据文件或 Trace，不核对文件/行是否存在或内容是否支持判定，语义正确性仍需人工阅读源码确认。Pi 最终答案在输出前把临时绝对路径改为工程相对路径；Pi Trace 只保存模型调用摘要，不能标记为完整请求快照。
-- 8／16 题同模型真实对照与现有模式验收尚未完成，工程测试或单次真实运行不能替代答案质量验收；旧 Runtime 的删除与历史评测入口调整另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
+- 优先完成同模型、同题库、同源码的 Pi 质量基线，再按 Trace 区分未找到证据、已读但漏答与证据充足后的继续调查，用 none／backbone 验证业务知识增益。跨系统调查限同一工程授权范围。工程测试和单次实跑不能替代答案质量验收；Direct 实验不作为 Pi 的前置，旧 Runtime 删除另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
+
+## Direct 评测：上下文管理（2026-11-15）
+
+- 以下机制只在显式 Direct 评测中使用。Token 预算包含系统提示、工具定义、请求内容和输出预留，沿用 `BUSINESS_CODE_AGENT_CONTEXT_CHARS` 作为字符上限。
+- `BUSINESS_CODE_AGENT_CONTEXT_TOKENS` 显式启用同一循环内的上下文压缩。保留原问题和最近完整工具批次，优先收缩旧搜索的大结果。摘要调用计入调查耗时、模型调用和 token。预算紧张时可直接收缩上下文。
+- 调查摘要保留结论线索、未确认问题与已读路径。ReadLedger 在本轮恢复原文；最终引用检查依据交给答题模型的原文。跨轮复用摘要前核对会话范围和源文件版本。工具范围与结束决定仍由现有 Profile 和 Direct 循环负责。
+
+## Direct 评测：调查证据与收尾（2026-11-15）
+
+- Question Contract v3 冻结。Direct 使用它保存原问题和模型登记的目标，逐字引文用于关联，分句与词面规则不参与收尾判定。
+- Evidence Ledger 关联用户目标、模型结论、实际交付的 Read 原文及必要关系。必要连接有单独的源码依据，两端文件的存在不足以确认连接。ReadLedger 继续负责已读区间及原文恢复。
+- Answer Closure 在同一 Direct 循环内核对资料类型、引用区间和已登记关系。提交若混用有效与无效引用，可向原模型退回一次，让它拆出有依据的结论和缺口。`BUSINESS_CODE_AGENT_ANSWER_CLOSURE_ENABLED=true` 显式启用，Answer Checkpoint v2 保持默认关闭。
+- 执行终态、已登记目标覆盖和原问题完整性分别记录。答题质量以同题、同冻结资料、同模型的真实对照为依据。验证与后续边界见[迁移计划](docs/spec/agent-migration-plan.md)。
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）
 

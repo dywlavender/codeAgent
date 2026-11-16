@@ -1,17 +1,19 @@
 # Pi 问答质量基线：纯源码与 Business Context 配对实验（2026-11-15）
 
-> 状态：进行中。16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。lifecycle 修复验证完成 4 次：`none` 2/2 completed，`backbone` 2/2 因上游额度耗尽 failed。剩余运行因同一额度问题暂停，恢复后继续。
+> 当前：`gpt-6-luna` 的 4 题 8 次真实配对已完成。8 次均返回答案，逐项复核 42 项中 17 项通过、14 项部分通过、11 项未通过。尚未验证 Business Context 带来稳定增益。见[本轮真实对照](#本轮真实对照2026-11-16)。
+
+> 旧 glm 批次：16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。lifecycle 修复验证完成 4 次：`none` 2/2 completed，`backbone` 2/2 因上游额度耗尽 failed。其余旧批次运行因同一额度问题暂停。
 >
-> 2026-11-16 起问答默认模型改为 `deepseek/gpt-6-luna`。本记录已有的 7 次基线均为 `zcode/glm-5.3-flash`，不能与 gpt-6-luna 续跑或混算；gpt-6-luna 需要新批次基线。
+> 2026-11-16 起问答默认模型改为 `deepseek/gpt-6-luna`。以下旧批次使用 `zcode/glm-5.3-flash`，与本轮分开记录。
 >
 > 2026-11-16 复核补充：原始 Trace 已归档到各批次 `raw-traces/`；引用统计改为按独立源码引用去重，旧的正则命中次数统计作废；关键运行的逐项复核已落为 `checks.md`。下表引用列均为修正后数据。
 
-## 结论摘要（阶段性）
+## 旧批次结论摘要
 
 - native-frontend：4 次运行都覆盖 5/6 检查项，第 6 项未被逐字声明但也没有把业务规则归到前端；没有发现凭空编造的路径或行号。低“引用确认率”主要因为生产核验只承认 `read` 原文，多数未确认引用实际在 grep 输出中可见。主要问题是末键后仍执行 5—36 次工具、3—22 次搜索，成本 0.33M—1.13M Token；A/B 正确性无可见差异，成本差异在两次重复内波动很大。
 - native-lifecycle：两次 none 都只读到 3/6 关键文件，连续漏掉 `CommandWrapperBuilder → 命令总线 → @CommandType → Handler` 这一层（check 5），无效调查代理 22/30；backbone r1 读到 4/6，仍未覆盖该层，并把成本推到 248 次工具、6.63M Token。该缺口的直接原因是 Pi 使用自建系统提示且带 `--no-context-files`，工作区已有的调查契约（“找到第一个入口并不代表问题已回答”）没有进入 Pi。
 - 针对性修复后，lifecycle `none` 两轮都显著改善了命令路由关系：r1 覆盖 `CommandWrapperBuilder → 命令总线 → @CommandType → DisburseLoanCommandHandler`，r2 覆盖命令总线、注册表和审批/放款 Handler。逐项复核 r1 为 3 项通过、2 项部分通过、0 项未通过（检查项 4 未核实 Fineract 审批 REST 入口；检查项 5 缺审批 Handler 分发），r2 为 4 项通过、1 项部分通过、0 项未通过（检查项 5 未明确指出和读取 `CommandWrapperBuilder`），不能表述为 check 5 完整通过。关键文件分别为 6/6 和 4/6，成本 3.41M Token/542.7 秒与 6.16M Token/895.6 秒。第二轮接近 900 秒超时，修复改善了关系覆盖，但没有解决成本与停止问题。`backbone` 两轮因上游额度错误没有有效答案，Business Context 的修复后对照尚不成立。
-- 尚未完成的 `v2-strategy-code`、`biz-payment-pending` 决定不了 Business Context 是否有价值；现在不能据此下结论。
+- 旧批次未跑 `v2-strategy-code` 和 `biz-payment-pending`，不能据该批次判断 Business Context 的价值。
 
 ## 实验设置
 
@@ -178,9 +180,65 @@
   - 完整 `native-frontend` 题目再次运行：12 次模型调用、读取 2/8 关键文件后，第 13 次模型请求返回 `Request timed out.`（总耗时 238.4 秒），没有最终答案。完整题仍受上游请求超时限制，不能用这两个定向小样本替代基线或答案质量验收。
   - 两个定向小样本不是冻结题库运行，不能与 16 次基线指标混算；它们只证明最终路径、引用核验边界和目标覆盖解析在真实模型输出上可工作，不证明停止收敛或答案质量改善。
 
-## 下一步（2026-11-16 复核后）
+## gpt-6-luna 完整题基线准备与离线复核（2026-11-16）
 
-1. 用修正后的评测器重跑同配置配对：固定源码、提示指纹、模型与评分标准；gpt-6-luna 需要新批次，不能与 glm 批次混算或续跑。
-2. 额度恢复后补跑基线剩余 9 次与修复后的 `backbone` 两轮；先补同模型对照，再判断 Business Context 是否有价值。
-3. 末键后证据指标和轻量目标覆盖检查已实现；额度恢复后在同一冻结源码上开启目标覆盖重跑 lifecycle 与 native-frontend，对照人工 `checks.md`、`goalCoverage` 和末键后证据，判断提示是否改善停止与关系覆盖。暂不开发 Coordinator、完整 Agent Loop 或 Evidence Ledger/Answer Closure。
-4. 完成上述对照后，再决定是否启用 Evidence Ledger / Answer Closure；当前不作为默认前置。
+使用现行 Pi 主链准备首批 8 次配对：`native-frontend`、`native-lifecycle`、`v2-strategy-code`、`biz-payment-pending` 各跑一次 `none` 和 `backbone`。固定两份现有题库及 checks、`deepseek/gpt-6-luna`、Pi 1.5.0、thinking off、每次最多 900 秒。使用 `scripts/evaluation/evaluate_pi.py`，每次启动独立会话，checks 不进入模型提示。与旧模型数据和定向问法分别归档。
+
+从项目根目录核对运行计划（`--plan` 不调用模型）：
+
+```bash
+.venv/bin/python scripts/evaluation/evaluate_pi.py run \
+  --suite validation-projects/complex-loan/evaluations/complex-loan.json \
+  --suite validation-projects/complex-loan/evaluations/complex-loan-diagnostic-v3.json \
+  --case native-frontend --case native-lifecycle --case v2-strategy-code --case biz-payment-pending \
+  --modes none,backbone --repeats 1 --model deepseek/gpt-6-luna --thinking off --timeout 900 \
+  --keys-file validation-projects/complex-loan/evaluations/pi-quality-keys-20261115.json \
+  --output .data/evaluations/pi-luna-quality-baseline-20261116-live --plan
+```
+
+8 次预检均准备了预期资料：两组共有 5 个源码仓库及需求原文，`backbone` 只额外增加业务补充知识；各次共有资料的版本一致。预检在 Pi 创建本机凭据锁时失败，Trace 中没有模型调用，也没有最终答案。预检留在本地 `.data/evaluations/pi-luna-quality-baseline-20261116/`，不进入质量评分。经用户确认资料范围和接收方后，另开批次实跑。
+
+用当前评测器重放已经归档的真实 Trace，并抽查原文：
+
+| 观察 | 证据 | 对应的验收重点 |
+| --- | --- | --- |
+| 未读到必要链路 | gpt-6-luna 旧版 `native-frontend/none` 正常结束，但只读取 2/8 个关键文件；审批、放款、还款组件都未读。既有复核为 1 项通过、4 项部分、1 项未通过 | 先核对各动作对应的组件 → Service → 端点关系是否实际交付 |
+| 读到了局部证据，答案未包含关系 | glm `native-lifecycle/backbone/r1` 第 39 轮读取 `CommandWrapperBuilder.java:1090-1136`（含 `1110-1116` 的 LOAN/APPROVE 绑定），最终没解释该绑定，也没读审批 Handler 和注册表 | 区分已读局部代码未写入答案，与未找到完整关系；单纯扩大搜索解决不了前者 |
+| 关键位置后仍继续搜索 | glm `native-frontend/none/r2` 在第 14 轮读齐 8/8，随后 36 次工具、22 次搜索，其中 17 次提供新读取或新候选被读，10 次不增加已交付证据，6 次只增加未读候选，其余 3 次不分类。第 19、21 轮分别读后端 REST 文件 | 按题目需要判断新增证据是否必要，不能把末键后工具一律算浪费，也不能把读齐清单当作生产停止阈值 |
+| 目标自报与原问题覆盖口径不同 | gpt-6-luna [三方法定向样本](../../../validation-projects/complex-loan/evaluations/pi-coverage-smoke-targeted-20261116/summary.md) 为 3/3 verified；问题只要求三个已知 service 方法，未要求前端页面、前缀、租户和认证 | 完整题需逐项核对题库和源码；`goalCoverage.complete` 不能替代 |
+
+**补充语义错误**：glm [lifecycle 修复版 none/r2](../../../validation-projects/complex-loan/evaluations/pi-lifecycle-fix-ab-20261116/raw-traces/runs/native-lifecycle-none-r2/answer.md) 给出“需先补 approve 命令或创建时带 `approvedOnDate`”。后半条与冻结源码冲突。创建时调用 `LoanApplicationValidator.java:237-242`；其支持字段列表（143–179 行）没有 `approvedOnDate`，1987–1992 行检查未支持的字段。`Loan.java:560` 明确把新借据置为待审批。实际审批入口是 `LoansApiResource.java:1323-1324`。源码位于 [验证工程的冻结 Fineract 仓库](../../../validation-projects/complex-loan/VERSIONS.md)。旧逐项评分保留；新批次复核时单独记此类超出证据的修复建议。
+
+## 本轮真实对照（2026-11-16）
+
+使用和在线问答相同的 `QueryService → PiAgentRuntime`。实际模型均为 `deepseek/gpt-6-luna`，Pi 1.5.0，thinking 关闭，4 题各模式各跑 1 次。运行记录确认两组共享同版本的 5 个源码仓库及需求，只有 `backbone` 额外挂载业务知识。8 次都以正常终态返回答案；策略题 `backbone` 经上游自动重试后完成。未测试默认 `combined` 模式。
+
+答案、Trace、运行摘要和逐项评分保存在本地 `.data/evaluations/pi-luna-quality-baseline-20261116-live/`。`checks.md` 记录答案原句、源码与判定理由；下表的通过数来自对照源码的逐项复核。关键文件和自报目标用于排查过程。
+
+| 题目 | 模式 | 通过／部分／未通过 | 关键文件 Read | 自报目标经核验 | 引用确认 | 模型／工具次数 | 耗时（秒） |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| native-frontend | none | 1／4／1 | 3/8 | 4/8 | 7/10 | 14／13 | 281.24 |
+| native-frontend | backbone | 2／2／2 | 3/8 | 2/7 | 7/8 | 12／11 | 232.66 |
+| native-lifecycle | none | 0／0／5 | 0/6 | 5/6 | 18/19 | 8／7 | 208.75 |
+| native-lifecycle | backbone | 2／3／0 | 2/6 | 1/6 | 4/8 | 14／13 | 239.08 |
+| v2-strategy-code | none | 3／1／1 | 3/6 | 3/5 | 7/15 | 17／16 | 339.34 |
+| v2-strategy-code | backbone | 3／1／1 | 3/6 | 2/4 | 7/9 | 11／9 | 197.15 |
+| biz-payment-pending | none | 4／1／0 | 5/7 | 5/7 | 18/19 | 20／19 | 392.90 |
+| biz-payment-pending | backbone | 2／2／1 | 0/7 | 0/4 | 0/1 | 5／4 | 166.89 |
+
+`none` 共 8 项通过、6 项部分通过、7 项未通过，55 次工具，约 123 万累计 Token；`backbone` 共 9 项通过、8 项部分通过、4 项未通过，37 次工具，约 69 万累计 Token。八个答案均有缺口。每个条件只有一次，成本差异同时反映了调查深度和模型波动。
+
+- `native-frontend`：两组均只读到 3/8 个关键文件，且没有还款组件的完整调用链。`none` 说明了统一拦截器和租户认证，但将创建请求指向抵押物模板的行；`backbone` 核实了单笔操作，未回答前缀、租户和认证。
+- `native-lifecycle`：题目没直接点名 Fineract，但明确问账户状态。`none` 的 5 次读取全部在中台，解释了授信申请和提款单，遗漏借据账户全链路。它自报 5/6 个目标经引用核验，题库 0/5 项通过。`backbone` 找对 Fineract 账户和 REST 入口，仍未核实审批前置状态及命令如何分派给 Handler。
+- `v2-strategy-code`：两组均答对请求值和普通还款分配顺序，均遗漏 `LoanAssemblerImpl` 根据产品设置决定采用请求值还是产品值的分支，也没追到中台使用还款分配结果。两组引用的普通还款行号均偏离执行片段（处理器第 131–144 行）。`none` 最后一次读到关键文件后再执行 7 次工具，没有交付新证据；重复正文已出现在 Trace 保存的最后一条模型响应里。
+- `biz-payment-pending`：两组都能说清外部付款、入账和额度占用的区别。`none` 查源码给出了重试上限和先查借据 ACTIVE 的顺序，却误导用户等待 `RESULT_UNCONFIRMED` 自动查单；实际定时任务只主动查询超时的 `PROCESSING`。`backbone` 两次 `codemode` 出错后只搜索业务文档和需求，没有读源码，遗漏了重试上限和防重顺序；部分需求引用保留临时工作区路径。
+
+前三题没有交付业务文档内容，无法用它解释组间差异。付款题确实使用了 `cross-system.md` 的搜索结果解释“本金才恢复额度占用”，但共同的需求原文也有这条规则，`none` 也正确回答了。这个样本证明业务资料能被使用，尚未证明它补足了仅凭共同资料无法回答的问题。
+
+本轮没有记录到 Pi 上下文压缩。6 次 `codemode` 均遇到脚本语法错误，未调用其参数中指定的子工具；部分运行改用单工具继续调查。早停、证据缺口和无关搜索均可见，不能据此认定上下文压缩是主因。
+
+## 后续验收
+
+1. 优先核实模型调查的对象与用户原问是否一致，以及关键关系是否有源码依据。用生命周期原题、前端原题和付款原题分别复现答错对象、关系遗漏和文档代替实现的问题。观察 `codemode` 失败后能否用单工具补完必要证据。
+2. 同模型、同源码、同题库复跑并增加重复，再对比每次只改一项的结果。区分未取得证据、已取得但漏答，以及继续搜索未增加证据；用题库检查项评判效果。暂不移植 Direct 的调查或收尾模块。
+3. `biz-payment-pending` 同时包含可直接从源码核实的状态和业务语义，不能单题证明知识增益。扩大对照时，另选有独立依据的术语、系统职责和隐式关系题，并保留纯源码题作为对照。业务价值通过对照后，再评估自动维护。

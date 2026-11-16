@@ -1,8 +1,8 @@
 # CodeAgent V2 迁移与验收计划
 
-状态：V2 设计冻结，`core-v1` 和 `core-business-v1` 已显式开放，生产默认使用 Legacy。Direct 的 Evidence Ledger 与 Answer Closure 作为独立实验接入，真实答案质量仍按对应对照验收。
+状态：在线问答已统一到 Pi（见[第 10 节](#10-pi-runtime-统一问答主链2026-11-15已实现并默认启用)）。当前验收重点是问答质量、调查停止与 Business Context 增益；`core-v1`、`core-business-v1` 和 Direct 的证据与上下文能力保留为独立实验。
 
-依据见[V2 总体架构](agent-architecture-v2.md)和[能力与运行合同](agent-capability-contract.md)。第 1–7 节保留设计冻结时的基线及验收记录，实现进度见第 8 节起。
+在线行为见[当前架构](architecture.md)。第 1–7 节保留设计冻结时的基线和验收计划，第 8–9 节记录 Direct 实验，第 10 节记录 Pi 实现与后续验收。通用边界见[V2 总体架构](agent-architecture-v2.md)和[能力与运行合同](agent-capability-contract.md)。
 
 ## 1. 当前基线与保护范围
 
@@ -613,6 +613,16 @@ Question Contract v3 冻结，保留原问题和模型登记的目标，停止�
 - **工具**：只开放 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接；只读扩展从授权真实根目录搜索并通过 `CODEAGENT_PI_MOUNTS` 映射回工作区路径，不使用全局 `--follow`，仓库内部软链接不会扩大授权范围。扩展仍在执行前拦截越界路径，但不是 OS 沙箱。
 - **会话**：CodeAgent `conversationId` 映射到工程数据目录 `pi-sessions/` 下的 Pi 会话文件；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档与需求使用内容指纹，源码仓库使用文件元数据修订号；资料变化会隔离旧会话。旧 LangChain 会话不直接复用，历史答案仍可查看。
 - **Trace 与引用**：Pi 事件转换为现有 `model`／`tool`／`status`／`compaction`／`text` 事件；模型调用在 `message_start` 即写入 running，`message_end` 补响应，取消时标记 cancelled。最终答案引用按本轮实际交付的 `read` 输出核验路径与行区间，结果写入 usage／Trace，`semanticProof=false`；不新增模型评审。回答末尾的“目标覆盖”小节由模型声明问题关系及证据，`usage.investigation.goalCoverage` 只把该条所有带行号引用都被本轮 `read` 确认（至少一条）的 `[已核实]` 目标计为 verified，全部 verified 才记 `complete=true`，未声明为 null；该标记不是语义证明，停止仍由 Pi 自主决定，不以关键文件数量或工具次数阈值代替目标覆盖。引用按独立 `path+line` 去重，Markdown 链接不因文字和目标各匹配一次而重复计数；最终答案展示前只把临时绝对路径规范为工程相对路径。Pi 模型调用记录是摘要，`requestSnapshotAvailable=false`，不能标记为完整请求快照。
-- **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（默认 `deepseek/gpt-6-luna`；留空才使用 Pi 自身默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
+- **配置**：`BUSINESS_CODE_PI_COMMAND`（默认 `pi`）、`BUSINESS_CODE_PI_MODEL`（模板预设 `deepseek/gpt-6-luna`；留空使用 Pi 自身默认模型）、`BUSINESS_CODE_PI_TIMEOUT`（默认 600 秒）、`BUSINESS_CODE_PI_THINKING`。启动前检查 CLI 版本、实际模型、只读搜索扩展命令和授权仓库；任一不满足明确失败，不自动降级。
 
-验证：Pi 专项 33 项、全量后端 526 项及 96 个子测试通过；真实 API/SSE 已完成源码问答、同会话追问和取消三次运行。验收修复后又完成一次默认 Pi 的真实 grep 冒烟（`RUN-bd5a78cf89db4950a534ed0b3f688bed`），返回 `repos/...` 与代码地图的工作区路径；并完成一次真实扩展加载检查。修复覆盖空范围拒绝、在线旧链封存、Pi 引用核验、资料版本会话隔离和搜索软链接边界。该验证只证明链路和授权／引用／会话工程行为可用，不证明相对旧链的答案质量收益；目标覆盖提示与 `goalCoverage` 解析已用 gpt-6-luna 定向小样本验证格式与核验链路（3/3 verified），但完整题仍受上游请求超时限制，未验证停止收敛或答案质量改善；Codemode 真实运行、8／16 题同题同模型对照与现有模式验收仍未完成。
+工程验证：Pi 专项 33 项、全量后端 526 项及 96 个子测试通过。真实 API/SSE 已完成源码问答、同会话追问和取消；另有真实搜索与扩展加载验证。这些记录覆盖链路、授权、引用和会话行为。目标覆盖提示与 `goalCoverage` 解析在三方法定向样本中分别通过了格式与引用核验。
+
+问答质量：2026-11-16 已使用 `deepseek/gpt-6-luna` 在生产问答链路完成 4 题 `none`／`backbone` 配对，共 8 次。逐项复核通过 17/42；生命周期题出现 5/6 自报目标通过引用核验、但 0/5 题库检查项通过的情况。业务知识在付款题被实际使用，未观察到独有的正确性增益。完整题库和默认 `combined` 模式尚待验收。见[真实基线](../records/2026-11/pi-quality-baseline-20261115.md#本轮真实对照2026-11-16)。
+
+后续按以下顺序验收：
+
+1. 先使用固定模型、源码和题库完成关键题的真实问答基线。正常终态、模型自报目标覆盖、人工检查正确性和调查成本分别记录。
+2. 按 Trace 区分未取得证据、证据已取得但遗漏关系、取得必要证据后继续扩张。基线能复现问题后再做针对性修改，并使用同一设置做前后对照。
+3. 比较 `none` 与 `backbone`，重点检验术语、跨系统职责和隐式关系。代码实现仍回到源码核实。验证业务知识增益后，再评估知识自动维护。
+
+当前保留 Pi 循环。Question Contract、Evidence Ledger、Answer Closure 和 Context Manager 仍是 Direct 实验；是否接入轻量增强由真实缺口决定，旧 Runtime 的删除另行确认。

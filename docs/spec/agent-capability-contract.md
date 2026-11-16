@@ -1,8 +1,8 @@
 # CodeAgent V2 能力与运行合同
 
-状态：接口设计冻结；`core-v1` 阶段 1 与 `core-business-v1` 阶段 2 最小子集已实现，完整合同其余部分尚未实现。确认日期：2026-11-13。
+状态：接口设计于 2026-11-13 冻结；`core-v1` 和 `core-business-v1` 最小子集已实现，供显式 Direct 评测。在线问答的实际装配、会话和工具见[当前架构](architecture.md)，其循环由 Pi 负责。
 
-本文是 V2 的规范性接口；[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)说明如何接入现有代码。下列 Python 是完整目标合同，不是已全部实现的模块清单。阶段 1 已实现 `RunContext`、`MaterialSource`/`prepare_core`、简易 `FileCapability`、`DirectAgentRuntime` 以及 `QueryService` 接入；`RunAccess` 联动、结构版本和复杂 Evidence 仍未实现。完整合同用于后续能力阶段，不要求现在复制所有类型。
+本文保留 V2 的授权与证据原则以及 Direct 实验接口。[总体架构](agent-architecture-v2.md)说明职责，[迁移计划](agent-migration-plan.md)记录实现与验收。下列 Python 是 Direct 设计合同，不代表 Pi 已实现这些接口。阶段 1 已实现 `RunContext`、`MaterialSource`/`prepare_core`、简易 `FileCapability`、`DirectAgentRuntime` 以及 `QueryService` 接入；`RunAccess` 联动、结构版本和复杂 Evidence 仍未实现。
 
 ### 合同成熟度与实施边界
 
@@ -408,7 +408,7 @@ class AgentRuntime(Protocol):
 沿用当前 RuntimeResult 的 `answer, runtime_session_id, events, usage, status` 和序列化键，不为每个能力定义另一套 Answer。现有 normalize_runtime_result 继续用于兼容；本阶段不改签名。未来 LegacyAdapter 将 context 转为当前 `workspace/session_id/repositories/preparation` 输入，适配位于 query 边界，不要求修改旧 LangChainRuntime。
 
 - RuntimeSettings 是会话核对前解析的公开有效设置；端点须去除认证信息，model_parameters 仅允许非敏感的有效模型参数，深复制/冻结后使用。凭证由组合根单独注入模型连接，不参与此对象。运行中不得再修改设置；其 runtime_revision/system_prompt 随实现或提示变化参与指纹。
-- 生产 RunOptions 两项为 None，无模型调用次数/调查总时长限制。有界评测可明确传正值，max_seconds 从 ask 开始计时，调用额度包含必要的最终答题调用；到限时不能超限再请求模型，保留已有输出/缺口与 `stopReason`。该参数不能改变 Profile 授权，必须与工厂绑定及会话指纹中使用的值相同。
+- Direct 未设限时两个 RunOptions 均为 None。有界评测可明确传正值，max_seconds 从 ask 开始计时，调用额度包含必要的最终答题调用；到限时保留已有输出/缺口与 `stopReason`。该参数不能改变 Profile 授权，必须与工厂及会话的实际运行设置一致。Pi 使用独立的运行超时。
 - 模型连接、上下文容量、单次网络超时由 RuntimeFactory 按已冻结 RuntimeSettings 注入并保存，不在每个工具中重新读 `.env`。取消检查在模型请求前后及工具边界执行，能中断可取消的请求；不能在取消后继续安排新工具。
 - `status=completed` 表示本次执行成功产生回答，不表示业务问题完全解决。`cancelled` 允许空答案；有界运行达到显式调用次数或总时长限制时返回 `incomplete`（`stopReason=budget`），不得记为 `completed`。失败通过现有 RuntimeErrorBase 体系抛出，由服务记录 failed，不填造回答。required 预检失败映射 RequiredToolUnavailable/QueryConfigurationError。
 - 工具错误先交给模型；底层必需能力整体失效、模型调用失败和持久化失败不能伪装为工具空结果。失败不自动切换到 Legacy。

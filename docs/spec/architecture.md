@@ -1,70 +1,19 @@
 # 问答运行时架构
 
-本文记录 V1 当前实现；其中 `combined`、`coordinated`、现有开关和实验收尾继续有效，不因设计冻结而切换生产默认。资料与证据原则遵循 [项目整改指导方向](knowledge-backbone-direction.md)。
+本文描述在线问答与配套平台的现行行为。资料与证据原则见[项目整改指导方向](knowledge-backbone-direction.md)；运行时迁移记录见[迁移计划](agent-migration-plan.md)。
 
-## V1 当前实现与 V2 目标的关系（2026-11-13）
-
-V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构](agent-architecture-v2.md)、[能力与运行合同](agent-capability-contract.md) 和 [迁移计划](agent-migration-plan.md)。它们是后续实现目标，不表示零索引 Agent 已实现，也不替换本文记录的 V1 运行行为。
-
-| 维度 | V1 当前实现 | V2 冻结目标 |
-| --- | --- | --- |
-| 调查主链 | LangChainRuntime 默认 coordinated，保留程序补查 | 独立 DirectRuntime，模型自主选择工具；旧链通过 Legacy 入口保留 |
-| 执行配置 | 现有 Profile/环境开关和 combined 等资料模式 | core-v1/legacy-v1；Profile 显式授权，禁用能力不探测 |
-| 上下文 | QueryService 传工作区、仓库范围、会话和预检对象 | 复用 ProjectContext 构建 RunContext，不再散传权限/资料配置 |
-| 扩展 | 既有 File/SearchCode/契约工具与 AST 文件投影 | AgentCapability 的 status/tools/instructions，不改变核心循环 |
-| AST 生命周期 | CodeIntel 管理手动生成的固定版本 | Pi 按资料模式查询符号和已索引的关系 |
-| 资料边界 | combined 可读业务资料、地图和可用 AST | core 仅源码/可选需求；其他资料按明确能力组合接入 |
-
-`claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
-
-阶段 1 已在同一分支实现 `core-v1` 最小主链：`query/context.py`、`profile.CORE`、`materials.for_core`、`workspace.prepare_core`、`query/tools/files.py`、`query/capabilities.py`、`query/agent/direct.py` 和 QueryService core 分支。它只挂载源码和可选需求，按配置逐一核验仓库，不构造 AST 或探测索引；Direct 不导入 Coordinator/Investigation。Core 仅在评测代码显式构造 Direct Runtime 时使用；在线问答固定进入 Pi（2026-11-15），环境变量不再切换。完整 V2 合同中的运行期失效联动、结构版本和复杂 Evidence 生命周期尚未实现；`legacy-v1` 兼容名称也未开放。
-
-真实模型答案验收尚未完成：2026-11-13 对验证工程请求时供应商返回 403（额度耗尽），失败 Run/Event/Trace 已保存；不能用模拟模型测试或 API 回归代替答案质量验收。设计通过、整包有条件通过；阶段 1 验收与测试范围见[迁移计划第 8 节](agent-migration-plan.md#8-阶段-1-实现与验证2026-11-13)。
-
-后续新 Agent 功能遵守 V2 接口与依赖边界。本文以下章节继续描述 V1；共享的只读、工程隔离、证据来源、显式生成索引及审计原则继续适用。完整动态失效/结构版本/证据生命周期随对应能力延后。Direct 验收前不删除旧链代码；在线旧 Runtime 选择已封存，删除旧链另行确认。
-
-## V1 目标
-
-生产主问答采用项目自有 LangChain 1.2 Agent。模型连接来自 `.env`，Agent 负责规划工具调用、阅读代码、追踪关系和组织答案；Python 提供工具、上下文管理、预算、资料范围和运行记录。原 Claude CLI 运行时保留为显式兼容选项及历史评测／知识维护能力。
+## 问答主链
 
 ```text
-用户问题
-   ↓
-QueryService
-   ├─ 获取工程 Conversation / Agent Session
-   ├─ 准备只读 Workspace
-   └─ 调用 AgentRuntime
-          ↓
-   LangChainRuntime（create_agent + 配置的兼容模型）
-          ↓
-   Read / Glob / Grep / 可选 SearchCode
-   ┌───────────────┬───────────────┬───────────────┐
-   │ business context │ code map │ requirements │ source repos │
-   └──────────────────┴──────────┴─────────────┴──────────────┘
-          ↓
-   无工具整理答案（可选 facts：分层事实 → 程序检查 → 答案）
-   （原始 Tool Event 与检查记录分别保留）
+Web / API → ProjectContext → QueryService
+  → RunContext（工程、范围、资料、工作区、会话）
+  → PiAgentRuntime → Pi RPC：模型、只读工具、上下文、会话
+  → 引用和目标覆盖记录 → Answer / SSE / Trace
 ```
 
-## Python 的边界
+CodeAgent 负责授权与工作区装配、运行互斥、取消、事件转发和持久化。Pi 决定查什么、何时停止，并管理上下文压缩。业务知识、评测、AST 和契约索引各自管理资料或观测结果，不另设全局调查循环。
 
-Python 负责：
-
-- 项目配置、Git 同步和代码索引；
-- 业务补充知识、业务关系和可选调查入口的管理页面；
-- 工作区链接和固定 `CLAUDE.md`；
-- Query Conversation、Run、Event、Feedback 持久化；
-- LangChain 模型／工具循环、会话上下文、取消、调用和总时长预算；
-- 原文引用、事实层次和已观察返回字段的一致性检查及答案组装；
-- HTTP/SSE API 和前端展示。
-
-主问答默认 `WORKFLOW=coordinated`：程序按问题目标安排定位、契约核对和补查，模型仍可选择工具和追加 Investigation。`coordinator.py` 根据每轮真实工具结果更新事项，明确文件直接读取，标识用 Grep，业务描述用 SearchCode／契约候选；相关入口选定后按需取得字段、分支及对应系统前端代码。自动动作去重，每批最多 3 个独立动作并发，不限制动作、入口或调查任务总数。主问答不设模型调用次数和调查总时长上限，也不设有限的 LangGraph 循环步数。事项区分原文已读、结构证据已交付及缺口，不能据此认定完整控制流或业务语义正确。basic/tracked 保留为显式对照。默认 `ANSWER_MODE=plain`，facts/contracts 收尾仍为实验能力；按答题模式在调查结束后整理答案。
-
-`query/langchain_agent/` 的 `runtime.py` 负责调查与预算，`coordinator.py` 调度检索，`files.py`／`context.py` 管理范围内文件与会话，`investigation.py` 维护调查待办和补读，`trace.py` 保存公开快照；`evidence.py` 建立引用表，`answering.py` 定义最终输入，`verification.py` 校验可选事实协议并渲染答案。`query/navigation.py` 从配置生成职责导航，不解析业务源码。`codeintel/hybrid/` 实现显式结构分块／索引、局部 ONNX 向量与 Cross-Encoder、并发混合召回和上下文组装。索引位于当前工程 `data_root/retrieval-index`，本地模型由显式准备命令下载；问答和启动不会自动建索引。coordinated 默认 `RETRIEVAL=auto`、`CONTRACTS=auto`，仅发现已有索引时提供 SearchCode 与契约工具；显式 files/off 保留文件对照，hybrid/on 可显式要求对应能力。来源仍受当前工程和资料模式限制。
-
-以上边界指生产问答。独立检索诊断由 `codeintel/retrieval.py` 提供词项基线和实验性上下文选择，`evaluation/retrieval.py` 冻结资料、复用候选并计量逐题覆盖增减，`retrieval_service.py` 管理工程内批次与本地对照，`fixed_context.py` 执行关闭工具的固定证据答题，`context_runtime.py` 可接入 `.env` 中的兼容模型接口；它们不接管主问答调查，也不生成 AST。接口和使用约定见[检索诊断](retrieval-evaluation.md)。
-
-`codeintel/structure.py` 可只读复用工程已有代码索引的方法位置，经冻结原文、声明、结束位置和更新时间核对后，由显式操作保存成检索批次内的版本。它不调用解析器或更新索引，不创建 AST；方法之外和未通过核对的文件仍保留文本窗口。方法单元、整段保留及候选原文预算匹配仅作为独立实验能力，生产默认不变。
+正常 API 问答固定使用 `pi-v1`。旧 LangChain、Direct 和 Claude Runtime 保留给显式注入的历史评测；旧 Profile／Runtime 环境变量不切换在线入口，Pi 失败也不回退。Direct 的 Context Manager、Question Contract、Evidence Ledger 和 Answer Closure 没有进入 Pi。旧链的退出条件见[迁移计划](agent-migration-plan.md)。
 
 ## 包结构与依赖方向
 
@@ -96,32 +45,21 @@ Python 负责：
 
 ## Workspace
 
-工作区由 `WorkspaceManager` 生成，默认位置为项目配置旁的 `.data/agent-workspaces/<project-id>`：
+`WorkspaceManager.prepare_pi()` 在当前工程的工作区根下准备 `pi/<conversationId>/`。按模式和可用性挂载以下资料：
 
-```text
-<workspace>/
-├── CLAUDE.md
-├── .codeagent-project-navigation.json → 当前工程配置中的应用职责导航
-├── .langchain-traces/ → 每轮公开模型输入、工具定义、响应与调查状态
-├── knowledge/business-context/  → 项目特有的业务补充知识
-├── knowledge/generated-code-map/ → 自动生成的结构导航（按模式挂载）
-├── requirements/        → 配置的 requirementsRoot（可选）
-└── repos/<repo-id>/     → 同步后的仓库目录
-```
+| 资料 | 工作区路径 | 用途 |
+| --- | --- | --- |
+| 授权源码和仓库 README | `repos/<repo-id>/` | 核实实现；README 提供项目背景 |
+| 需求原文 | `requirements/` | 说明被提出的目标 |
+| 业务补充知识 | `knowledge/business-context/` | 术语、业务约定、系统职责和例外 |
+| 自动代码地图 | `knowledge/generated-code-map/` | 文件、符号和结构导航 |
+| 手动 AST | `knowledge/ast/`（组合模式） | 版本化结构导航 |
 
-目录优先使用软链接；Windows 无法创建软链接时使用 Junction。链接始终指向已同步目录，不复制源代码。刷新工作区只重建链接和 `CLAUDE.md`，不会改动仓库。
+`combined` 是在线默认，业务资料、代码地图和 AST 按已准备的实际状态可用。显式 `none` 只提供基础资料；`backbone` 在同一基础上增加业务补充；`ast` 只额外提供当前可用的手动 AST，兼容路径为 `knowledge/generated-code-map/`。组合模式在 AST 不可用时继续；显式 AST 模式在没有可用版本时报告配置错误。只有用户显式生成 AST 才会创建版本，启动、浏览状态和问答都不会生成。
 
-`CLAUDE.md` 保留为工作区资料规则文件，LangChain 与兼容运行时均读取它；文件名不表示主问答依赖 Claude CLI。它只写资料位置、源码核对、导航边界和只读规则。
+源码目录通过链接挂载。未指定范围时使用当前工程所有登记仓库；指定范围后，按配置展开系统与仓库 ID。未知 ID、空仓库集合和不可读取的必需仓库会在调用模型前失败。Pi 的只读检索扩展从授权真实根目录搜索，将结果映射回工作区路径，不用全局跟随链接。工作目录本身不是系统级隔离边界。
 
-项目资料可提供简短的 `project-index.md`。Runtime 每轮只附加真实来源目录和短索引，不再把历史 `project-overview.md` 全文注入；业务补充知识和代码地图保留在资料目录中供模型按需搜索。默认使用轻量项目上下文；显式启用契约实验时额外提供只作导航的入口候选，由模型选择类型化工具核对，程序据具体未解析边生成补读任务。
-
-主问答默认 `combined` 工作区，同时挂载正常项目资料（源码、README、需求等）、业务补充知识、已有自动代码地图和当前可用的手动 AST 版本。模型按问题需要检索和读取，页面只展示资料状态与仓库调查范围，不再要求互斥选择。AST 独立挂载到 `knowledge/ast/`，代码地图仍为 `knowledge/generated-code-map/`；两者均只用于导航。AST 未生成、待更新或暂不可用时不挂载旧结构，问答继续使用其余资料，页面说明状态。
-
-每轮轨迹记录实际授权资料目录、AST 状态及采用版本。历史轮次只读取自身记录的 AST 版本，不从会话后续使用的版本补填；旧回答没有使用 AST 时仍保留空值。
-
-历史兼容和显式对照仍支持 none/backbone/ast：分别为基础资料、基础资料加业务补充、基础资料加 AST（不含业务补充）。工作区位于注册工程的 `workspaces/<project-id>/modes/{combined,none,backbone,ast}`（兼容单工程仍使用 `agent-workspaces`），模型会话不跨资料模式或 AST 版本复用；旧答案与资料版本不被改写。
-
-AST 由 `codeintel/ast/` 管理。服务启动、读取评测就绪状态、进入 AST 页面、发起问答和启动实验都只读取状态，不生成 AST；只有用户在 AST 管理页点击生成或重新生成才会创建新版本。源码变化会将当前版本标为待更新，历史查询和已开始的实验仍引用它们各自记录的版本。
+Pi 每轮接收 CodeAgent 生成的系统提示与实际来源清单，资料正文按需读取。工作区的 `CLAUDE.md` 和 `.langchain-traces/` 属于旧 Runtime。历史 Run 保留其资料模式和版本。
 
 ## 工程注册与隔离
 
@@ -175,43 +113,13 @@ python -m business_code_agent.cli serve-query --db .data/unused.db --project-reg
 
 ## Runtime
 
-`AgentRuntime` 是最小接口：
+`PiAgentRuntime` 为每轮启动 Pi RPC 进程，核对 CLI、实际模型和只读搜索扩展。基础工具是 `read`、`grep`、`find`、`ls` 和 `codemode`。Pi 使用自身模型配置；`BUSINESS_CODE_PI_MODEL` 在 `.env.example` 中预设 `deepseek/gpt-6-luna`，留空时使用 Pi 默认模型，也可由单轮请求的 `model` 覆盖。`BUSINESS_CODE_PI_TIMEOUT` 默认 600 秒；用户可主动取消。
 
-```python
-ask(question, *, workspace, session_id=None, event_callback=None)
-```
+Pi 会话文件保存在工程数据目录 `pi-sessions/`。工程、范围、Profile、资料模式或版本、模型或相关 Pi 配置变化时重建会话。历史 LangChain 或 Claude 会话独立保留。
 
-`ClaudeCodeRuntime` 用 `subprocess` 启动当前安装的 `claude` CLI，使用 `--output-format stream-json` 解析事件。默认参数：
+最终答案的临时绝对源码路径规范为工程相对路径。运行记录依据本轮 `read` 交付的原文核验引用路径和行区间，`grep` 命中只作导航。核验不判断结论是否被原文语义支持。复杂题的“目标覆盖”由模型逐项声明；每项标为已核实且至少有一条带行号引用，并且其带行号引用均通过核验时，才把该项计为 verified。全部自报项通过只说明这些声明有本轮交付依据，原问题的完整性仍需复核。
 
-```text
---print
---output-format stream-json
---verbose
---permission-mode dontAsk
---tools Read,Glob,Grep
---disallowed-tools Edit,Write,Bash,NotebookEdit,Task
---add-dir <workspace>
-```
-
-以上命令仅适用于显式 `BUSINESS_CODE_AGENT_RUNTIME=claude`。显式 `BUSINESS_CODE_AGENT_RUNTIME=langchain` 时使用配置的兼容 Chat 模型、Read／Glob／Grep 及已准备时的 SearchCode。会话消息保存在模式工作区 `.langchain-sessions/`，最多保留最近六个完整用户回合；旧工具正文超过上下文预算时标为已废弃，保留工具调用与结果的配对。源码修改后历史 Read 原文作废，历史 SearchCode 原文在追问时重新取得。模式、范围、AST 版本或运行时改变不续用旧会话。页面恢复历史时保留原轮次资料信息，新的追问使用 combined；浏览器旧 queryMode 设置不再限制新问题。
-
-LangChain 主问答不设调查轮数或总时长上限，旧环境变量 `BUSINESS_CODE_AGENT_MAX_CALLS`／`BUSINESS_CODE_AGENT_TIMEOUT` 不再生效。只有有界评测等显式调用者可传 `max_calls`／`max_seconds`，其中调用总数包含最后一次无工具答题；轨迹记录实际限额，无限制时为 null。手动停止可中断异步模型请求。上下文字符数、单次原文大小及单次模型网络请求超时继续管理。无工具答题不携带调查工具定义或工具调用历史，仅组装真实原文与必要对话背景。facts/contracts 调查结束后执行独立收尾。plain 优先接收自然答案，遇到只剩证据缺口或重复检索时，进入下述无工具收尾。无工具答题未返回有效答案时记录真实错误，不再误标为预算用尽。检查与渲染本身不调用模型，格式不合格不会自动重试。所有模型调用用量累计，工具原文完整保存在事件中。事实检查的协议、接受事实和 `semanticProof=false` 保存在 usage.verification；检查通过不代表语义解释正确。会话核对应答模式，事件通过 SSE 与 query_event 保存，最终回答在模型完成后输出。
-
-调查与收尾接收工程职责和本轮无命中、截断等状态。tracked 和 coordinated 提供 Investigation，明确的 next_read 由 before_model 执行，配对 Read 消息随下一次模型请求交付。程序补读事件标为 origin=workflow。supported 表示所列原文端点已读。关系需不同文件或符号的引用，consumer 需前端职责配置及对应代码。不可查项和预算结束时的开放项保留为未确认。
-
-`BUSINESS_CODE_AGENT_CONTRACTS=on` 只读取当前工程已准备的 `contract-index`，与混合检索开关独立。契约编号只在工程／索引版本内有效，会话范围包含该版本。`TraceResponseFields` 交付受支持字段、展示映射、连接和完整原文引用；每包默认最多 16,000 字符／260 行，事实和所需证据整体接纳，源码变化或超出授权仓库则停止交付相关事实。历史契约工具正文在下一用户回合废弃。未解析项中的具体源码位置自动成为本轮 Read 任务；`source_read` 不是关系证明。
-
-实验性 `ANSWER_MODE=contracts` 保留一次无工具收尾，模型选择已核对契约、最多六段业务原文，并可引用已交付的业务分支编号给出解释。程序生成返回字段与字符串 switch 映射，检查解释所依赖的返回字段和分支原文确已交付，再输出模型解读；来源通过不表示解释正确。建议采用复用字段、调整映射、补查新字段与核对消费者四种选项；字段已返回时不建议重复新增，映射缺少相关判别输入时指出限制，消费端未核对时不保证单点收益或排序。格式错误不重试，仍保留已核对事实。
-
-问题中的状态／失败／重试／区分／条件／改动等显式词触发分支资料需求（规则覆盖有限，不冒称通用语义分类）。字段核对后 before_model 自动调用 `TraceBusinessRules`，不消耗模型请求；模型也可显式调用。单纯字段查询不自动展开。状态、接口、消费端与改动前提由程序记录本轮事项，不依赖可选 Investigation 的创建。未登记同系统前端时记录 `not_registered_in_scope`，不把其他系统前端列作消费者。局部写入不证明全部调用链、提前返回、最终持久化或实际执行。
-
-包含 catch 的解释仅对该分支明确写入的成员形成结论，先前值不作为异常后的保证。消费者未登记、其它系统前端搜索无命中只记录为缺口，不能判定页面不存在，也不按无命中次数强制收尾。正常资料及 Read／Grep 范围保持工程授权边界。收尾版本变化会使契约实验的旧会话上下文失效，默认文件工具会话范围不受该版本字段影响。
-
-收尾将重复原文按文件和行号合并，保留未交付的行号空缺；同一行存在冲突时不静默选一份。证据包中仅传位置元数据，原文在来源目录中交付一次；丢弃来源与冲突随审计保存。普通 `plain` 加契约工具仍可作对照。两种实验保留正常源码、README、需求和业务资料，不自动下载模型或生成 AST。索引结构升级需要用户显式执行准备命令的 `--reparse`。
-
-usage.investigation 保存调查状态，usage.retrievalPlan 保存程序检索事项，usage.tracePath 指向工作区公开快照。`query/traces.py` 在 QueryService 创建运行时建立工程内 `query-traces/<runId>.json`，随模型和工具事件原子更新，失败或取消也保留，并由 usage.traceArchive 引用；工作区清理不会删除归档。快照包含每次系统／用户／工具消息、公开响应、工具定义、用量、耗时、调度原因与状态，不记录认证信息或私有思考；它属于供应商序列化之前的框架输入，不是 HTTP 抓包。`GET /api/projects/<projectId>/query/<runId>/trace` 校验工程与运行归属；无新归档时复用工程工作区已有快照，否则仅返回已有历史事件。问答页 TraceDrawer 支持运行中查看、分类筛选及完整 JSON 导出。执行 completed 不表示全部业务关系已经确认。
-
-收到答案时，程序有待执行的补查才恢复调查。关键事项仍开放但已无具体动作时，丢弃草稿并用已读原文和缺口发起一次无工具答题。程序和模型发起的同参数定位调用共用本轮去重记录。只剩重复定位且没有程序补查时，也进入无工具答题。跳过的调用和收尾原因可在轨迹中查看。plain 的业务结论由模型根据证据组织，程序在末尾附上未确认事项。契约实验另由源码绑定的结构事实约束接口字段部分。
+`QueryService` 从 Run 创建起持续保存 Trace，记录模型调用摘要、工具输入和输出、状态、用量与错误。归档保存在工程的 `query-traces/<runId>.json`，取消或失败也保留；Pi 模型摘要不作为完整请求快照。问答页可查看和导出 Trace。旧 Runtime 的程序补查、facts／contracts 收尾和 SearchCode 不参与这条链路。
 
 ## Conversation / Run / Event
 
@@ -236,25 +144,25 @@ query_feedback
 
 一次请求的顺序：
 
-1. 主问答默认组合使用资料，创建或读取 Conversation，准备 combined 工作区；显式对照仍可指定旧模式。模式、调查范围或可用 AST 资料版本变化时清空可恢复的模型会话；
-2. 创建 `running` 的 Query Run，并保存用户消息；
-3. 调用 Runtime，实时保存并转发事件；
-4. 成功后保存 Session、回答、用量和 assistant 消息；
-5. 失败后将 Run 标记为 `failed`，保存错误事件，不生成 assistant 消息。
+1. 解析工程和范围，创建或读取 Conversation，检查该会话是否已有运行。
+2. 创建 Run、保存问题并开始 Trace；准备授权工作区及会话配置。
+3. 调用 Pi，持续保存工具、模型和状态事件并通过 SSE 转发。
+4. 保存回答、运行终态和用量。失败和取消分别记录，正常完成也不代表业务关系已查全。
 
-`query_message` 用于前端历史和审计。LangChain 的工具会话状态由工程内 SessionStore 提供；历史兼容模式使用 Claude Session。
+`query_message` 服务前端历史与审计；Pi 自己管理可恢复的模型会话。
 
 ## API 与 SSE
 
-`POST /api/query` 返回一次性 JSON，`POST /api/query/stream` 返回：
+登记工程使用 `/api/projects/<projectId>/...`，兼容单工程可用 `/api/...`。`POST /api/query` 返回一次性 JSON，`POST /api/query/stream` 返回：
 
 ```text
-event: event   data: {"eventType":"tool_use", ...}
+event: run     data: {"runId":"...", "conversationId":"...", ...}
+event: event   data: {"eventType":"tool", ...}
 event: result  data: {"runId":"...", "answer":"...", ...}
 event: error   data: {"error":"..."}
 ```
 
-LangChain 事件使用现有 status／tool／text 格式；兼容模式保留 CLI 事件。前端展示实际调查进度、最终回答、历史和反馈。
+`GET /api/pi/models` 返回可展示的 Pi 模型；`GET /api/query/<runId>/trace` 按工程与运行归属读取归档。关闭 SSE 连接不会自动取消后台任务。
 
 ## 代码索引边界
 
@@ -264,9 +172,9 @@ LangChain 事件使用现有 status／tool／text 格式；兼容模式保留 CL
 
 投影从已有 RETURN_CALL／HTTP_RESPONSE 中提取主链并去重，不构建新的 AST。前端 `features/graph/CallChainView.jsx` 负责接口选择、横向图布局、缩放平移和源码抽屉；现有 GraphPage 的业务图改为独立标签保留。源文件更新时连接标为过期，原文面板说明是索引快照。图仅覆盖已抽取的返回依赖关系，完整调用图／控制流／副作用调用不在本次实现内。
 
-`repository`、`code_file`、`code_symbol`、`code_fact`、`cross_application_edge` 继续服务同步、索引和浏览。主问答文件工具直接读源码；SearchCode 使用独立显式准备的混合检索索引，不调用旧 BusinessTools 或 EntryResolver。结构与引用是导航，跨系统结论仍须核对源码连接。
+`repository`、`code_file`、`code_symbol`、`code_fact`、`cross_application_edge` 继续服务同步、索引和浏览。Pi 文件工具直接读取授权源码；SearchCode 使用独立准备的混合检索索引，供旧链和独立诊断使用。结构命中提供导航，跨系统结论仍须核对源码连接。
 
-`business_baseline_source`、`business_entity`、`business_relation_v2`、`business_entry_anchor` 继续服务知识维护。Query 不查询这些表，而是读取它们对应的 Markdown 文件；Anchor 原文是 Claude 的可选导航提示。
+`business_baseline_source`、`business_entity`、`business_relation_v2`、`business_entry_anchor` 继续服务知识维护。Pi 调查读取对应的授权 Markdown 文件，不查询这些表；文档中的入口只作为导航线索。
 
 ## 数据库迁移
 
@@ -281,7 +189,9 @@ LangChain 事件使用现有 status／tool／text 格式；兼容模式保留 CL
 
 ## 效果验证（评测子系统）
 
-同题「有无知识主干」的对照验证由 `business_code_agent/evaluation/` 实现，命令行脚本与页面共用同一执行逻辑：
+生产链问答质量使用 `scripts/evaluation/evaluate_pi.py`：它调用生产 `QueryService` 和 Pi Runtime，固定模型、题库和资料，保存答案、原始 Trace 与逐项复核。题库检查项只留在评测侧。
+
+历史知识主干对照由 `business_code_agent/evaluation/` 实现，命令行脚本与评测页面共用同一执行逻辑，结果与 Pi 基线分开记录：
 
 ```text
 business_code_agent/evaluation/
@@ -303,8 +213,7 @@ business_code_agent/evaluation/
 
 ## 运行限制
 
-- 生产问答需要安装项目依赖并配置模型兼容接口；历史 CLI 能力另需安装认证 Claude Code；
+- 生产问答需要 Pi CLI 与可访问的模型；历史 Claude 工具需要独立配置；
 - 主问答工具只读取和搜索本轮授权的文件，不能修改源码或执行 Bash；
-- 工作区挂载文件资料；显式启用混合检索时，SearchCode 按当前授权范围提供原文；
 - 业务补充知识、代码地图和混合索引可能过时，Agent 必须核对当前源码；
 - 回答质量仍取决于模型、资料和调查过程，框架或索引存在不代表业务链路已经答对。

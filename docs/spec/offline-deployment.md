@@ -32,7 +32,7 @@ offline-packages\business-code-agent-windows-project.zip
 
 首次启动会从 Python 包源和 npm registry 安装依赖。如需在内网安装，请配置目标机可访问的镜像。SQLite 随 Python 使用。
 
-生产主问答现使用 LangChain 1.2，需要按 `.env.example` 配置模型兼容接口。混合检索另需安装 `pyproject.toml` 的 `retrieval` 与 `tree-sitter` 可选依赖，并显式准备本地模型和工程索引；没有公网的环境应提前带入这些依赖和模型文件。项目 ZIP 不包含本机下载的模型与工程索引。
+在线问答需要另装 Pi CLI，并在目标机器的 Git Bash 中确认 `pi --version` 可用。项目 ZIP 不包含 Pi、供应商凭据和工程索引。混合检索用于独立诊断和旧评测，仍需单独准备相应依赖、模型文件与索引。
 
 ## 3. 解压项目包
 
@@ -65,7 +65,7 @@ cp .env.example .env
 
 如需使用业务补充资料，先把资料放到目标机可访问的目录，再将 `knowledge.businessContextRoot`（或兼容字段 `knowledge.baselineRoot`）改为该目录。项目 ZIP 不包含根目录的业务资料；不使用这类资料时，删除配置中的 `knowledge` 项即可。
 
-在 `.env` 中填写 `BUSINESS_CODE_MODEL_BASE_URL`、`BUSINESS_CODE_MODEL_NAME` 和 `BUSINESS_CODE_MODEL_API_KEY`。模型接口需要支持工具调用，并能从目标 Windows 机器访问。
+在 Pi 中配置目标机可访问、支持工具调用的模型及凭据。在 `.env` 中用 `BUSINESS_CODE_PI_COMMAND` 指定 Pi 命令，用 `BUSINESS_CODE_PI_MODEL` 指定在线默认模型；留空时使用 Pi 自己的模型配置。`BUSINESS_CODE_MODEL_*` 仅用于旧 Runtime。
 
 ## 5. 首次启动
 
