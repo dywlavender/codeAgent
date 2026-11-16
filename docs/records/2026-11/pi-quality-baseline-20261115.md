@@ -53,7 +53,7 @@
 | none | 1 | 7/8 | 14 | 26/14 | 32 | 52 | 19 | 20 | 0 | 6 | 0 | 6 | 23/22/1/7 | 744,483 | 234.3 |
 | none | 2 | 8/8 | 14 | 36/22 | 40 | 58 | 22 | 22 | 2 | 5 | 0 | 7 | 33/9/0/2 | 1,131,863 | 292.0 |
 | backbone | 1 | 8/8 | 11 | 17/12 | 19 | 48 | 19 | 19 | 2 | 5 | 0 | 7 | 22/20/0/5 | 539,025 | 142.2 |
-| backbone | 2 | 7/8 | 17 | 5/3 | 23 | 39 | 12 | 18 | 1 | 3 | 0 | 4 | 30/13/2/2 | 327,716 | 260.8 |
+| backbone | 2 | 7/8 | 17 | 5/3 | 23 | 39 | 12 | 18 | 1 | 3 | 0 | 4 | 30/14/1/2 | 327,716 | 260.8 |
 
 **关键关系覆盖（按 checks 阅读答案）**：四次运行都覆盖了创建（组件 submit → `createLoansAccount` → `POST /loans`）、审批/放款（`loanActionButtons` → `POST /loans/{id}?command=…`）、还款（模板类型解析 → `submitLoanActionButton` → `POST /loans/{id}/transactions?command=…`）、前缀/租户/认证三类统一处理，以及各业务域 service 与环境配置来源。check 6“前端只组装与发送、业务规则在后端”没有被四次答案逐字声明，但也没有任何一次把业务规则归到前端，按“未违背”记为部分覆盖。backbone r1 额外给出批量审批/批量放款与 `POST /batches`，超出题目要求；none r2 额外下钻到 Fineract 的 `LoansApiResource`/`LoanTransactionsApiResource`，同样超范围。
 

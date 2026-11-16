@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-16T02:47:29.133853+00:00",
+  "generatedAt": "2026-11-16T03:06:23.618487+00:00",
   "batch": "validation-projects/complex-loan/.data/pi-gpt6luna-smoke-20261116",
   "runs": [
     {
@@ -67,29 +67,16 @@
         "materialReads": {},
         "references": {
           "total": 34,
-          "confirmed": 6,
-          "searchSeen": 11,
+          "confirmed": 9,
+          "searchSeen": 21,
           "fileReadNotRange": 0,
-          "unseen": 17,
+          "unseen": 4,
           "pathOnly": 0,
           "unseenReferences": [
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:154",
             "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:460",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:169",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:198",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:60",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:121",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:150",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:68",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
             "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/web-app.component.ts:221",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:12",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:35",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/login/login.component.ts:101",
-            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:47"
+            "repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
+            "repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:47"
           ],
           "unconfirmed": [
             "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:154",
