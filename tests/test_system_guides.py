@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from business_code_agent.query.navigation import build_navigation
-from business_code_agent.query.system_guides import load_system_guides
+from business_code_agent.query.system_guides import load_system_guides, render_system_guidance
 
 
 class SystemGuideSelectionTest(unittest.TestCase):
@@ -45,3 +45,17 @@ class SystemGuideSelectionTest(unittest.TestCase):
         documents = load_system_guides(self.root, navigation)
         self.assertEqual(["中台通用规则", "批任务规则"], [doc.text for doc in documents])
         self.assertEqual((), load_system_guides(self.root / "not-installed", navigation))
+
+    def test_prompt_uses_authored_summary_for_long_guides_and_lists_each_system_once(self):
+        navigation = self.navigation({"shared": "repos/shared", "jobs": "repos/jobs"})
+        path = self.root / "loan/SYSTEM.md"
+        path.write_text("# 中台\n\n## 导航摘要\n- 通用入口规则\n\n## 详细说明\n"
+                        + "此处只供按需读取\n" * 100, encoding="utf-8")
+        guidance = render_system_guidance(navigation, load_system_guides(self.root, navigation))
+        self.assertEqual(1, guidance.count("通用入口规则"))
+        self.assertNotIn("此处只供按需读取", guidance)
+        self.assertIn("knowledge/system-guides/loan/SYSTEM.md", guidance)
+        self.assertIn("批任务规则", guidance)
+        self.assertIn("渠道通用规则", guidance)
+        self.assertIn("repos/shared/api", guidance)
+        self.assertIn("repos/shared/channel", guidance)

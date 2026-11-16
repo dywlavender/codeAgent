@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -92,9 +93,13 @@ class PiRuntimeTest(unittest.TestCase):
         context, prepared, _ = self.context_and_prepared(mode="none")
         prompt = self.runtime()._system_prompt(context, prepared, mode="none")
         self.assertIn("找到第一个入口", prompt)
-        self.assertIn("Handler/注册表", prompt)
+        self.assertIn("注册点与实际处理器", prompt)
         self.assertIn("题目要求的各项都有源码依据后停止调查", prompt)
         self.assertIn("## 目标覆盖", prompt)
+        guidance = "## 当前工程导航\n任务入口由当前系统的注册点定位。"
+        prompt = self.runtime()._system_prompt(
+            replace(context, system_guidance=guidance), prepared, mode="none")
+        self.assertIn(guidance, prompt)
 
     def test_goal_coverage_requires_delivered_read_evidence(self):
         reads = [{"path": "repos/a/Main.java", "content": "line1\nline2\n",

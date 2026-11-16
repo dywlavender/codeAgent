@@ -1,4 +1,4 @@
-"""Immutable authorization snapshot for one core-v1 run."""
+"""Immutable authorization snapshot for one query run."""
 
 from __future__ import annotations
 
@@ -26,3 +26,4 @@ class RunContext:
     workspace: Path
     materials: tuple[MaterialSource, ...]
     session_id: str | None
+    system_guidance: str = ""
