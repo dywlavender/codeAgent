@@ -127,7 +127,7 @@ class QueryMaterialsTest(unittest.TestCase):
         ast = next(item for item in summary["sources"] if item["kind"] == "ast")
         self.assertEqual("missing", ast["availability"])
         self.assertFalse(ast["authorizationConfigured"])
-        self.assertEqual([], list((self.ast_root / "versions").iterdir()))
+        self.assertFalse(self.ast_root.exists())
 
     def test_stale_ast_is_unmounted_and_returns_to_combined_after_manual_update(self):
         self.prepare_ast()

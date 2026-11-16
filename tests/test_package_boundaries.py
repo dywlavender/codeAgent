@@ -83,7 +83,7 @@ class PackageBoundaryTest(unittest.TestCase):
     def test_broken_dependency_edges_stay_broken(self):
         forbidden = {
             "query": {"evaluation", "knowledge"},
-            "codeintel": {"requirement"},
+            "codeintel": {"evaluation", "query", "requirement"},
         }
         violations = []
         for owner, blocked in forbidden.items():

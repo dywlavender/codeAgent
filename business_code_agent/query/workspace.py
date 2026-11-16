@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from business_code_agent.platform.repositories import configured_repository_sources, resolve_config_path
+
 from .materials import BUSINESS_CONTEXT_MOUNT, MaterialManifest
 from .navigation import NAVIGATION_FILE, build_navigation
 
@@ -621,10 +623,7 @@ class WorkspaceManager:
         return value
 
     def _configured_path(self, value: Any) -> Path:
-        raw = str(value or "").strip()
-        base = self.project_config.parent if self.project_config else Path.cwd()
-        candidate = Path(raw).expanduser()
-        return candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+        return resolve_config_path(self.project_config, value)
 
     def _resolve_material_path(self, value: Any) -> Path:
         candidate = Path(str(value or "")).expanduser()
@@ -660,34 +659,9 @@ class WorkspaceManager:
         return result
 
     def _repository_sources(self) -> list[tuple[str, Path]]:
-        configured = self.config.get("repositories")
-        values: list[tuple[str, Path]] = []
-        seen: set[str] = set()
-        if isinstance(configured, list):
-            for item in configured:
-                if not isinstance(item, dict):
-                    continue
-                repository_id = str(item.get("id") or "").strip()
-                if not repository_id or repository_id in seen:
-                    continue
-                raw_path = item.get("localPath")
-                if raw_path:
-                    source = self._configured_path(raw_path)
-                    # A project config may retain a historical localPath while
-                    # the synchroniser has moved the checkout to
-                    # repositoryRoot. Prefer the live indexed checkout when it
-                    # is available instead of exposing a broken link.
-                    db_source = self._repository_from_db(repository_id)
-                    if not source.exists() and db_source is not None and db_source.exists():
-                        source = db_source
-                else:
-                    source = self._repository_from_db(repository_id)
-                    if source is None:
-                        source = self._configured_path(
-                            Path(str(self.config.get("repositoryRoot") or ".data/repositories")) / repository_id
-                        )
-                values.append((repository_id, source))
-                seen.add(repository_id)
+        values = configured_repository_sources(
+            self.config, self.project_config, indexed_root=self._repository_from_db,
+        )
         if values:
             return values
         if self.db is not None:

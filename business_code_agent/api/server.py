@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from business_code_agent.evaluation.service import EvaluationService
-from business_code_agent.evaluation.ast_service import AstService
+from business_code_agent.codeintel.ast.service import AstService
 from business_code_agent.evaluation.retrieval_service import RetrievalEvaluationService
 from business_code_agent.platform.projects import ProjectContext, ProjectRegistry, ProjectRegistryError
 from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryRuntimeError, QueryService
@@ -187,10 +187,6 @@ def make_server(
                 retrieval_root=context.data_root / 'retrieval-index',
                 trace_root=context.data_root / 'query-traces',
                 project_context=context,
-                ast_material_factory=lambda: AstService(
-                    project_config=str(context.config_path) if context.config_path else None,
-                    data_root=context.ast_root,
-                ),
             )
 
         def _json(self, status, payload):

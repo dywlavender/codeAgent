@@ -91,7 +91,7 @@ def resolve_project_sources(project_config, *, business_context_root=None, code_
         baseline_root=baseline_root,
         requirements_root=requirements_root,
     )
-    repository_sources = manager._repository_sources()
+    repository_sources = manager.repository_sources()
     if not repository_sources or any(not path.is_dir() for _, path in repository_sources):
         raise ValueError("请先准备项目配置中的本地代码仓库")
     resolved_baseline_root = manager.business_context_root

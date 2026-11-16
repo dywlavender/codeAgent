@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from business_code_agent.platform.ast_material import AstMaterial
+from business_code_agent.codeintel.ast.material import AstMaterial
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.capabilities import (prepare_capabilities,
                                                     prepare_pi_capabilities)
