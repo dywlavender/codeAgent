@@ -143,7 +143,7 @@
 ### 评测与引用体系修正（2026-11-16）
 
 - `verify_references` 现在按 Markdown 链接和独立源码引用去重，同一 path+line 只保留一条；支持缺段、重复 `repos/...` 前缀的路径归一化，并把绝对工作区路径还原为工程相对路径。
-- Pi 最终答案输出前会调用 `normalize_answer_paths`，只改写非规范的绝对路径，不改变短文件名或正常相对引用；原始模型答案仍保留在 Trace 调用记录中。
+- Pi 最终答案输出前会调用 `normalize_answer_paths`，只改写非规范的绝对路径，不改变短文件名或正常相对引用；原始模型答案仍保留在 Trace 调用记录中。对 `pi-gpt6luna-smoke-20261116` 的真实模型答案做离线回放：17 个临时绝对文件路径全部归一化为工程相对路径，引用统计仍为 15 条、4 条读取确认。该回放验证的是规范化函数，不是一次新的真实问答运行。
 - `evaluate_pi.py` 的 grep 解析只取行首路径，不再把 `path-260- content` 上下文行或内容片段当成候选文件；引用统计新增总数、独立引用去重、格式问题（绝对/缺段/重复根/无法归一化/其中格式错误数）。
 - 新增 `review` 命令：逐项复核使用 `pass/partial/fail`，要求答案原句必须出现在 `answer.md`、证据必须是工程相对路径，并生成单次与批次 `checks.md`。该校验只检查复核结构、判定词、引文是否存在于答案文本和证据路径形态；它不打开证据文件或 Trace，不核对文件/行是否存在，也不判断所引源码是否支持该判定，语义正确性仍需人工阅读源码确认。
 - Trace 元数据区分“模型调用摘要”和“完整请求快照”：Pi 的调用记录不再把空的 `messages/tools` 标成 `modelSnapshotAvailable`，并记录 `recordKind=message_summary`、`requestSnapshotAvailable=false`、`snapshotStage=pi_message_summary`；轨迹页会提示只保存摘要。
