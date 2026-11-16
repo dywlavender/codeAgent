@@ -1,0 +1,490 @@
+{
+  "generatedAt": "2026-11-16T02:47:29.133853+00:00",
+  "batch": "validation-projects/complex-loan/.data/pi-gpt6luna-smoke-20261116",
+  "runs": [
+    {
+      "caseId": "native-frontend",
+      "category": "native_frontend",
+      "mode": "none",
+      "repeat": 1,
+      "status": "completed",
+      "runId": "RUN-15f5f10f342446a983b182877e312798",
+      "modelRequested": "deepseek/gpt-6-luna",
+      "modelActual": "deepseek/gpt-6-luna",
+      "piVersion": "1.5.0",
+      "elapsedSeconds": 436.14,
+      "metrics": {
+        "modelCalls": 13,
+        "toolCalls": 11,
+        "toolErrors": 1,
+        "uniqueReadFiles": 2,
+        "readCalls": 3,
+        "searchCalls": 6,
+        "emptySearches": 0,
+        "candidateFiles": 62,
+        "unreadCandidates": [
+          "repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts",
+          "repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts-260-              data",
+          "repos/mifos-web-repo/src/app/home/dashboard/client-trends-bar/client-trends-bar.component.ts-261-              backgroundColor",
+          "repos/mifos-web-repo/src/app/collections/individual-collection-sheet/individual-collection-sheet.component.ts",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-171-      data",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-197-    listSelectedAccounts.forEach((element",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-200-      const batchData = { requestId",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts-224-      this.loans = this.loans.filter((account",
+          "repos/mifos-web-repo/src/app/templates/template-parameter-labels.ts",
+          "repos/mifos-web-repo/src/app/templates/create-edit-template/create-edit-template.component.ts",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts-123-      data",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts-124-        heading",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts-149-    listSelectedAccounts.forEach((element",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts-152-      const batchData = { requestId",
+          "repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts-171-      this.loans = this.loans.filter((account",
+          "repos/mifos-web-repo/src/app/tasks/tasks.service.ts",
+          "repos/mifos-web-repo/src/app/tasks/tasks.service.ts-62-    return this.http.get('/loans', { params",
+          "repos/mifos-web-repo/src/app/tasks/tasks.service.ts-70-    return this.http.get('/loans', { params",
+          "repos/mifos-web-repo/src/app/templates/create-edit-template/create-edit-template.component.ts-88-  loanParameterLabels",
+          "repos/mifos-web-repo/src/app/home/activities.ts-11-  { activity",
+          "repos/mifos-web-repo/src/app/home/activities.ts-12-  { activity",
+          "repos/mifos-web-repo/src/app/home/activities.ts",
+          "repos/mifos-web-repo/src/app/home/activities.ts-14-  { activity",
+          "repos/mifos-web-repo/src/app/home/activities.ts-15-  { activity",
+          "repos/mifos-web-repo/src/app/savings/savings-account-stepper/savings-account-preview-step/savings-account-preview-step.component.ts",
+          "repos/mifos-web-repo/src/app/savings/savings-account-stepper/savings-account-charges-step/savings-account-charges-step.component.ts",
+          "repos/mifos-web-repo/src/app/loans/edit-loans-account/edit-loans-account.component.ts",
+          "repos/mifos-web-repo/src/app/loans/edit-loans-account/edit-loans-account.component.ts-164-      interestChargedFromDate"
+        ],
+        "unreadCandidateCount": 61,
+        "repeatedToolCalls": 0,
+        "searchesWithoutRead": 4,
+        "invalidInvestigationProxy": 4,
+        "repos": {
+          "mifos-web-repo": {
+            "reads": 2,
+            "searches": 6
+          }
+        },
+        "materialReads": {},
+        "references": {
+          "total": 34,
+          "confirmed": 6,
+          "searchSeen": 11,
+          "fileReadNotRange": 0,
+          "unseen": 17,
+          "pathOnly": 0,
+          "unseenReferences": [
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:154",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:460",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:169",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:198",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:60",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:121",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:150",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:68",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/web-app.component.ts:221",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:12",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:35",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/login/login.component.ts:101",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:47"
+          ],
+          "unconfirmed": [
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts:154",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:460",
+            "loan-approval.component.ts:169",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:169",
+            "loan-approval.component.ts:198",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-approval/loan-approval.component.ts:198",
+            "tasks.service.ts:60",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:60",
+            "loan-disbursal.component.ts:121",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:121",
+            "loan-disbursal.component.ts:150",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/checker-inbox-and-tasks-tabs/loan-disbursal/loan-disbursal.component.ts:150",
+            "tasks.service.ts:68",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/tasks/tasks.service.ts:68",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:28",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
+            "web-app.component.ts:221",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/web-app.component.ts:221",
+            "authentication.interceptor.ts:12",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:12",
+            "authentication.interceptor.ts:35",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:35",
+            "login.component.ts:101",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/login/login.component.ts:101",
+            "authentication.interceptor.ts:47",
+            "private/var/folders/jx/j9rb80x14sl4qkrk9fp1t9_80000gn/T/pi-eval-7k4xvb3p/workspaces/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/complex-loan-validation/pi/CONV-580133e569e34f41a38ba387112714df/repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts:47"
+          ],
+          "readFiles": [
+            "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts",
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+          ],
+          "semanticProof": false
+        },
+        "totalTokens": 187615,
+        "cost": 0,
+        "durationMs": 436135.253,
+        "stopReason": "stop",
+        "keyFiles": [
+          {
+            "key": "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts",
+            "read": true,
+            "firstRound": 5,
+            "ranges": [
+              [
+                1,
+                194
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
+            "read": true,
+            "firstRound": 6,
+            "ranges": [
+              [
+                1,
+                262
+              ],
+              [
+                430,
+                531
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/approve-loan/approve-loan.component.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": false
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/disburse/disburse.component.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": false
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/loans/loans-view/loan-account-actions/make-repayment/make-repayment.component.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": false
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/core/http/api-prefix.interceptor.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": false
+          },
+          {
+            "key": "repos/mifos-web-repo/src/app/core/authentication/authentication.interceptor.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": true
+          },
+          {
+            "key": "repos/mifos-web-repo/src/environments/environment.ts",
+            "read": false,
+            "firstRound": null,
+            "ranges": [],
+            "cited": false
+          }
+        ],
+        "keyFilesRead": 2,
+        "keyFilesTotal": 8,
+        "allKeyFilesRound": null,
+        "lastKeyFileRound": 6,
+        "toolsAfterAllKeys": 0,
+        "searchesAfterAllKeys": 0,
+        "modelCallsAfterAllKeys": null,
+        "toolsAfterLastKey": 5,
+        "searchesAfterLastKey": 4,
+        "modelCallsAfterLastKey": 7,
+        "reads": [
+          {
+            "path": "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts",
+            "firstRound": 5,
+            "rounds": [
+              5
+            ],
+            "ranges": [
+              [
+                1,
+                194
+              ]
+            ],
+            "contentChars": 7495
+          },
+          {
+            "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
+            "firstRound": 6,
+            "rounds": [
+              6,
+              10
+            ],
+            "ranges": [
+              [
+                1,
+                262
+              ],
+              [
+                430,
+                531
+              ]
+            ],
+            "contentChars": 12397
+          }
+        ],
+        "searches": [
+          {
+            "round": 3,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src",
+              "pattern": "loan.*(apply|approve|disburse|repay)|apply.*loan|approve.*loan|disburse.*loan|repay.*loan"
+            },
+            "candidates": 20,
+            "readCandidates": 0
+          },
+          {
+            "round": 4,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "*.ts",
+              "ignoreCase": false,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "command=(approve|disburse|repayment)|create.*loan|post.*loan|repay"
+            },
+            "candidates": 17,
+            "readCandidates": 0
+          },
+          {
+            "round": 7,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 50,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount|buildLoanRequestPayload|submitLoanActionButton|repayment|transactions"
+            },
+            "candidates": 6,
+            "readCandidates": 1
+          },
+          {
+            "round": 8,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 20,
+              "literal": true,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 11,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "tenant|authorization|baseUrl|apiUrl|interceptor|X-Mifos"
+            },
+            "candidates": 7,
+            "readCandidates": 0
+          },
+          {
+            "round": 12,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 80,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "HttpInterceptor|apiUrl|fineractUrl|baseUrl|/api/|API_URL"
+            },
+            "candidates": 16,
+            "readCandidates": 0
+          }
+        ],
+        "toolTimeline": [
+          {
+            "round": 1,
+            "name": "codemode",
+            "input": {
+              "code": "const r = await Promise.all([\n  tools.ls({path:'repos/mifos-web-repo',limit:200,"
+            },
+            "status": "error",
+            "outputChars": 143
+          },
+          {
+            "round": 2,
+            "name": "ls",
+            "input": {
+              "limit": 200,
+              "path": "repos/mifos-web-repo"
+            },
+            "status": "completed",
+            "outputChars": 416
+          },
+          {
+            "round": 3,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src",
+              "pattern": "loan.*(apply|approve|disburse|repay)|apply.*loan|approve.*loan|disburse.*loan|repay.*loan"
+            },
+            "status": "completed",
+            "outputChars": 11959
+          },
+          {
+            "round": 4,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "*.ts",
+              "ignoreCase": false,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "command=(approve|disburse|repayment)|create.*loan|post.*loan|repay"
+            },
+            "status": "completed",
+            "outputChars": 12538
+          },
+          {
+            "round": 5,
+            "name": "read",
+            "input": {
+              "limit": 240,
+              "offset": 1,
+              "path": "repos/mifos-web-repo/src/app/loans/create-loans-account/create-loans-account.component.ts"
+            },
+            "status": "completed",
+            "outputChars": 7495
+          },
+          {
+            "round": 6,
+            "name": "read",
+            "input": {
+              "limit": 260,
+              "offset": 1,
+              "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+            },
+            "status": "completed",
+            "outputChars": 8804
+          },
+          {
+            "round": 7,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 50,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount|buildLoanRequestPayload|submitLoanActionButton|repayment|transactions"
+            },
+            "status": "completed",
+            "outputChars": 4472
+          },
+          {
+            "round": 8,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 20,
+              "literal": true,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount"
+            },
+            "status": "completed",
+            "outputChars": 440
+          },
+          {
+            "round": 10,
+            "name": "read",
+            "input": {
+              "limit": 100,
+              "offset": 430,
+              "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+            },
+            "status": "completed",
+            "outputChars": 3593
+          },
+          {
+            "round": 11,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 100,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "tenant|authorization|baseUrl|apiUrl|interceptor|X-Mifos"
+            },
+            "status": "completed",
+            "outputChars": 10588
+          },
+          {
+            "round": 12,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "*.ts",
+              "ignoreCase": true,
+              "limit": 80,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app",
+              "pattern": "HttpInterceptor|apiUrl|fineractUrl|baseUrl|/api/|API_URL"
+            },
+            "status": "completed",
+            "outputChars": 7848
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 # Pi 问答质量基线：纯源码与 Business Context 配对实验（2026-11-15）
 
 > 状态：进行中。16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。lifecycle 修复验证完成 4 次：`none` 2/2 completed，`backbone` 2/2 因上游额度耗尽 failed。剩余运行因同一额度问题暂停，恢复后继续。
+>
+> 2026-11-16 起问答默认模型改为 `deepseek/gpt-6-luna`。本记录已有的 7 次基线均为 `zcode/glm-5.3-flash`，不能与 gpt-6-luna 续跑或混算；gpt-6-luna 需要新批次基线。
 
 ## 结论摘要（阶段性）
 
@@ -110,3 +112,25 @@
 - 修复后第二个 `none` 答案有 1 条错误模块路径引用（`fineract-loan/.../LoanTransactionValidatorImpl.java`；实际文件在 `fineract-provider/...`，同一内容另以 basename 引用并被读取确认），属于路径精度问题，不是凭空内容。
 
 **下一步**：额度恢复后补跑基线剩余 9 次与修复后的 `backbone` 两轮；再用 `native-frontend` 做一次修复后回归，确认新增提示没有扩大前端题成本。
+
+## 模型切换：gpt-6-luna（2026-11-16）
+
+用户要求把问答模型改为 `deepseek/gpt-6-luna`。已写入 `.env.example`，本地 `.env` 同时设置 `BUSINESS_CODE_PI_MODEL=deepseek/gpt-6-luna`；Pi CLI 的 `--model` 探针和生产评测链路均已确认实际模型为 `deepseek/gpt-6-luna`。
+
+为确认切换后的完整链路，使用生产 `QueryService + PiAgentRuntime` 跑了一次 `native-frontend / none / r1`（结果快照见 `validation-projects/complex-loan/evaluations/pi-gpt6luna-smoke-20261116/`）：
+
+| 指标 | gpt-6-luna 冒烟 | glm-5.3-flash 基线（none r1/r2） |
+| --- | --- | --- |
+| 状态 | completed | completed ×2 |
+| 模型调用 / 工具 | 13 / 11 | 32/52、40/58 |
+| 读取文件 / 关键文件 | 2 / 2 个（清单 8 个） | 19–22 / 7–8 个 |
+| Token / 耗时 | 187,615 / 436.1 s | 744k–1.13M / 234–292 s |
+| 引用 确认/搜索见/未交付 | 9 / 21 / 4 | 23/22/1、33/9/0 |
+
+答案覆盖创建入口和 `POST /loans`，但审批/放款只覆盖批量任务页路径，未读 `approve-loan.component.ts`、`disburse.component.ts`、`make-repayment.component.ts`、`ApiPrefixInterceptor`、`AuthenticationInterceptor` 和 `environment.ts`；答案自述批量 endpoint、还款 command、API 前缀 provider 未核实。按 checks 判断，check 1 覆盖，check 2–5 部分覆盖，check 6 未显式声明，明显浅于同题 glm 结果。
+
+引用还出现 4 条路径格式错误：绝对临时工作区路径缺少中间目录，或重复 `repos/.../CONV-.../repos/...`；其中部分内容实际已读取，但路径无法与交付原文匹配。该问题不影响模型选择本身，但会让引用核验和用户回看失效。
+
+结论：`gpt-6-luna` 的生产链路可用，但这次冒烟不支持“与 glm-5.3-flash 质量等价”的假设；它更便宜、调用更少，但调查深度、关键文件覆盖和引用精度都下降。已有 glm 批次不能续跑或混算，gpt-6-luna 需要重新建立基线后再判断是否适合作为默认问答模型。
+
+同时修正了引用核验的路径归一化：`verify_references` 现在接受 workspace，并把答案中的绝对工作区路径还原为相对路径；离线评测的引用来源统计也重新核对已交付的读取行区间。该修正只改善核验与审计，不改变模型答案或语义证明边界。
