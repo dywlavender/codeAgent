@@ -166,7 +166,7 @@ event: error   data: {"error":"..."}
 
 ## 代码索引边界
 
-手动生成的 AST 可供 Pi 通过 `find_code_symbol`、`get_code_symbol`、`find_code_relations` 查询。服务端固定当前版本和仓库范围，Reader 返回可用 `read` 核实的源码位置。全仓范围可以同时读取版本 Markdown，限仓查询使用结构工具。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
+手动生成的 AST 可供 Pi 通过 `find_code_symbol`、`get_code_symbol`、`find_code_relations` 查询。服务端固定当前版本和仓库范围，Reader 返回可用 `read` 核实的源码位置。全仓范围可读取 Code Map 和 AST Markdown，限仓范围通过结构工具查询授权仓库。AST 扩展启动检查失败时，Pi 用文件工具继续，运行记录说明降级原因。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
 
 `codeintel/contracts/graph.py` 提供只读调用链投影，复用显式准备的 `contract-index/contracts.sqlite` 与工程源码根目录。`GET /api/projects/<projectId>/call-chains` 列出接口；`/<contractId>?version=...` 返回节点与定向边；`/<contractId>/evidence?version=...&node=...` 或 `&edge=...` 返回有行数上限的索引源码片段。版本变化拒绝旧引用，工程身份由 ProjectContext 与快照共同核对，不使用可变的全局工程。
 

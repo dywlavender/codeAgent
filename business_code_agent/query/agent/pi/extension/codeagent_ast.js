@@ -66,4 +66,8 @@ export default function (pi) {
       },
     });
   }
+  pi.registerCommand("codeagent-ast-loaded", {
+    description: "CodeAgent AST 查询工具已注册",
+    handler: async () => {},
+  });
 }

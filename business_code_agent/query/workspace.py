@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,6 +141,15 @@ def _directory_status(path: Path) -> str:
             return "EMPTY" if next(entries, None) is None else "READABLE"
     except OSError:
         return "UNREADABLE"
+
+
+def _is_directory_junction(path: Path) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        return path.lstat().st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    except FileNotFoundError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -382,8 +392,8 @@ class WorkspaceManager:
         repositories.mkdir(exist_ok=True)
         knowledge.mkdir(exist_ok=True)
         for child in repositories.iterdir():
-            if child.is_symlink() and child.name not in desired:
-                child.unlink()
+            if child.name not in desired and (child.is_symlink() or _is_directory_junction(child)):
+                self._unlink_directory(child)
         for repository_id, source in selected:
             link = repositories / _safe_name(repository_id)
             self._link_directory(link, source)
@@ -414,11 +424,11 @@ class WorkspaceManager:
             ast_source = None
         else:
             ast_source = Path(ast_source).expanduser().resolve() if ast_source else None
-        if len(selected) < len(configured):
-            # Version-wide Markdown may refer to repositories outside this turn.
+        scoped = len(selected) < len(configured)
+        if scoped:
+            # Project-wide structure documents can name repositories outside this turn.
             ast_source = None
-            if mode == "ast":
-                code_map_source = None
+            code_map_source = None
         if business_context_source:
             self._link_directory(business_context_link, business_context_source)
         else:
@@ -431,6 +441,8 @@ class WorkspaceManager:
             self._link_directory(ast_link, ast_source)
         else:
             self._unlink_directory(ast_link)
+        if scoped and (code_map_link.exists() or ast_link.exists()):
+            raise WorkspaceError("无法移除工作区中的全工程结构资料，未启动限仓问答")
         if self.requirements_root.is_dir():
             self._link_directory(requirements_link, self.requirements_root)
         else:
@@ -699,13 +711,12 @@ class WorkspaceManager:
         if not source.is_dir():
             # Optional/unavailable sources must not leave dangling links that
             # look like mounted data to the agent.
-            if link.is_symlink():
-                link.unlink()
+            self._unlink_directory(link)
             return
-        if link.is_symlink():
+        if link.is_symlink() or _is_directory_junction(link):
             if link.resolve() == source:
                 return
-            link.unlink()
+            self._unlink_directory(link)
         elif link.exists():
             if link.is_dir() and not any(link.iterdir()):
                 link.rmdir()
@@ -736,7 +747,7 @@ class WorkspaceManager:
         """Remove only an empty or manager-created structural link."""
         if link.is_symlink():
             link.unlink()
-        elif link.is_dir() and not any(link.iterdir()):
+        elif _is_directory_junction(link) or (link.is_dir() and not any(link.iterdir())):
             link.rmdir()
 
     def _turn_context(self, root: Path, mode: str | None, mode_description: str | None,

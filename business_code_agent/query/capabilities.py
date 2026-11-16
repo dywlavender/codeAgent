@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from business_code_agent.query.context import RunContext
@@ -35,6 +35,14 @@ class PreparedCapabilities:
     @property
     def pi_tool_names(self) -> tuple[str, ...]:
         return PI_TOOL_NAMES + (PI_AST_TOOL_NAMES if self.ast_reader else ())
+
+    def without_pi_ast(self, reason: str) -> PreparedCapabilities:
+        return replace(
+            self, ast_reader=None,
+            instructions=tuple(item for item in self.instructions if item[0] != "ast"),
+            statuses=tuple(replace(tool, status="unavailable", names=(), reason=reason)
+                           if tool.capability == "ast" else tool for tool in self.statuses),
+        )
 
 
 class FileCapability:

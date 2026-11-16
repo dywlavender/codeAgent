@@ -363,7 +363,10 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         self.assertEqual(self.ast.resolve(),
                          (combined.path / "knowledge" / "ast").resolve())
         scoped = self.manager.prepare_pi(
-            workspace_key="scoped", mode="combined", repository_ids=["a"], ast_source=self.ast)
+            workspace_key="combined", mode="combined", repository_ids=["a"],
+            code_map_source=self.code_map, ast_source=self.ast)
+        self.assertEqual(combined.path, scoped.path)
+        self.assertFalse((scoped.path / "knowledge" / "generated-code-map").exists())
         self.assertFalse((scoped.path / "knowledge" / "ast").exists())
 
     def test_pi_capabilities_follow_the_material_mode(self):

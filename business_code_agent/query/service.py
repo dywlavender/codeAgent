@@ -758,33 +758,49 @@ class QueryService:
             settings = runtime.execution_settings()
             prepared = prepare_pi_capabilities(context, version=version, mode=effective_mode,
                                                ast_root=self.ast_data_root)
-            settings = {**settings, "tools": list(prepared.pi_tool_names)}
-            preparation = RunPreparation(manifest, prepared.statuses)
-            execution = execution_snapshot(profile, manifest, prepared.statuses, settings=settings)
-            execution["repositoryIds"] = list(workspace.repository_ids)
-            execution["mode"] = effective_mode
-            session_config = _session_config(execution, manifest, core=True)
-            session_config["mode"] = effective_mode
-            session_config["astVersionId"] = workspace.ast_version_id
             archive.workspace = workspace.path.resolve()
-            archive.update_run(execution=execution, mode=effective_mode,
+            archive.update_run(mode=effective_mode,
                                astVersionId=workspace.ast_version_id,
                                workspace=str(workspace.path),
                                materials=[{"label": label, "path": str(path)}
                                           for label, path in manifest.labelled_roots()])
-            self._apply_pi_run(conversation, run_id, effective_scope, effective_mode,
-                               workspace.ast_version_id, execution, session_config,
-                               runtime_name, workspace_id)
-            if run_callback:
-                callback_sent = True
-                run_callback({"runId": run_id, "conversationId": conversation["id"],
-                              "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
-                              "astVersionId": workspace.ast_version_id, "execution": execution})
-            preparation.require_tools()
-            context = replace(context, session_id=conversation["runtime_session_id"])
+
+            def prepared_config(active):
+                snapshot = execution_snapshot(
+                    profile, manifest, active.statuses,
+                    settings={**settings, "tools": list(active.pi_tool_names)})
+                snapshot["repositoryIds"] = list(workspace.repository_ids)
+                snapshot["mode"] = effective_mode
+                session = _session_config(snapshot, manifest, core=True)
+                session["mode"] = effective_mode
+                session["astVersionId"] = workspace.ast_version_id
+                return snapshot, session
+
+            def bind_prepared(active):
+                nonlocal execution, callback_sent
+                execution, session = prepared_config(active)
+                archive.update_run(execution=execution)
+                self._apply_pi_run(conversation, run_id, effective_scope, effective_mode,
+                                   workspace.ast_version_id, execution, session,
+                                   runtime_name, workspace_id)
+                if run_callback:
+                    callback_sent = True
+                    run_callback({"runId": run_id, "conversationId": conversation["id"],
+                                  "mode": effective_mode, "modeLabel": QUERY_MODE_LABELS[effective_mode],
+                                  "astVersionId": workspace.ast_version_id, "execution": execution})
+                return conversation["runtime_session_id"]
+
+            verify_ast = isinstance(runtime, PiAgentRuntime) and prepared.ast_reader is not None
+            if verify_ast:
+                _, session = prepared_config(prepared)
+                session_id = self._pi_session_id(conversation, effective_scope, effective_mode,
+                                                 workspace.ast_version_id, session, runtime_name)
+            else:
+                session_id = bind_prepared(prepared)
+            RunPreparation(manifest, prepared.statuses).require_tools()
             ask_kwargs = {
-                "context": context, "prepared": prepared,
-                "session_id": conversation["runtime_session_id"],
+                "context": replace(context, session_id=session_id), "prepared": prepared,
+                "session_id": session_id,
                 "event_callback": on_event,
                 "cancel_check": lambda: self.db.execute(
                     "SELECT status FROM query_run WHERE id=?", (run_id,)).fetchone()[0] == "cancelling",
@@ -792,6 +808,8 @@ class QueryService:
             }
             if isinstance(runtime, PiAgentRuntime):
                 ask_kwargs["call_callback"] = archive.record_call
+            if verify_ast:
+                ask_kwargs["prepared_callback"] = bind_prepared
             raw_result = runtime.ask(question, **ask_kwargs)
             result = normalize_runtime_result(raw_result)
             actual_model = result.usage.get("actualModel")
@@ -882,8 +900,8 @@ class QueryService:
             "usage": usage,
         }
 
-    def _apply_pi_run(self, conversation, run_id, scope, mode, ast_version_id, execution,
-                      session_config, runtime_name, workspace_id) -> None:
+    @staticmethod
+    def _pi_session_id(conversation, scope, mode, ast_version_id, session_config, runtime_name):
         stored_scope = _load_json(conversation.get("scope_json"), None)
         stored_mode = str(conversation.get("mode") or "backbone")
         changed = (
@@ -893,7 +911,12 @@ class QueryService:
             or conversation.get("runtime") != runtime_name
             or session_config != _load_json(conversation.get("session_config_json"), None)
         )
-        session_id = None if changed else conversation.get("runtime_session_id")
+        return None if changed else conversation.get("runtime_session_id")
+
+    def _apply_pi_run(self, conversation, run_id, scope, mode, ast_version_id, execution,
+                      session_config, runtime_name, workspace_id) -> None:
+        session_id = self._pi_session_id(conversation, scope, mode, ast_version_id,
+                                         session_config, runtime_name)
         self.db.execute("BEGIN IMMEDIATE")
         try:
             self.db.execute(

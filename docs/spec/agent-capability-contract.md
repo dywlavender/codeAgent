@@ -359,7 +359,7 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 `pi-v1` 使用 Pi 原生 `read`、`grep`、`find`、`ls`、`codemode`，不注册 LangChain 工具，不开放 `bash`／`edit`／`write`。`file_tools` 为 required；业务补充知识、AST、代码地图按模式为 optional，缺失只收缩本轮能力，不换 Profile、不生成索引。
 
-AST 在 `combined` 或显式 `ast` 模式下按可用版本装配。只有索引和授权映射可用时，Pi 才注册 `find_code_symbol`、`get_code_symbol`、`find_code_relations`。工具参数仅选择符号、仓库过滤和关系方向，工程、版本与允许范围由服务端提供。`ready` 表示本轮装配结构工具。组合模式在 AST 不可用时保留源码工具。当前实现的依据仍由 `read` 交付。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
+AST 在 `combined` 或显式 `ast` 模式下按可用版本装配。只有索引和授权映射可用时，Pi 才注册 `find_code_symbol`、`get_code_symbol`、`find_code_relations`。工程、版本与允许范围由服务端提供。Pi 在发出模型请求前通过加载标识确认 AST 扩展，失败时在运行配置和 Trace 记录 `unavailable`，并使用没有 AST 工具的 Pi 进程继续。本轮会话按实际工具配置绑定。限仓问答只通过结构工具获得授权仓库的 AST 位置，全工程 Code Map 和 AST Markdown 仅供全仓问答挂载。当前实现的依据仍由 `read` 交付。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
 
 正常在线 API 入口固定进入 Pi；旧 Profile／Runtime 环境变量不能再覆盖这一选择。旧 Runtime 仅允许历史评测代码显式构造并注入。
 

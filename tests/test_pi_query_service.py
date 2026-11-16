@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -253,7 +254,7 @@ class PiQueryServiceTest(unittest.TestCase):
         self.assertEqual((self.root / "ast").resolve(),
                          (root / "knowledge" / "generated-code-map").resolve())
 
-    def test_pi_ast_tools_are_versioned_optional_and_respect_scope(self):
+    def generate_ast(self):
         ast = AstService(project_config=self.config)
         ast.generate()
         deadline = time.monotonic() + 5
@@ -261,6 +262,10 @@ class PiQueryServiceTest(unittest.TestCase):
             time.sleep(0.01)
         state = ast.status()
         self.assertEqual("available", state["status"], state)
+        return state
+
+    def test_pi_ast_tools_are_versioned_optional_and_respect_scope(self):
+        state = self.generate_ast()
         service = self.service()
         scope = {"repositoryIds": ["a"]}
 
@@ -274,6 +279,8 @@ class PiQueryServiceTest(unittest.TestCase):
             self.assertIn("find_code_symbol", ready["execution"]["settings"]["tools"])
             self.assertFalse(next(item["available"] for item in ready["execution"]["materials"]
                                   if item["kind"] == "ast"))
+            self.assertFalse(next(item["available"] for item in ready["execution"]["materials"]
+                                  if item["kind"] == "code_map"))
             disabled = service.query("只看源码", mode="none", scope=scope)
             self.assertEqual("disabled", ast_tool(disabled)["status"])
             self.assertNotIn("find_code_symbol", disabled["execution"]["settings"]["tools"])
@@ -285,6 +292,36 @@ class PiQueryServiceTest(unittest.TestCase):
             self.assertEqual([], ast_tool(stale)["names"])
             self.assertIn("read", stale["execution"]["settings"]["tools"])
             self.assertEqual("completed", stale["status"])
+
+    def test_broken_ast_extension_falls_back_before_prompt_and_updates_run_metadata(self):
+        state = self.generate_ast()
+        ready = self.service().query("查结构", mode="combined")
+        with patch.dict(os.environ, {"FAKE_PI_NO_AST_EXTENSION": "1"}):
+            service = self.service()
+        notifications = []
+        result = service.query("回退到源码", mode="combined",
+                               conversation_id=ready["conversationId"],
+                               run_callback=notifications.append)
+
+        def ast_status(execution):
+            return next(tool for tool in execution["tools"] if tool["capability"] == "ast")
+
+        self.assertEqual("completed", result["status"])
+        self.assertNotEqual(ready["sessionId"], result["sessionId"])
+        self.assertEqual(1, len(notifications))
+        status = ast_status(result["execution"])
+        self.assertEqual(("unavailable", [], state["currentVersionId"]),
+                         (status["status"], status["names"], status["version"]))
+        self.assertIn("未完成加载", status["reason"])
+        self.assertEqual(status, ast_status(notifications[0]["execution"]))
+        self.assertEqual(status, ast_status(service.get_run(result["runId"])["execution"]))
+        self.assertNotIn("find_code_symbol", result["execution"]["settings"]["tools"])
+        trace = service.get_trace(result["runId"])
+        self.assertEqual(status, ast_status(trace["run"]["execution"]))
+        phases = [event["payload"].get("phase") for event in trace["events"]]
+        self.assertLess(phases.index("ast_unavailable"), phases.index("thinking"))
+        self.assertTrue(any(event["eventType"] == "tool" and event["payload"]["name"] == "read"
+                            for event in trace["events"]))
 
     def test_runtime_failure_is_persisted_without_langchain_fallback(self):
         service = self.service("error")

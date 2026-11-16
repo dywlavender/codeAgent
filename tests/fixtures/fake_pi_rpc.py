@@ -267,7 +267,11 @@ def main() -> int:
     if not SESSION_FILE.exists():
         SESSION_FILE.write_text("", encoding="utf-8")
     scenario = os.environ.get("FAKE_PI_SCENARIO", "normal")
+    tools = set((opts.get("--tools") or "").split(","))
+    ast_broken = os.environ.get("FAKE_PI_NO_AST_EXTENSION") == "1"
     commands = [{"name": "codeagent-readonly-search", "source": "extension"}]
+    if "find_code_symbol" in tools and not ast_broken:
+        commands.append({"name": "codeagent-ast-loaded", "source": "extension"})
     if os.environ.get("FAKE_PI_NO_EXTENSION") == "1":
         commands = []
 
@@ -294,6 +298,10 @@ def main() -> int:
         elif kind == "get_messages":
             response(request_id, kind, data={"messages": []})
         elif kind == "prompt":
+            if ast_broken and ("find_code_symbol" in tools
+                               or "find_code_symbol" in (opts.get("--system-prompt") or "")):
+                response(request_id, kind, success=False, error="AST was advertised after load failure")
+                continue
             response(request_id, kind, data={"disposition": "started"})
             threading.Thread(target=prompt_worker, args=(scenario,), daemon=True).start()
         elif kind == "abort":

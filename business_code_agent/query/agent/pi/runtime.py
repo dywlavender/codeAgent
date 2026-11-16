@@ -32,10 +32,15 @@ from .sessions import (prepare_session_root, resolve_session_file,
 SEARCH_EXTENSION = Path(__file__).with_name("extension") / "codeagent_search.js"
 AST_EXTENSION = Path(__file__).with_name("extension") / "codeagent_ast.js"
 SEARCH_EXTENSION_COMMAND = "codeagent-readonly-search"
+AST_EXTENSION_COMMAND = "codeagent-ast-loaded"
 
 
 class PiConfigurationError(RuntimeErrorBase):
     """Pi or its configured model is not ready for this run."""
+
+
+class _AstExtensionUnavailable(Exception):
+    """The optional AST tools could not be loaded before prompting Pi."""
 
 
 class PiAgentRuntime:
@@ -146,7 +151,8 @@ class PiAgentRuntime:
 
     def ask(self, question: str, *, context: RunContext,
             prepared=None, session_id: str | None = None, event_callback=None,
-            cancel_check=None, call_callback=None, mode: str | None = None) -> RuntimeResult:
+            cancel_check=None, call_callback=None, prepared_callback=None,
+            mode: str | None = None) -> RuntimeResult:
         started = time.monotonic()
         version = self.preflight()
         if prepared is None:
@@ -166,9 +172,6 @@ class PiAgentRuntime:
         adapter = PiEventAdapter(emit, workspace=context.workspace,
                                  allowed_roots=allowed_roots,
                                  call_callback=call_callback)
-        system_prompt = self._system_prompt(context, prepared, mode=mode)
-        command = self._command(root, existing, system_prompt, prepared=prepared)
-        system_prompt_hash = sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
         process_environment = {
             **self.environment,
             "CODEAGENT_PI_WORKSPACE": str(Path(context.workspace).resolve()),
@@ -182,45 +185,27 @@ class PiAgentRuntime:
                  if source.available and source.directory},
                 ensure_ascii=False),
         }
-        if prepared.ast_reader:
-            reader = prepared.ast_reader
-            material = reader.material
-            process_environment.update({
-                "CODEAGENT_PI_AST_SCOPE": json.dumps({
-                    "versionId": reader.version_id, "projectId": reader.project_id,
-                    "astRoot": str(material.root),
-                    "projectConfig": str(material.project_config) if material.project_config else None,
-                    "repositories": [{"repositoryId": repo.repository_id, "root": str(repo.root), "mount": repo.mount}
-                                     for repo in reader.repositories],
-                }, ensure_ascii=False),
-                "CODEAGENT_PI_AST_PYTHON": sys.executable,
-                "CODEAGENT_PI_AST_IMPORT_ROOT": str(Path(__file__).resolve().parents[4]),
-            })
-        process = PiProcess(command, cwd=context.workspace,
-                            environment=process_environment)
         cancelled = False
         timed_out = False
         session_file = existing
-        actual_model = ""
+        process = None
         try:
-            process.start()
-            state = self._request(process, {"type": "get_state"}, adapter=adapter,
-                                  timeout=min(30.0, max(5.0, self.timeout)))
-            if not state.get("success"):
-                raise PiConfigurationError(
-                    f"Pi 状态检查失败：{state.get('error') or 'unknown error'}")
-            state_data = state.get("data") if isinstance(state.get("data"), Mapping) else {}
-            actual_model = self._verify_model(state_data.get("model"))
-            self._verify_search_extension(process, adapter)
-            reported_session = state_data.get("sessionFile")
-            if session_file is None:
-                session_file = validate_session_file(
-                    root, reported_session, require_exists=False)
+            try:
+                process, state_data, actual_model, system_prompt = self._start_checked(
+                    root, existing, context, prepared, mode, adapter, process_environment)
+            except _AstExtensionUnavailable as exc:
+                prepared = prepared.without_pi_ast(str(exc))
+                fallback_session = prepared_callback(prepared) if prepared_callback else None
+                session_file = resolve_session_file(root, fallback_session)
+                self._emit(emit, "status", phase="ast_unavailable", capability="ast",
+                           label=f"{exc}，本轮继续使用文件工具")
+                process, state_data, actual_model, system_prompt = self._start_checked(
+                    root, session_file, context, prepared, mode, adapter, process_environment)
             else:
-                current = validate_session_file(
-                    root, reported_session, require_exists=False)
-                if current != session_file:
-                    session_file = current
+                if prepared_callback:
+                    prepared_callback(prepared)
+            session_file = validate_session_file(
+                root, state_data.get("sessionFile"), require_exists=False)
 
             self._emit(emit, "status", phase="thinking", label="Pi 正在分析")
             prompt_id = self._request_id("prompt")
@@ -289,10 +274,11 @@ class PiAgentRuntime:
             adapter.finish_pending("failed", str(exc))
             raise RuntimeErrorBase(f"Pi 运行失败：{exc}") from exc
         finally:
-            process.close()
+            if process is not None:
+                process.close()
 
         usage = adapter.usage()
-        usage["systemPromptSha256"] = system_prompt_hash
+        usage["systemPromptSha256"] = sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
         usage["piVersion"] = version
         usage["actualModel"] = actual_model or None
         usage["piSessionFile"] = str(session_file)
@@ -340,6 +326,47 @@ class PiAgentRuntime:
                    label="回答被截断（达到模型输出上限）" if incomplete else "已完成")
         return RuntimeResult(answer, str(session_file), events, usage,
                              status="incomplete" if incomplete else "completed")
+
+    def _start_checked(self, root, existing, context, prepared, mode, adapter, environment):
+        env = dict(environment)
+        if prepared.ast_reader:
+            if not AST_EXTENSION.is_file():
+                raise _AstExtensionUnavailable("Pi AST 扩展文件缺失")
+            reader = prepared.ast_reader
+            material = reader.material
+            env.update({
+                "CODEAGENT_PI_AST_SCOPE": json.dumps({
+                    "versionId": reader.version_id, "projectId": reader.project_id,
+                    "astRoot": str(material.root),
+                    "projectConfig": str(material.project_config) if material.project_config else None,
+                    "repositories": [{"repositoryId": repo.repository_id, "root": str(repo.root), "mount": repo.mount}
+                                     for repo in reader.repositories],
+                }, ensure_ascii=False),
+                "CODEAGENT_PI_AST_PYTHON": sys.executable,
+                "CODEAGENT_PI_AST_IMPORT_ROOT": str(Path(__file__).resolve().parents[4]),
+            })
+        system_prompt = self._system_prompt(context, prepared, mode=mode)
+        command = self._command(root, existing, system_prompt, prepared=prepared)
+        process = PiProcess(command, cwd=context.workspace, environment=env)
+        try:
+            process.start()
+            state = self._request(process, {"type": "get_state"}, adapter=adapter,
+                                  timeout=min(30.0, max(5.0, self.timeout)))
+            if not state.get("success"):
+                raise PiConfigurationError(
+                    f"Pi 状态检查失败：{state.get('error') or 'unknown error'}")
+            state_data = state.get("data") if isinstance(state.get("data"), Mapping) else {}
+            actual_model = self._verify_model(state_data.get("model"))
+            names = self._verify_search_extension(process, adapter)
+            if prepared.ast_reader and AST_EXTENSION_COMMAND not in names:
+                raise _AstExtensionUnavailable("Pi AST 扩展未完成加载")
+        except Exception as exc:
+            process.close()
+            if (isinstance(exc, PiProcessError) and prepared.ast_reader
+                    and AST_EXTENSION.name in process.diagnostics()):
+                raise _AstExtensionUnavailable("Pi AST 扩展启动失败") from exc
+            raise
+        return process, state_data, actual_model, system_prompt
 
     def _command(self, root: Path, existing: Path | None, system_prompt: str, *, prepared=None) -> list[str]:
         command = [
@@ -414,7 +441,7 @@ class PiAgentRuntime:
         )
 
     def _verify_search_extension(self, process: PiProcess,
-                                 adapter: PiEventAdapter) -> None:
+                                 adapter: PiEventAdapter) -> set[str]:
         if not SEARCH_EXTENSION.is_file():
             raise PiConfigurationError(f"Pi 只读检索扩展不存在：{SEARCH_EXTENSION}")
         response = self._request(process, {"type": "get_commands"}, adapter=adapter,
@@ -428,6 +455,7 @@ class PiAgentRuntime:
         if SEARCH_EXTENSION_COMMAND not in names:
             raise PiConfigurationError(
                 "Pi 只读检索扩展未加载；grep/find 可能无法跟随授权仓库链接")
+        return names
 
     def _verify_model(self, model: Any) -> str:
         if not isinstance(model, Mapping):
