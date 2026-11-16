@@ -44,8 +44,8 @@ def goal_coverage(answer: str, reads, *, workspace=None) -> dict[str, Any]:
 
     A goal is only ``verified`` when the model marked it 已核实 and every
     line-cited reference in that item was delivered by a read in this run (at
-    least one such reference is required). The remainder are reported as gaps;
-    no section means the model made no completeness claim.
+    least one such reference is required). System guide citations only supply
+    navigation. No section means the model made no completeness claim.
     """
     lines = str(answer or "").replace("\r\n", "\n").splitlines()
     start = next((index for index, line in enumerate(lines)
@@ -64,7 +64,7 @@ def goal_coverage(answer: str, reads, *, workspace=None) -> dict[str, Any]:
         text = match.group(2).strip()
         references = verify_references(text, reads, workspace=workspace)["references"]
         line_references = [reference for reference in references
-                           if reference.get("line") is not None]
+                           if reference.get("line") is not None and reference["kind"] != "system_guide"]
         confirmed = [reference for reference in line_references
                      if reference.get("confirmed")]
         if status == "verified" and (not line_references

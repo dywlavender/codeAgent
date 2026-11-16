@@ -323,6 +323,53 @@ class PiQueryServiceTest(unittest.TestCase):
         self.assertTrue(any(event["eventType"] == "tool" and event["payload"]["name"] == "read"
                             for event in trace["events"]))
 
+    def test_system_guides_follow_scope_and_only_relevant_edits_replace_the_session(self):
+        config = json.loads(self.config.read_text())
+        config.update(systems=[{"id": "middle", "name": "中台"}, {"id": "channel", "name": "渠道"}],
+                      applications=[
+                          {"id": "api", "systemId": "middle", "repositoryId": "a", "sourceRoot": "api"},
+                          {"id": "job", "systemId": "middle", "repositoryId": "b"},
+                          {"id": "entry", "systemId": "channel", "repositoryId": "a"},
+                      ])
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        service = self.service()
+        source_root = service.project_context.system_guides_root
+        for filename, text in {
+            "middle/SYSTEM.md": "从项目约定的入口定位",
+            "middle/applications/job.md": "批任务从注册器定位",
+            "channel/SYSTEM.md": "渠道从路由定位",
+        }.items():
+            path = source_root / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+        full = service.query("全工程", mode="none")
+        conversation_id = full["conversationId"]
+        folder = service.workspace_manager.root / "pi" / _safe_name(conversation_id) / "knowledge/system-guides"
+        self.assertTrue((folder / "channel/SYSTEM.md").is_file())
+        scoped = service.query("只看中台", mode="none", scope={"systemIds": ["middle"]},
+                               conversation_id=conversation_id)
+        self.assertFalse((folder / "channel").exists())
+        self.assertTrue((folder / "middle/applications/job.md").is_file())
+        self.assertEqual(["a", "b"], scoped["execution"]["repositoryIds"])
+
+        scope = {"repositoryIds": ["a"]}
+        narrowed = service.query("只授权仓库 a", mode="none", scope=scope, conversation_id=conversation_id)
+        self.assertFalse((folder / "middle/applications/job.md").exists())
+        old = narrowed["execution"]["systemGuides"]
+        self.assertEqual(["knowledge/system-guides/middle/SYSTEM.md", "knowledge/system-guides/channel/SYSTEM.md"],
+                         old["documents"])
+
+        (source_root / "middle/applications/job.md").write_text("更新未授权仓库规则", encoding="utf-8")
+        unchanged = service.query("续问", mode="none", scope=scope, conversation_id=conversation_id)
+        self.assertEqual(narrowed["sessionId"], unchanged["sessionId"])
+        (source_root / "middle/SYSTEM.md").write_text("入口改从登记表定位", encoding="utf-8")
+        refreshed = service.query("查新导航", mode="none", scope=scope, conversation_id=conversation_id)
+        self.assertNotEqual(narrowed["sessionId"], refreshed["sessionId"])
+        self.assertNotEqual(old["version"], refreshed["execution"]["systemGuides"]["version"])
+        self.assertEqual("入口改从登记表定位", (folder / "middle/SYSTEM.md").read_text())
+        self.assertEqual(old, service.get_trace(narrowed["runId"])["run"]["execution"]["systemGuides"])
+
     def test_runtime_failure_is_persisted_without_langchain_fallback(self):
         service = self.service("error")
         runs = []

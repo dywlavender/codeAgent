@@ -103,19 +103,22 @@ class PiRuntimeTest(unittest.TestCase):
 
     def test_goal_coverage_requires_delivered_read_evidence(self):
         reads = [{"path": "repos/a/Main.java", "content": "line1\nline2\n",
-                  "lineStart": 10, "lineEnd": 11}]
+                  "lineStart": 10, "lineEnd": 11},
+                 {"path": "knowledge/system-guides/a/SYSTEM.md", "content": "路线说明",
+                  "lineStart": 1, "lineEnd": 1}]
         answer = (
             "答案正文。\n\n## 目标覆盖\n"
             "- [已核实] 创建入口：`repos/a/Main.java:10-11`\n"
             "- [已核实] 审批入口：`repos/a/Missing.java:1`\n"
             "- [已核实] 混合证据：`repos/a/Main.java:10-11` 与 `repos/a/Other.java:1`\n"
+            "- [已核实] 仅有导航：`knowledge/system-guides/a/SYSTEM.md:1`\n"
             "- [部分] 还款：已知 command，缺 Handler\n"
             "- [未核实] 状态机例外\n")
         coverage = goal_coverage(answer, reads, workspace="/workspace")
-        self.assertEqual(5, coverage["total"])
+        self.assertEqual(6, coverage["total"])
         self.assertEqual(1, coverage["verified"])
         self.assertEqual(1, coverage["partial"])
-        self.assertEqual(3, coverage["unverified"])
+        self.assertEqual(4, coverage["unverified"])
         self.assertFalse(coverage["complete"])
         self.assertEqual(["repos/a/Main.java:10-11"],
                          coverage["goals"][0]["confirmedReferences"])

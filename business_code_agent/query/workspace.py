@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from business_code_agent.platform.repositories import configured_repository_sour
 
 from .materials import BUSINESS_CONTEXT_MOUNT, MaterialManifest
 from .navigation import NAVIGATION_FILE, build_navigation
+from .system_guides import (SYSTEM_GUIDES_MOUNT, GuideDocument, load_system_guides,
+                            render_system_guidance)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +172,9 @@ class Workspace:
     ast_status: str | None = None
     repository_ids: tuple[str, ...] = ()
     repository_mounts: tuple[tuple[str, str], ...] = ()
+    navigation_applications: tuple[dict, ...] = ()
+    system_guidance: str = ""
+    system_guide_paths: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -340,6 +346,8 @@ class WorkspaceManager:
 
     def prepare_pi(self, *, workspace_key: str, mode: str | None = None,
                    repository_ids=None,
+                   system_ids=(), direct_repository_ids=(),
+                   system_guides_source: Path | None = None,
                    business_context_source: str | Path | None = None,
                    code_map_source: str | Path | None = None,
                    ast_source: str | Path | None = None,
@@ -456,7 +464,10 @@ class WorkspaceManager:
             self.config,
             {repository_id: f"repos/{_safe_name(repository_id)}" for repository_id, _ in selected},
             self.project_id, self.project_name,
+            system_ids=system_ids, direct_repository_ids=direct_repository_ids,
         )
+        guides = load_system_guides(system_guides_source, navigation) if system_guides_source else ()
+        self._copy_system_guides(root, guides)
         (root / NAVIGATION_FILE).write_text(
             json.dumps(navigation, ensure_ascii=False, indent=2), encoding="utf-8")
         return Workspace(
@@ -477,7 +488,27 @@ class WorkspaceManager:
             repository_ids=tuple(repository_id for repository_id, _ in selected),
             repository_mounts=tuple((repository_id, f"repos/{_safe_name(repository_id)}")
                                     for repository_id, _ in selected),
+            navigation_applications=tuple(navigation["applications"]),
+            system_guidance=render_system_guidance(navigation, guides),
+            system_guide_paths=tuple(doc.workspace_path for doc in guides),
         )
+
+    def _copy_system_guides(self, workspace: Path, guides: tuple[GuideDocument, ...]) -> None:
+        target = workspace / SYSTEM_GUIDES_MOUNT
+        if not guides and not (target.exists() or target.is_symlink() or _is_directory_junction(target)):
+            return
+        if target.parent.resolve() != workspace.resolve() / "knowledge":
+            raise WorkspaceError("系统导航资料必须写入本轮工作区")
+        if target.is_symlink() or _is_directory_junction(target):
+            self._unlink_directory(target)
+        elif target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            raise WorkspaceError("系统导航工作区路径不是目录")
+        for document in guides:
+            path = target / document.relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(document.text, encoding="utf-8")
 
     def ensure(self, *, mode: str | None = None,
                business_context_source: str | Path | None = None,

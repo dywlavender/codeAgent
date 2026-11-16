@@ -23,7 +23,7 @@ class ResolveProfileTest(unittest.TestCase):
             with self.subTest(environment=environment):
                 profile = resolve_profile(environment)
                 self.assertEqual(("pi-v1", "pi", "pi"), (profile.id, profile.runtime, profile.investigation))
-                self.assertEqual(MATERIAL_KINDS, profile.materials)
+                self.assertEqual((*MATERIAL_KINDS, "system_guide"), profile.materials)
         profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain"})
         self.assertEqual(
             ("coordinated-legacy-v1", "langchain", "coordinated", "plain"),

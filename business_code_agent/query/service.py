@@ -737,9 +737,14 @@ class QueryService:
         callback_sent = False
         try:
             selection = self._mode_selection(effective_mode)
+            systems = effective_scope["systemIds"] if effective_scope is not None else ()
+            directly_selected = tuple(str(item).strip() for item in (scope.get("repositoryIds") or ())) if systems else ()
             workspace = self.workspace_manager.prepare_pi(
                 workspace_key=conversation["id"], mode=effective_mode,
-                repository_ids=repositories, **selection)
+                repository_ids=repositories, system_ids=systems, direct_repository_ids=directly_selected,
+                system_guides_source=(self.project_context.system_guides_root
+                                      if "system_guide" in profile.materials else None),
+                **selection)
             manifest = MaterialManifest.from_workspace(
                 workspace.path, repository_mounts=workspace.repository_mounts,
                 allowed=profile.materials, mode=effective_mode,
@@ -752,7 +757,7 @@ class QueryService:
             context = RunContext(
                 run_id=run_id, project=self.project_context, profile=profile,
                 repository_ids=workspace.repository_ids, workspace=workspace.path,
-                materials=manifest.sources, session_id=None,
+                materials=manifest.sources, session_id=None, system_guidance=workspace.system_guidance,
             )
             version = runtime.preflight()
             settings = runtime.execution_settings()
@@ -771,9 +776,15 @@ class QueryService:
                     settings={**settings, "tools": list(active.pi_tool_names)})
                 snapshot["repositoryIds"] = list(workspace.repository_ids)
                 snapshot["mode"] = effective_mode
+                guide_source = next((source for source in manifest.sources if source.kind == "system_guide"), None)
+                if guide_source:
+                    snapshot["systemGuides"] = {"version": guide_source.version,
+                                                "documents": list(workspace.system_guide_paths)}
                 session = _session_config(snapshot, manifest, core=True)
                 session["mode"] = effective_mode
                 session["astVersionId"] = workspace.ast_version_id
+                if workspace.navigation_applications:
+                    session["applicationNavigation"] = list(workspace.navigation_applications)
                 return snapshot, session
 
             def bind_prepared(active):

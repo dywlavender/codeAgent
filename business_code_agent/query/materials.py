@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .system_guides import SYSTEM_GUIDES_MOUNT
 
 MATERIAL_KINDS = ("source", "requirements", "business_context", "code_map", "ast")
 BUSINESS_CONTEXT_MOUNT = "knowledge/business-context"
@@ -16,6 +17,7 @@ _PURPOSES = {
     "business_context": "解释项目术语、职责边界和业务约定",
     "code_map": "定位代码目录、文件和符号",
     "ast": "定位手动生成的版本化结构资料",
+    "system_guide": "说明系统和应用的代码查找规则",
 }
 _BASE_MATERIALS = {"source", "requirements"}
 _MODE_MATERIALS = {
@@ -61,6 +63,8 @@ class MaterialManifest:
                        repository_mounts=None):
         root = Path(workspace)
         kinds = set(allowed) & _MODE_MATERIALS.get(mode, set(MATERIAL_KINDS))
+        if "system_guide" in allowed and (root / SYSTEM_GUIDES_MOUNT).is_dir():
+            kinds.add("system_guide")
         context = "knowledge/business-context"
         context_label = "业务补充知识"
         if not (root / context).is_dir() and (root / "knowledge/baseline").is_dir():
@@ -77,7 +81,7 @@ class MaterialManifest:
                 if versions and version is None and directory is not None:
                     if kind == "source":
                         version = _source_revision(directory)
-                    elif kind in {"business_context", "requirements", "code_map"}:
+                    elif kind in {"business_context", "requirements", "code_map", "system_guide"}:
                         version = _directory_revision(directory)
                 sources.append(MaterialSource(kind, label, path, directory,
                                               "available" if directory else unavailable,
@@ -89,6 +93,7 @@ class MaterialManifest:
         add("ast", "AST 结构资料", code_map if mode == "ast" else "knowledge/ast",
             ast_version, "not_mounted" if ast_status == "available" else ast_status or "missing")
         add("requirements", "需求原文", "requirements")
+        add("system_guide", "系统代码导航", SYSTEM_GUIDES_MOUNT)
         if "source" in kinds:
             if repository_mounts is None:
                 repos = root / "repos"

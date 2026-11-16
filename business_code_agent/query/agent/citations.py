@@ -82,6 +82,8 @@ def match_reference_path(cited: str, by_path) -> str | None:
 
 
 def reference_kind(path: str) -> str:
+    if path.startswith("knowledge/system-guides/"):
+        return "system_guide"
     if path.startswith("knowledge/business-context/"):
         return "business_context"
     if path.startswith("requirements/"):

@@ -31,7 +31,7 @@ CORE_BUSINESS = AgentProfile("core-business-v1", "langchain-direct", "direct",
                              materials=("source", "requirements", "business_context"),
                              file_tools="required", search_code="disabled",
                              contract_trace="disabled", business_context="optional")
-PI = AgentProfile("pi-v1", "pi", "pi", materials=MATERIAL_KINDS,
+PI = AgentProfile("pi-v1", "pi", "pi", materials=(*MATERIAL_KINDS, "system_guide"),
                   file_tools="required", search_code="disabled",
                   contract_trace="disabled", business_context="optional")
 STANDARD = AgentProfile("standard-v1", "langchain", "agent_direct")
