@@ -1,0 +1,22 @@
+{
+  "suites": [
+    {
+      "path": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/evaluations/pi-targeted-coverage-smoke-20261116.json",
+      "name": "Pi goal coverage targeted smoke"
+    }
+  ],
+  "projectConfig": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/project.config.json",
+  "projectId": "complex-loan-validation",
+  "cases": [
+    "targeted-loans-coverage"
+  ],
+  "modes": [
+    "none"
+  ],
+  "repeats": 1,
+  "requestedModel": "deepseek/gpt-6-luna",
+  "timeoutSeconds": 600.0,
+  "thinking": null,
+  "keysFile": null,
+  "startedAt": "2026-11-16T06:24:09.739917+00:00"
+}

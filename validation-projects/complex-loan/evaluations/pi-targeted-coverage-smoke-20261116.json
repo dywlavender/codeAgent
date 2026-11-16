@@ -1,0 +1,18 @@
+{
+  "name": "Pi goal coverage targeted smoke",
+  "origin": "targeted-smoke",
+  "projectConfig": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/project.config.json",
+  "cases": [
+    {
+      "id": "targeted-loans-coverage",
+      "question": "请分别说明 repos/mifos-web-repo/src/app/loans/loans.service.ts 中 createLoansAccount、getLoansAccountTemplateResource 和 submitLoanActionButton 调用的 HTTP 方法与端点，并给出各自的文件路径和行号。请按目标覆盖小节逐项列出核实结果。",
+      "checks": [
+        "createLoansAccount 的 HTTP 方法与端点",
+        "getLoansAccountTemplateResource 的 HTTP 方法与端点",
+        "submitLoanActionButton 的 HTTP 方法与端点",
+        "三条结论均有文件路径和行号"
+      ],
+      "category": "targeted_smoke"
+    }
+  ]
+}

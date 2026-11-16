@@ -1,0 +1,199 @@
+{
+  "generatedAt": "2026-11-16T06:26:29.711759+00:00",
+  "batch": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/evaluations/pi-coverage-smoke-targeted-20261116",
+  "runs": [
+    {
+      "caseId": "targeted-loans-coverage",
+      "category": "targeted_smoke",
+      "mode": "none",
+      "repeat": 1,
+      "status": "completed",
+      "runId": "RUN-421a0ebe88b84135a456135cb9e09ae4",
+      "modelRequested": "deepseek/gpt-6-luna",
+      "modelActual": "deepseek/gpt-6-luna",
+      "piVersion": "1.5.0",
+      "elapsedSeconds": 139.93,
+      "metrics": {
+        "modelCalls": 4,
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "uniqueReadFiles": 1,
+        "readCalls": 2,
+        "searchCalls": 1,
+        "emptySearches": 0,
+        "candidateFiles": 1,
+        "unreadCandidates": [],
+        "unreadCandidateCount": 0,
+        "repeatedToolCalls": 0,
+        "searchesWithoutRead": 0,
+        "invalidInvestigationProxy": 0,
+        "repos": {
+          "mifos-web-repo": {
+            "reads": 1,
+            "searches": 1
+          }
+        },
+        "materialReads": {},
+        "references": {
+          "total": 6,
+          "confirmed": 5,
+          "searchSeen": 0,
+          "fileReadNotRange": 0,
+          "unseen": 0,
+          "pathOnly": 1,
+          "formatIssues": {
+            "absolute": 0,
+            "unrooted": 0,
+            "duplicated": 0,
+            "unresolved": 0,
+            "malformed": 0
+          },
+          "unresolvedFormat": 0,
+          "unseenReferences": [],
+          "unconfirmed": [
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+          ],
+          "readFiles": [
+            "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+          ],
+          "semanticProof": false
+        },
+        "totalTokens": 37608,
+        "cost": 0,
+        "durationMs": 139927.49,
+        "stopReason": "stop",
+        "keyFiles": [],
+        "keyFilesRead": 0,
+        "keyFilesTotal": 0,
+        "allKeyFilesRound": null,
+        "lastKeyFileRound": null,
+        "toolsAfterAllKeys": 0,
+        "searchesAfterAllKeys": 0,
+        "modelCallsAfterAllKeys": null,
+        "toolsAfterLastKey": 0,
+        "searchesAfterLastKey": 0,
+        "modelCallsAfterLastKey": null,
+        "stopping": {
+          "postKeyToolCalls": 0,
+          "postKeyNovelCalls": 0,
+          "postKeyRedundantCalls": 0,
+          "postKeyUnusedSearchCalls": 0,
+          "postKeyUnclassifiedCalls": 0,
+          "postKeyNewFiles": 0,
+          "postKeyNewReadCalls": 0,
+          "postKeyNovelCandidatePaths": 0,
+          "postKeyUnusedCandidatePaths": 0
+        },
+        "goalCoverage": {
+          "total": 3,
+          "verified": 3,
+          "partial": 0,
+          "unverified": 0,
+          "complete": true,
+          "goals": [
+            {
+              "status": "verified",
+              "text": "`createLoansAccount` 的 HTTP 方法与端点：`POST /loans`。依据：[loans.service.ts](repos/mifos-web-repo/src/app/loans/loans.service.ts:460)。",
+              "confirmedReferences": [
+                "repos/mifos-web-repo/src/app/loans/loans.service.ts:460"
+              ]
+            },
+            {
+              "status": "verified",
+              "text": "`getLoansAccountTemplateResource` 的 HTTP 方法与端点：`GET /loans/template`。依据：[loans.service.ts](repos/mifos-web-repo/src/app/loans/loans.service.ts:427)、[loans.service.ts](repos/mifos-web-repo/src/app/loans/loans.service.ts:433)。",
+              "confirmedReferences": [
+                "repos/mifos-web-repo/src/app/loans/loans.service.ts:427",
+                "repos/mifos-web-repo/src/app/loans/loans.service.ts:433"
+              ]
+            },
+            {
+              "status": "verified",
+              "text": "`submitLoanActionButton` 的 HTTP 方法与端点：`POST /loans/${loanId}/transactions`，带 `command` 查询参数。依据：[loans.service.ts](repos/mifos-web-repo/src/app/loans/loans.service.ts:238)、[loans.service.ts](repos/mifos-web-repo/src/app/loans/loans.service.ts:240)。",
+              "confirmedReferences": [
+                "repos/mifos-web-repo/src/app/loans/loans.service.ts:238",
+                "repos/mifos-web-repo/src/app/loans/loans.service.ts:240"
+              ]
+            }
+          ]
+        },
+        "reads": [
+          {
+            "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts",
+            "firstRound": 1,
+            "rounds": [
+              1,
+              3
+            ],
+            "ranges": [
+              [
+                1,
+                242
+              ],
+              [
+                418,
+                489
+              ]
+            ],
+            "contentChars": 10833
+          }
+        ],
+        "searches": [
+          {
+            "round": 2,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 20,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount|getLoansAccountTemplateResource|submitLoanActionButton"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          }
+        ],
+        "toolTimeline": [
+          {
+            "round": 1,
+            "name": "read",
+            "input": {
+              "limit": 240,
+              "offset": 1,
+              "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+            },
+            "status": "completed",
+            "outputChars": 8219
+          },
+          {
+            "round": 2,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "loans.service.ts",
+              "ignoreCase": false,
+              "limit": 20,
+              "literal": false,
+              "path": "repos/mifos-web-repo/src/app/loans",
+              "pattern": "createLoansAccount|getLoansAccountTemplateResource|submitLoanActionButton"
+            },
+            "status": "completed",
+            "outputChars": 1846
+          },
+          {
+            "round": 3,
+            "name": "read",
+            "input": {
+              "limit": 70,
+              "offset": 418,
+              "path": "repos/mifos-web-repo/src/app/loans/loans.service.ts"
+            },
+            "status": "completed",
+            "outputChars": 2614
+          }
+        ]
+      }
+    }
+  ]
+}

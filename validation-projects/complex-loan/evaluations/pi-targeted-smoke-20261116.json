@@ -1,0 +1,16 @@
+{
+  "name": "Pi path-fix targeted smoke",
+  "origin": "targeted-smoke",
+  "projectConfig": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/project.config.json",
+  "cases": [
+    {
+      "id": "targeted-loans-service",
+      "question": "请读取 repos/mifos-web-repo/src/app/loans/loans.service.ts，说明 createLoansAccount 调用的后端方法和端点，并给出文件路径与行号。",
+      "checks": [
+        "createLoansAccount 的 HTTP 方法与 /loans 端点",
+        "所在文件路径和行号"
+      ],
+      "category": "targeted_smoke"
+    }
+  ]
+}

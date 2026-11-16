@@ -1,0 +1,49 @@
+{
+  "reviewSchemaVersion": 2,
+  "reviewStatus": "unreviewed",
+  "caseId": "targeted-loans-coverage",
+  "mode": "none",
+  "repeat": 1,
+  "question": "请分别说明 repos/mifos-web-repo/src/app/loans/loans.service.ts 中 createLoansAccount、getLoansAccountTemplateResource 和 submitLoanActionButton 调用的 HTTP 方法与端点，并给出各自的文件路径和行号。请按目标覆盖小节逐项列出核实结果。",
+  "checks": [
+    "createLoansAccount 的 HTTP 方法与端点",
+    "getLoansAccountTemplateResource 的 HTTP 方法与端点",
+    "submitLoanActionButton 的 HTTP 方法与端点",
+    "三条结论均有文件路径和行号"
+  ],
+  "checksReview": [
+    {
+      "index": 1,
+      "check": "createLoansAccount 的 HTTP 方法与端点",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    },
+    {
+      "index": 2,
+      "check": "getLoansAccountTemplateResource 的 HTTP 方法与端点",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    },
+    {
+      "index": 3,
+      "check": "submitLoanActionButton 的 HTTP 方法与端点",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    },
+    {
+      "index": 4,
+      "check": "三条结论均有文件路径和行号",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    }
+  ],
+  "issues": []
+}

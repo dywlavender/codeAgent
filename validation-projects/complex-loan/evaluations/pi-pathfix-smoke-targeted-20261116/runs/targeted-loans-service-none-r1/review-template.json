@@ -1,0 +1,31 @@
+{
+  "reviewSchemaVersion": 2,
+  "reviewStatus": "unreviewed",
+  "caseId": "targeted-loans-service",
+  "mode": "none",
+  "repeat": 1,
+  "question": "请读取 repos/mifos-web-repo/src/app/loans/loans.service.ts，说明 createLoansAccount 调用的后端方法和端点，并给出文件路径与行号。",
+  "checks": [
+    "createLoansAccount 的 HTTP 方法与 /loans 端点",
+    "所在文件路径和行号"
+  ],
+  "checksReview": [
+    {
+      "index": 1,
+      "check": "createLoansAccount 的 HTTP 方法与 /loans 端点",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    },
+    {
+      "index": 2,
+      "check": "所在文件路径和行号",
+      "verdict": null,
+      "answerQuotes": [],
+      "evidence": [],
+      "reason": ""
+    }
+  ],
+  "issues": []
+}
