@@ -1,0 +1,85 @@
+# Pi 问答质量基线：纯源码与 Business Context 配对实验（2026-11-15）
+
+> 状态：进行中。16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。另有一组 lifecycle 修复验证运行（4 次中完成 1 次）。本记录在剩余运行完成后更新，当前结论只覆盖已完成部分。
+
+## 结论摘要（阶段性）
+
+- native-frontend：4 次运行都覆盖 5/6 检查项，第 6 项未被逐字声明但也没有把业务规则归到前端；没有发现凭空编造的路径或行号。低“引用确认率”主要因为生产核验只承认 `read` 原文，多数未确认引用实际在 grep 输出中可见。主要问题是末键后仍执行 5—36 次工具、3—22 次搜索，成本 0.33M—1.13M Token；A/B 正确性无可见差异，成本差异在两次重复内波动很大。
+- native-lifecycle：两次 none 都只读到 3/6 关键文件，连续漏掉 `CommandWrapperBuilder → 命令总线 → @CommandType → Handler` 这一层（check 5），无效调查代理 22/30；backbone r1 读到 4/6，仍未覆盖该层，并把成本推到 248 次工具、6.63M Token。该缺口的直接原因是 Pi 使用自建系统提示且带 `--no-context-files`，工作区已有的调查契约（“找到第一个入口并不代表问题已回答”）没有进入 Pi。
+- 针对性修复后，lifecycle none r1 读到 6/6 关键文件，答案覆盖命令构造、注册表和 Handler 路由，引用无未交付路径；成本 104 次工具、3.41M Token、542.7 秒。修复的稳定性、backbone 对照和 frontend 回归仍待完成。
+- 尚未完成的 `v2-strategy-code`、`biz-payment-pending` 决定不了 Business Context 是否有价值；现在不能据此下结论。
+
+## 实验设置
+
+- 生产链路：`scripts/evaluation/evaluate_pi.py` 直接构造 `PiAgentRuntime` 与生产 `QueryService`，调用 `service.query()`；没有另写简化版 Agent，检查项只存在于评测脚本与 `review-template.json`，不进入问题或模型提示词。
+- 题库：`complex-loan.json`（native-frontend、native-lifecycle）与 `complex-loan-diagnostic-v3.json`（v2-strategy-code、biz-payment-pending）。
+- 工程：`complex-loan-validation`；同一冻结源码与需求资料。
+- 模式：A 组 `mode=none`（源码、README、需求原文）；B 组 `mode=backbone`（在 A 组基础上增加 `knowledge/business-context`）。
+- 模型与运行时：Pi 1.5.0，`zcode/glm-5.3-flash`，未启用 thinking，单次超时 900 秒；zcode 账号单并发，批次串行执行。
+- 重复：每题、每组 2 次；运行顺序为题目 → 模式 → 重复。
+- 冻结资料版本（来自运行记录的 `execution.materials`）：
+
+| 资料 | 版本 |
+| --- | --- |
+| requirements | `sha256:f863836b7b3d6b81` |
+| channel-service-repo | `meta-sha256:662306313bf04125` |
+| external-simulator-repo | `meta-sha256:367ff820525ccd21` |
+| fineract-repo | `meta-sha256:7e06e91044174aaa` |
+| loan-middle-repo | `meta-sha256:7e71daa1be23e948` |
+| mifos-web-repo | `meta-sha256:9cdee6a34439fab2` |
+
+- 关键文件清单由 `evaluations/pi-quality-keys-20261115.json` 指定，仅供评测统计；它不是答案证据，也不代表只允许读这些文件。
+
+## 指标与边界
+
+- `completed` 只表示运行结束，不作为质量结论。
+- 关键文件覆盖：评测清单中实际被 `read` 的文件数；它只说明是否到达关键位置，不说明关系理解正确。
+- 末键轮次与扩张：最后一次读到清单文件的模型轮次，以及之后仍执行的工具、搜索与模型调用；用于观察“证据已足够后是否继续调查”。
+- 无效调查代理：重复工具调用、空搜索、搜索有候选但后续未读该候选的搜索次数之和；未读候选总数只作为调查广度信号，不单独判为无效。
+- 引用交付分类：生产核验器只承认本轮 `read` 原文；本报告额外把未核实引用分为“搜索输出可见”“读取文件但行区间未交付”“读取与搜索均未出现”“无行号”四类。`semanticProof=false`，引用核验通过不等于语义正确。
+- 结论可信度：按题库 checks 逐题阅读答案与源码抽查；不把引用数量当作正确性评分。
+- 调查成本：模型调用、工具调用、Token 与耗时；汇总的是上下文累计 Token，不同轮次长度差异会放大该数字。
+
+## 逐题结果
+
+### native-frontend
+
+**问题**：Mifos X 前端在创建贷款申请、发起审批、放款和还款时，分别调用哪些服务方法和后端接口？API 地址前缀、租户标识和认证是如何统一处理的？
+
+| 组 | 重复 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 空搜索 | 无读取搜索 | 重复调用 | 无效代理 | 引用 确认/搜索见/未交付/无行号 | Token | 耗时 s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 1 | 7/8 | 14 | 26/14 | 32 | 52 | 19 | 20 | 0 | 6 | 0 | 6 | 23/22/1/7 | 744,483 | 234.3 |
+| none | 2 | 8/8 | 14 | 36/22 | 40 | 58 | 22 | 22 | 2 | 5 | 0 | 7 | 33/9/0/2 | 1,131,863 | 292.0 |
+| backbone | 1 | 8/8 | 11 | 17/12 | 19 | 48 | 19 | 19 | 2 | 5 | 0 | 7 | 22/20/0/5 | 539,025 | 142.2 |
+| backbone | 2 | 7/8 | 17 | 5/3 | 23 | 39 | 12 | 18 | 1 | 3 | 0 | 4 | 30/13/2/2 | 327,716 | 260.8 |
+
+**关键关系覆盖（按 checks 阅读答案）**：四次运行都覆盖了创建（组件 submit → `createLoansAccount` → `POST /loans`）、审批/放款（`loanActionButtons` → `POST /loans/{id}?command=…`）、还款（模板类型解析 → `submitLoanActionButton` → `POST /loans/{id}/transactions?command=…`）、前缀/租户/认证三类统一处理，以及各业务域 service 与环境配置来源。check 6“前端只组装与发送、业务规则在后端”没有被四次答案逐字声明，但也没有任何一次把业务规则归到前端，按“未违背”记为部分覆盖。backbone r1 额外给出批量审批/批量放款与 `POST /batches`，超出题目要求；none r2 额外下钻到 Fineract 的 `LoansApiResource`/`LoanTransactionsApiResource`，同样超范围。
+
+**结论可信度**：四次答案的核心方法与端点与冻结源码一致。抽查 `loans.service.ts` 的 `createLoansAccount`、`loanActionButtons`、`submitLoanActionButton`、`getLoansAccountTemplateResource` 及认证拦截器均与引用相符。backbone r2 有 2 条引用未在本轮工具输出中出现：`login.component.ts:99-103`（内容与源码 `reloadSettings` 基本相符）和 `channel-service-repo/.../ChannelController.java:38`（答案已自标为未核实，属于跨系统补充）。none r1 有 1 条引用行区间越过已读文件末尾。没有发现凭空编造的路径或方法。
+
+**观察**：
+
+- 关键文件覆盖 7/8 或 8/8，说明本轮的关键位置都能被找到；缺失的是 `create-loans-account.component.ts` 的 `read`，但该文件的 167/183 行在 grep 输出中出现过。
+- 末键后仍执行 5—36 次工具、3—22 次搜索；none r2 在关键文件齐备后还花了 26 次模型调用和 1.13M Token，主要用在 Fineract 后端端点和需求核对上。回答确实因此更细，但题目只要求前端调用链，属于超出必要范围的扩张。
+- A/B 在答案正确性上没有可见差异；B 组平均 Token（433k）低于 A 组（938k），但 B r2 只读了 12 个文件且引用更少，重复内差异很大，不能把成本下降归因于 Business Context。
+
+### native-lifecycle
+
+**问题**：在当前项目中，一笔贷款申请从提交、审批到放款，账户状态如何流转？状态定义和流转校验分别在代码哪里实现？请结合 REST 入口说明每次动作是如何触发状态变化的？
+
+| 组 | 重复 | 关键文件 | 末键轮次 | 末键后工具/搜索 | 模型调用 | 工具调用 | 读取文件 | 搜索 | 空搜索 | 无读取搜索 | 重复调用 | 无效代理 | 引用 确认/搜索见/未交付/无行号 | Token | 耗时 s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 1 | 3/6 | 6 | 72/48 | 52 | 85 | 20 | 53 | 8 | 14 | 0 | 22 | 25/8/0/2 | 2,080,351 | 533.7 |
+| none | 2 | 3/6 | 10 | 61/39 | 26 | 114 | 21 | 61 | 16 | 14 | 0 | 30 | 39/13/0/2 | 1,035,551 | 339.1 |
+| backbone | 1 | 4/6 | 102 | 14/7 | 110 | 248 | 33 | 107 | 35 | 16 | 4 | 55 | 40/2/0/3 | 6,628,987 | 738.2 |
+
+**关键关系覆盖（按 checks 阅读答案）**：两次运行都覆盖了 `LoanStatus` 状态值、`DefaultLoanLifecycleStateMachine` 的 `LOAN_APPROVED`/`LOAN_DISBURSED`/`REPAID_IN_FULL` 来源校验、`POST /loans` 与 `POST /loans/{id}?command=approve|disburse`，以及状态机在服务层的触发点。两次都没有覆盖 check 5：command 经 `CommandWrapperBuilder` 构造为 `entity=LOAN` 的命令、再按 `@CommandType` 路由到 `LoanApplicationApprovalCommandHandler` 这一层；两次都未读取 `CommandWrapperBuilder.java`、`CommandHandlerProvider.java`、`LoanApplicationApprovalCommandHandler.java`，也没有搜索这些类名。答案停在“经命令总线走到服务层”的概括，未说明命令路由机制。
+
+**结论可信度**：两次答案与源码抽查一致；都主动指出一个未核实闭环：`FineractClient.createLoan` 的 payload 只有 `submittedOnDate`、没有 `approvedOnDate`，而状态机只允许 200→300 放款，因此中台若未补审批命令，disburse 可能被拒绝并停留在 RETRY_NEEDED。该疑点与当前冻结源码相符，且答案标明“未核实闭环”，没有把它当成已确认故障。引用没有出现读取与搜索都未交付的路径/行号。
+
+**观察**：
+
+- 两次都花了大量调查在中台与渠道层（none r2：loan-middle 10 次读取/23 次搜索，channel 2/3；none r1：loan-middle 6/11，channel 2/4），但题目要求的是 Fineract 借据状态与 REST 触发链；这部分跨系统内容不算错误，却挤占了关键命令路由的调查预算。
+- 无效调查代理 22/30（占工具调用 26% 左右），空搜索 8/16、搜索后未读候选 14/14；none r2 的 61 次搜索中有 16 次无结果，是四次运行中最高的浪费。
+- 两次重复都漏同一组命令路由文件，说明这不是随机波动，而是当前 Pi 对该类“REST→命令→处理器”关系链的系统性缺口；同时说明“关键文件清单”里的导航信息本身没有进入模型，模型也未从问题中自行推出需要找 Handler。
+- backbone r1 读到 4/6：多读了 `CommandWrapperBuilder.java`，但答案仍未提到该文件；仍缺 `CommandHandlerProvider.java` 与 `LoanApplicationApprovalCommandHandler.java`，check 5 依然未覆盖。该次运行同时把 33 个文件、248 次工具、107 次搜索和 6.63M Token 投入调查，空搜索 35 次、重复调用 4 次、无效代理 55，是三组已完成的 lifecycle 运行中成本最高的一次。Business Context 没有带来该关系链的覆盖，反而伴随显著的范围扩张；单次样本，不能据此断言因果。

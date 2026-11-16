@@ -1,0 +1,2538 @@
+{
+  "generatedAt": "2026-11-16T00:45:23.844907+00:00",
+  "batch": "validation-projects/complex-loan/.data/pi-lifecycle-fix-ab-20261116",
+  "runs": [
+    {
+      "caseId": "native-lifecycle",
+      "category": "native_lifecycle",
+      "mode": "none",
+      "repeat": 1,
+      "status": "completed",
+      "runId": "RUN-d8d7d719928e486ba7ea89efb228342a",
+      "modelRequested": "zcode/glm-5.3-flash",
+      "modelActual": "zcode/glm-5.3-flash",
+      "piVersion": "1.5.0",
+      "elapsedSeconds": 542.67,
+      "metrics": {
+        "modelCalls": 74,
+        "toolCalls": 104,
+        "toolErrors": 1,
+        "uniqueReadFiles": 29,
+        "readCalls": 34,
+        "searchCalls": 64,
+        "emptySearches": 16,
+        "candidateFiles": 153,
+        "unreadCandidates": [
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/MiddleApplication.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/BizException.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/common/Ids.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditApplicationOrder.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditApplicationRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditController.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditLimit.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditLimitRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GroupLimit.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GroupLimitRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GroupMember.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GroupMemberRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GuaranteeCoverage.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/GuaranteeCoverageRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitRecord.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitRecordRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/LimitService.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductConfig.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductConfigRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductConfigVersion.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductConfigVersionRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductSubLimit.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/ProductSubLimitRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrderRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownQuote.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownQuoteRepository.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/SimulatorClient.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/SimulatorProperties.java",
+          "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractProperties.java"
+        ],
+        "unreadCandidateCount": 127,
+        "repeatedToolCalls": 0,
+        "searchesWithoutRead": 10,
+        "invalidInvestigationProxy": 26,
+        "repos": {
+          "fineract-repo": {
+            "reads": 17,
+            "searches": 51
+          },
+          "loan-middle-repo": {
+            "reads": 7,
+            "searches": 8
+          },
+          "channel-service-repo": {
+            "reads": 2,
+            "searches": 2
+          },
+          "mifos-web-repo": {
+            "reads": 0,
+            "searches": 1
+          },
+          "external-simulator-repo": {
+            "reads": 0,
+            "searches": 2
+          }
+        },
+        "materialReads": {
+          "requirements": 3
+        },
+        "references": {
+          "total": 40,
+          "confirmed": 31,
+          "searchSeen": 8,
+          "fileReadNotRange": 0,
+          "unseen": 0,
+          "pathOnly": 1,
+          "unseenReferences": [],
+          "unconfirmed": [
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java:14-18",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditApplicationOrder.java:17",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+            "CreditService.java:54-92",
+            "ExternalResultController.java:59-91",
+            "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java:63-71",
+            "LoanWritePlatformServiceJpaRepositoryImpl.java:314-323",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanRepaymentCommandHandler.java:36",
+            "LoanDownPaymentHandlerServiceImpl.java:169"
+          ],
+          "readFiles": [
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
+            "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/PortfolioCommandSourceWritePlatformServiceImpl.java",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+            "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanEvent.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanLifecycleStateMachine.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/DisburseLoanCommandHandler.java",
+            "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/service/LoanScheduleAssembler.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+            "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+            "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java",
+            "requirements/产品规则.md",
+            "requirements/接口与状态约定.md",
+            "requirements/系统职责.md"
+          ],
+          "semanticProof": false
+        },
+        "totalTokens": 3413575,
+        "cost": 0,
+        "durationMs": 542654.299,
+        "stopReason": "stop",
+        "keyFiles": [
+          {
+            "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+            "read": true,
+            "firstRound": 6,
+            "ranges": [
+              [
+                1,
+                135
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+            "read": true,
+            "firstRound": 8,
+            "ranges": [
+              [
+                1,
+                383
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+            "read": true,
+            "firstRound": 15,
+            "ranges": [
+              [
+                608,
+                669
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+            "read": true,
+            "firstRound": 40,
+            "ranges": [
+              [
+                1100,
+                1181
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java",
+            "read": true,
+            "firstRound": 50,
+            "ranges": [
+              [
+                1,
+                82
+              ]
+            ],
+            "cited": true
+          },
+          {
+            "key": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java",
+            "read": true,
+            "firstRound": 56,
+            "ranges": [
+              [
+                40,
+                43
+              ]
+            ],
+            "cited": false
+          }
+        ],
+        "keyFilesRead": 6,
+        "keyFilesTotal": 6,
+        "allKeyFilesRound": 56,
+        "lastKeyFileRound": 56,
+        "toolsAfterAllKeys": 23,
+        "searchesAfterAllKeys": 19,
+        "modelCallsAfterAllKeys": 18,
+        "toolsAfterLastKey": 23,
+        "searchesAfterLastKey": 19,
+        "modelCallsAfterLastKey": 18,
+        "reads": [
+          {
+            "path": "requirements/产品规则.md",
+            "firstRound": 2,
+            "rounds": [
+              2
+            ],
+            "ranges": [
+              [
+                1,
+                59
+              ]
+            ],
+            "contentChars": 1979
+          },
+          {
+            "path": "requirements/接口与状态约定.md",
+            "firstRound": 2,
+            "rounds": [
+              2
+            ],
+            "ranges": [
+              [
+                1,
+                51
+              ]
+            ],
+            "contentChars": 2927
+          },
+          {
+            "path": "requirements/系统职责.md",
+            "firstRound": 2,
+            "rounds": [
+              2
+            ],
+            "ranges": [
+              [
+                1,
+                37
+              ]
+            ],
+            "contentChars": 1742
+          },
+          {
+            "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+            "firstRound": 6,
+            "rounds": [
+              6
+            ],
+            "ranges": [
+              [
+                1,
+                135
+              ]
+            ],
+            "contentChars": 4798
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanLifecycleStateMachine.java",
+            "firstRound": 6,
+            "rounds": [
+              6
+            ],
+            "ranges": [
+              [
+                1,
+                44
+              ]
+            ],
+            "contentChars": 1812
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanEvent.java",
+            "firstRound": 7,
+            "rounds": [
+              7
+            ],
+            "ranges": [
+              [
+                1,
+                57
+              ]
+            ],
+            "contentChars": 1737
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+            "firstRound": 8,
+            "rounds": [
+              8
+            ],
+            "ranges": [
+              [
+                1,
+                383
+              ]
+            ],
+            "contentChars": 16591
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java",
+            "firstRound": 10,
+            "rounds": [
+              10
+            ],
+            "ranges": [
+              [
+                1,
+                77
+              ]
+            ],
+            "contentChars": 3459
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+            "firstRound": 10,
+            "rounds": [
+              10
+            ],
+            "ranges": [
+              [
+                1,
+                295
+              ]
+            ],
+            "contentChars": 13979
+          },
+          {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java",
+            "firstRound": 11,
+            "rounds": [
+              11
+            ],
+            "ranges": [
+              [
+                1,
+                58
+              ]
+            ],
+            "contentChars": 2299
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
+            "firstRound": 11,
+            "rounds": [
+              11
+            ],
+            "ranges": [
+              [
+                1,
+                87
+              ]
+            ],
+            "contentChars": 4196
+          },
+          {
+            "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+            "firstRound": 12,
+            "rounds": [
+              12
+            ],
+            "ranges": [
+              [
+                1,
+                226
+              ]
+            ],
+            "contentChars": 11432
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+            "firstRound": 15,
+            "rounds": [
+              15
+            ],
+            "ranges": [
+              [
+                608,
+                669
+              ]
+            ],
+            "contentChars": 5434
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
+            "firstRound": 18,
+            "rounds": [
+              18,
+              54,
+              55,
+              57
+            ],
+            "ranges": [
+              [
+                570,
+                611
+              ],
+              [
+                460,
+                571
+              ],
+              [
+                525,
+                566
+              ],
+              [
+                1700,
+                1746
+              ]
+            ],
+            "contentChars": 14058
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/service/LoanScheduleAssembler.java",
+            "firstRound": 19,
+            "rounds": [
+              19
+            ],
+            "ranges": [
+              [
+                1490,
+                1521
+              ]
+            ],
+            "contentChars": 1972
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+            "firstRound": 22,
+            "rounds": [
+              22,
+              24
+            ],
+            "ranges": [
+              [
+                800,
+                881
+              ],
+              [
+                125,
+                176
+              ]
+            ],
+            "contentChars": 7930
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+            "firstRound": 26,
+            "rounds": [
+              26
+            ],
+            "ranges": [
+              [
+                530,
+                561
+              ]
+            ],
+            "contentChars": 1507
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+            "firstRound": 32,
+            "rounds": [
+              32,
+              33
+            ],
+            "ranges": [
+              [
+                205,
+                266
+              ],
+              [
+                265,
+                306
+              ]
+            ],
+            "contentChars": 6573
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java",
+            "firstRound": 34,
+            "rounds": [
+              34
+            ],
+            "ranges": [
+              [
+                1,
+                87
+              ]
+            ],
+            "contentChars": 3940
+          },
+          {
+            "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+            "firstRound": 40,
+            "rounds": [
+              40
+            ],
+            "ranges": [
+              [
+                1100,
+                1181
+              ]
+            ],
+            "contentChars": 2622
+          },
+          {
+            "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/PortfolioCommandSourceWritePlatformServiceImpl.java",
+            "firstRound": 44,
+            "rounds": [
+              44
+            ],
+            "ranges": [
+              [
+                50,
+                151
+              ]
+            ],
+            "contentChars": 5739
+          },
+          {
+            "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+            "firstRound": 48,
+            "rounds": [
+              48
+            ],
+            "ranges": [
+              [
+                264,
+                335
+              ]
+            ],
+            "contentChars": 4560
+          },
+          {
+            "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java",
+            "firstRound": 50,
+            "rounds": [
+              50
+            ],
+            "ranges": [
+              [
+                1,
+                82
+              ]
+            ],
+            "contentChars": 3442
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+            "firstRound": 53,
+            "rounds": [
+              53
+            ],
+            "ranges": [
+              [
+                1,
+                165
+              ]
+            ],
+            "contentChars": 8172
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/DisburseLoanCommandHandler.java",
+            "firstRound": 56,
+            "rounds": [
+              56
+            ],
+            "ranges": [
+              [
+                1,
+                53
+              ]
+            ],
+            "contentChars": 2395
+          },
+          {
+            "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java",
+            "firstRound": 56,
+            "rounds": [
+              56
+            ],
+            "ranges": [
+              [
+                40,
+                43
+              ]
+            ],
+            "contentChars": 99
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java",
+            "firstRound": 57,
+            "rounds": [
+              57
+            ],
+            "ranges": [
+              [
+                1,
+                103
+              ]
+            ],
+            "contentChars": 5056
+          },
+          {
+            "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java",
+            "firstRound": 58,
+            "rounds": [
+              58
+            ],
+            "ranges": [
+              [
+                855,
+                891
+              ]
+            ],
+            "contentChars": 1912
+          },
+          {
+            "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java",
+            "firstRound": 69,
+            "rounds": [
+              69
+            ],
+            "ranges": [
+              [
+                1,
+                173
+              ]
+            ],
+            "contentChars": 7956
+          }
+        ],
+        "searches": [
+          {
+            "round": 4,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java",
+              "pattern": "**/DefaultLoanLifecycleStateMachine.java"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 4,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java",
+              "pattern": "**/LoanStatus.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/LoanLifecycleStateMachine.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/LoanEvent.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/loan-middle-repo/src",
+              "pattern": "**/*.java"
+            },
+            "candidates": 40,
+            "readCandidates": 7
+          },
+          {
+            "round": 7,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/DefaultLoanLifecycleStateMachine.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 9,
+            "name": "grep",
+            "input": {
+              "pattern": "@RequestBody|@PostMapping|@GetMapping|class |@RequestMapping",
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 9,
+            "name": "grep",
+            "input": {
+              "pattern": "@RequestBody|@PostMapping|@GetMapping|class |@RequestMapping",
+              "path": "repos/channel-service-repo/src/main/java"
+            },
+            "candidates": 6,
+            "readCandidates": 2
+          },
+          {
+            "round": 13,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "class LoansApiResource",
+              "glob": "**/*.java"
+            },
+            "candidates": 2,
+            "readCandidates": 1
+          },
+          {
+            "round": 13,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+              "pattern": "command=|createLoan|disburseLoan|isLoanActive",
+              "context": 3
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 14,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+              "pattern": "@POST|@Path|command|getCommandParameter|is\\(.*Creat",
+              "limit": 80
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 15,
+            "name": "grep",
+            "input": {
+              "glob": "**/LoanStateMachineServiceImpl.java",
+              "path": "repos/fineract-repo",
+              "pattern": "class|fireEvent|approve|disburse"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 16,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java",
+              "pattern": "fireEvent\\(LoanEvent"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 16,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 20,
+              "path": "repos/fineract-repo",
+              "pattern": "LoanStateMachineService"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 17,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "stateMachine.transition|loanLifecycleStateMachine"
+            },
+            "candidates": 13,
+            "readCandidates": 3
+          },
+          {
+            "round": 18,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "transition\\(LoanEvent.LOAN_APPROVED|transition\\(LoanEvent.LOAN_CREATED|LOAN_CREATED, loan"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 19,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 20,
+              "path": "repos/fineract-repo",
+              "pattern": "LOAN_CREATED"
+            },
+            "candidates": 2,
+            "readCandidates": 2
+          },
+          {
+            "round": 20,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "SUBMITTED_AND_PENDING_APPROVAL|submitApplication"
+            },
+            "candidates": 12,
+            "readCandidates": 1
+          },
+          {
+            "round": 21,
+            "name": "grep",
+            "input": {
+              "glob": "**/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+              "path": "repos/fineract-repo/fineract-provider/src/main/java",
+              "pattern": "assembleLoan|LOAN_CREATED|submittedOnDate|public Loan",
+              "limit": 40
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 23,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+              "pattern": "createLoan|Loan\\.create|new Loan|persist|save\\(",
+              "context": 4,
+              "limit": 30
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 25,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/LoanAssembler.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "LOAN_CREATED|newLoanApplication|transition"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 25,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/domain/Loan.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "static Loan newLoanApplication|LoanStatus.SUBMITTED"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 26,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 15,
+              "path": "repos/fineract-repo",
+              "pattern": "Loan\\.newLoanApplication"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 27,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "glob": "**/LoanAssembler.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "assembleFrom\\("
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 28,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "glob": "**/LoanAssemblerImpl.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "newLoanApplication|Loan\\("
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 29,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+              "pattern": "public static Loan newLoanApplication|newLoanApplication\\("
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 29,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 20,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "return Loan\\.|Loan\\.newLoan|\\.newLoanApplication"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 30,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "assembleFrom\\(final JsonCommand|assembleFrom\\(JsonCommand"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 31,
+            "name": "grep",
+            "input": {
+              "context": 10,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "return this\\.loan|final Loan loan = "
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 34,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/PortfolioCommandSourceWritePlatformServiceImpl.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "logCommandSource|switch|processCommand"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 35,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-command",
+              "pattern": "disburse|loans"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 36,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 25,
+              "path": "repos/fineract-repo",
+              "pattern": "disburseLoanApplication\\(\\)|CommandWrapperBuilder\\(\\)\\.disburseLoanApplication|approveLoanApplication\\(\\)"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 37,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "**/main/**/CommandWrapperBuilder.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "public CommandWrapper disburseLoan|public CommandWrapper approveLoan|LOAN_DISBURSE|LOAN_APPROVE"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 38,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/CommandWrapperBuilder.java"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 39,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+              "pattern": "disburseLoanAction|approveLoanApplication|loans/\\{loanId\\}"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 41,
+            "name": "grep",
+            "input": {
+              "context": 30,
+              "limit": 80,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+              "pattern": "private String stateTransitions"
+            },
+            "candidates": 4,
+            "readCandidates": 1
+          },
+          {
+            "round": 43,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-command",
+              "pattern": "**/*.java"
+            },
+            "candidates": 41,
+            "readCandidates": 0
+          },
+          {
+            "round": 45,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service",
+              "pattern": "jumpTo|findCommandHandler|executeCommand\\(wrapper|case \"LOAN\"|getHandlerFor"
+            },
+            "candidates": 2,
+            "readCandidates": 2
+          },
+          {
+            "round": 46,
+            "name": "grep",
+            "input": {
+              "context": 10,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+              "pattern": "findCommandHandler\\(final CommandWrapper|private CommandHandler findCommandHandler"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 47,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+              "pattern": "isLoanResource|\"approveLoanApplication\"|\"disburseLoanApplication\"|getBean\\(\"approve|getBean\\(\"disburse"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 49,
+            "name": "grep",
+            "input": {
+              "context": 15,
+              "glob": "**/main/**/CommandHandlerProvider.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "getHandler"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 51,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "@CommandType\\(entity = CommandType.Entity.LOAN, action = \"APPROVE\"|@CommandType\\(entity = CommandType.Entity.LOAN, action = \"DISBURSE\""
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 52,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "action = \"APPROVE\"|action = \"DISBURSE\""
+            },
+            "candidates": 4,
+            "readCandidates": 2
+          },
+          {
+            "round": 53,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java",
+              "pattern": "approve|APPROVE"
+            },
+            "candidates": 5,
+            "readCandidates": 2
+          },
+          {
+            "round": 55,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+              "pattern": "public void disburse|validateActivityNotBeforeClientOrGroupTransferDate|isDisbursed"
+            },
+            "candidates": 3,
+            "readCandidates": 1
+          },
+          {
+            "round": 58,
+            "name": "find",
+            "input": {
+              "path": "repos/mifos-web-repo",
+              "pattern": "**/loans-view/**/loan-actions*"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 59,
+            "name": "find",
+            "input": {
+              "path": "repos/external-simulator-repo/src",
+              "pattern": "**/*.java"
+            },
+            "candidates": 12,
+            "readCandidates": 0
+          },
+          {
+            "round": 60,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 50,
+              "path": "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java",
+              "pattern": "submitPayment|callback|SUCCESS|REJECTED"
+            },
+            "candidates": 4,
+            "readCandidates": 0
+          },
+          {
+            "round": 61,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
+              "pattern": "public CommandProcessingResult disburseLoan|public LoanTransaction disburseLoan|isApproved\\(\\)|throw new LoanOfficerAssignmentTransactionProcessingException"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 62,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/LoanTransactionValidator.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "validateDisbursement|isApproved|checkOwnerShip|notActive|LoanStatus"
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 63,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "glob": "**/main/**/LoanTransactionValidatorImpl.java",
+              "limit": 50,
+              "path": "repos/fineract-repo",
+              "pattern": "validateDisbursement"
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 64,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java",
+              "pattern": "REPAID_IN_FULL|determineAndTransition|LOAN_OVERPAYMENT"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 65,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java",
+              "pattern": "REPAID_IN_FULL|handleRepayment|determineAndTransition\\(loan"
+            },
+            "candidates": 2,
+            "readCandidates": 1
+          },
+          {
+            "round": 66,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanDownPaymentHandlerServiceImpl.java",
+              "pattern": "handleRepaymentOrRecoveryOrWaiverTransaction|determineAndTransition|REPAID_IN_FULL|LOAN_REPAYMENT"
+            },
+            "candidates": 2,
+            "readCandidates": 0
+          },
+          {
+            "round": 67,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "notApproved|NOT_APPROVED|isNotApproved|LoanApplicationNotApproved"
+            },
+            "candidates": 0,
+            "readCandidates": 0
+          },
+          {
+            "round": 68,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "newLoanApplicationFromGroup|newIndividualLoanApplication\\("
+            },
+            "candidates": 2,
+            "readCandidates": 2
+          },
+          {
+            "round": 70,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "@CommandType\\(entity = \"LOAN\", action = \"REPAYMENT\"\\)"
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 71,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+              "pattern": "public DrawdownOrder apply|setStatus\\(DrawdownOrder.Status.PROCESSING\\)|setBookingStatus\\(DrawdownOrder.BookingStatus.NONE\\)|public void submitPayment|public void onPaymentResult|EXTERNAL_SUCCESS_BOOKING_PENDING|public void book|isLoanActive|disburseLoan|confirmOccupy|releasePreOccupied|RETRY_NEEDED|terminal\\(\\)|public void queryAndSettle|preOccupy|createLoan|order.setStatus\\(DrawdownOrder.Status.SUCCESS\\)|order.setStatus\\(DrawdownOrder.Status.FAILED\\)"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 71,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java",
+              "pattern": "public .*apply|onApprovalResult|setStatus\\(CreditApplicationOrder.Status.APPROVED\\)|setStatus\\(CreditApplicationOrder.Status.REJECTED\\)|preOccupy|submitApproval"
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 72,
+            "name": "grep",
+            "input": {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+              "pattern": "private String displayOf|case \"SUCCESS\", \"FAILED\"|default -> \"PROCESSING\""
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 72,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java",
+              "pattern": "enum Status|enum DeductionStatus|enum Type|terminal"
+            },
+            "candidates": 1,
+            "readCandidates": 0
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+              "pattern": "case LOAN_APPROVED|case LOAN_DISBURSED|case REPAID_IN_FULL|private LoanStatus getNextStatus|void determineAndTransition|LOAN_CREATED\\) && from == null|isRepaidInFull && isAllChargesPaid"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+              "pattern": "SUBMITTED_AND_PENDING_APPROVAL\\(100|APPROVED\\(200|ACTIVE\\(300|CLOSED_OBLIGATIONS_MET\\(600|OVERPAID\\(700"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
+              "pattern": "public enum Status|public enum PaymentStatus|public enum BookingStatus|public boolean terminal"
+            },
+            "candidates": 1,
+            "readCandidates": 1
+          }
+        ],
+        "toolTimeline": [
+          {
+            "round": 1,
+            "name": "ls",
+            "input": {
+              "path": "."
+            },
+            "status": "completed",
+            "outputChars": 103
+          },
+          {
+            "round": 1,
+            "name": "ls",
+            "input": {
+              "path": "requirements"
+            },
+            "status": "completed",
+            "outputChars": 26
+          },
+          {
+            "round": 2,
+            "name": "read",
+            "input": {
+              "path": "requirements/产品规则.md"
+            },
+            "status": "completed",
+            "outputChars": 1979
+          },
+          {
+            "round": 2,
+            "name": "read",
+            "input": {
+              "path": "requirements/接口与状态约定.md"
+            },
+            "status": "completed",
+            "outputChars": 2927
+          },
+          {
+            "round": 2,
+            "name": "read",
+            "input": {
+              "path": "requirements/系统职责.md"
+            },
+            "status": "completed",
+            "outputChars": 1742
+          },
+          {
+            "round": 3,
+            "name": "ls",
+            "input": {
+              "path": "repos"
+            },
+            "status": "completed",
+            "outputChars": 95
+          },
+          {
+            "round": 3,
+            "name": "ls",
+            "input": {
+              "path": "repos/fineract-repo"
+            },
+            "status": "completed",
+            "outputChars": 1351
+          },
+          {
+            "round": 4,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java",
+              "pattern": "**/DefaultLoanLifecycleStateMachine.java"
+            },
+            "status": "completed",
+            "outputChars": 31
+          },
+          {
+            "round": 4,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java",
+              "pattern": "**/LoanStatus.java"
+            },
+            "status": "completed",
+            "outputChars": 112
+          },
+          {
+            "round": 4,
+            "name": "ls",
+            "input": {
+              "path": "repos/loan-middle-repo"
+            },
+            "status": "completed",
+            "outputChars": 12
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/LoanLifecycleStateMachine.java"
+            },
+            "status": "completed",
+            "outputChars": 127
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/LoanEvent.java"
+            },
+            "status": "completed",
+            "outputChars": 111
+          },
+          {
+            "round": 5,
+            "name": "find",
+            "input": {
+              "path": "repos/loan-middle-repo/src",
+              "pattern": "**/*.java"
+            },
+            "status": "completed",
+            "outputChars": 3318
+          },
+          {
+            "round": 6,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java"
+            },
+            "status": "completed",
+            "outputChars": 4798
+          },
+          {
+            "round": 6,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanLifecycleStateMachine.java"
+            },
+            "status": "completed",
+            "outputChars": 1812
+          },
+          {
+            "round": 7,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/DefaultLoanLifecycleStateMachine.java"
+            },
+            "status": "completed",
+            "outputChars": 134
+          },
+          {
+            "round": 7,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanEvent.java"
+            },
+            "status": "completed",
+            "outputChars": 1737
+          },
+          {
+            "round": 8,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java"
+            },
+            "status": "completed",
+            "outputChars": 16591
+          },
+          {
+            "round": 9,
+            "name": "grep",
+            "input": {
+              "pattern": "@RequestBody|@PostMapping|@GetMapping|class |@RequestMapping",
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java"
+            },
+            "status": "completed",
+            "outputChars": 1034
+          },
+          {
+            "round": 9,
+            "name": "grep",
+            "input": {
+              "pattern": "@RequestBody|@PostMapping|@GetMapping|class |@RequestMapping",
+              "path": "repos/channel-service-repo/src/main/java"
+            },
+            "status": "completed",
+            "outputChars": 2283
+          },
+          {
+            "round": 10,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownController.java"
+            },
+            "status": "completed",
+            "outputChars": 3459
+          },
+          {
+            "round": 10,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java"
+            },
+            "status": "completed",
+            "outputChars": 13979
+          },
+          {
+            "round": 11,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java"
+            },
+            "status": "completed",
+            "outputChars": 4196
+          },
+          {
+            "round": 11,
+            "name": "read",
+            "input": {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelController.java"
+            },
+            "status": "completed",
+            "outputChars": 2299
+          },
+          {
+            "round": 12,
+            "name": "read",
+            "input": {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java"
+            },
+            "status": "completed",
+            "outputChars": 11432
+          },
+          {
+            "round": 13,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "class LoansApiResource",
+              "glob": "**/*.java"
+            },
+            "status": "completed",
+            "outputChars": 323
+          },
+          {
+            "round": 13,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java",
+              "pattern": "command=|createLoan|disburseLoan|isLoanActive",
+              "context": 3
+            },
+            "status": "completed",
+            "outputChars": 6378
+          },
+          {
+            "round": 14,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+              "pattern": "@POST|@Path|command|getCommandParameter|is\\(.*Creat",
+              "limit": 80
+            },
+            "status": "completed",
+            "outputChars": 15775
+          },
+          {
+            "round": 15,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+              "limit": 60,
+              "offset": 608
+            },
+            "status": "completed",
+            "outputChars": 5434
+          },
+          {
+            "round": 15,
+            "name": "grep",
+            "input": {
+              "glob": "**/LoanStateMachineServiceImpl.java",
+              "path": "repos/fineract-repo",
+              "pattern": "class|fireEvent|approve|disburse"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 16,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java",
+              "pattern": "fireEvent\\(LoanEvent"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 16,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 20,
+              "path": "repos/fineract-repo",
+              "pattern": "LoanStateMachineService"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 17,
+            "name": "grep",
+            "input": {
+              "glob": "**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "stateMachine.transition|loanLifecycleStateMachine"
+            },
+            "status": "completed",
+            "outputChars": 9371
+          },
+          {
+            "round": 18,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "transition\\(LoanEvent.LOAN_APPROVED|transition\\(LoanEvent.LOAN_CREATED|LOAN_CREATED, loan"
+            },
+            "status": "completed",
+            "outputChars": 223
+          },
+          {
+            "round": 18,
+            "name": "read",
+            "input": {
+              "limit": 40,
+              "offset": 570,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 2554
+          },
+          {
+            "round": 19,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 20,
+              "path": "repos/fineract-repo",
+              "pattern": "LOAN_CREATED"
+            },
+            "status": "completed",
+            "outputChars": 543
+          },
+          {
+            "round": 19,
+            "name": "read",
+            "input": {
+              "limit": 30,
+              "offset": 1490,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/service/LoanScheduleAssembler.java"
+            },
+            "status": "completed",
+            "outputChars": 1972
+          },
+          {
+            "round": 20,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "SUBMITTED_AND_PENDING_APPROVAL|submitApplication"
+            },
+            "status": "completed",
+            "outputChars": 6905
+          },
+          {
+            "round": 21,
+            "name": "grep",
+            "input": {
+              "glob": "**/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+              "path": "repos/fineract-repo/fineract-provider/src/main/java",
+              "pattern": "assembleLoan|LOAN_CREATED|submittedOnDate|public Loan",
+              "limit": 40
+            },
+            "status": "completed",
+            "outputChars": 588
+          },
+          {
+            "round": 22,
+            "name": "read",
+            "input": {
+              "limit": 80,
+              "offset": 800,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 4841
+          },
+          {
+            "round": 23,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java",
+              "pattern": "createLoan|Loan\\.create|new Loan|persist|save\\(",
+              "context": 4,
+              "limit": 30
+            },
+            "status": "completed",
+            "outputChars": 5891
+          },
+          {
+            "round": 24,
+            "name": "read",
+            "input": {
+              "limit": 50,
+              "offset": 125,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanApplicationWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 3089
+          },
+          {
+            "round": 25,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/LoanAssembler.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "LOAN_CREATED|newLoanApplication|transition"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 25,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/domain/Loan.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "static Loan newLoanApplication|LoanStatus.SUBMITTED"
+            },
+            "status": "completed",
+            "outputChars": 1642
+          },
+          {
+            "round": 26,
+            "name": "read",
+            "input": {
+              "limit": 30,
+              "offset": 530,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java"
+            },
+            "status": "completed",
+            "outputChars": 1507
+          },
+          {
+            "round": 26,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 15,
+              "path": "repos/fineract-repo",
+              "pattern": "Loan\\.newLoanApplication"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 27,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "glob": "**/LoanAssembler.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "assembleFrom\\("
+            },
+            "status": "completed",
+            "outputChars": 2844
+          },
+          {
+            "round": 28,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "glob": "**/LoanAssemblerImpl.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "newLoanApplication|Loan\\("
+            },
+            "status": "completed",
+            "outputChars": 7341
+          },
+          {
+            "round": 29,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+              "pattern": "public static Loan newLoanApplication|newLoanApplication\\("
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 29,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 20,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "return Loan\\.|Loan\\.newLoan|\\.newLoanApplication"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 30,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "assembleFrom\\(final JsonCommand|assembleFrom\\(JsonCommand"
+            },
+            "status": "completed",
+            "outputChars": 2390
+          },
+          {
+            "round": 31,
+            "name": "grep",
+            "input": {
+              "context": 10,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java",
+              "pattern": "return this\\.loan|final Loan loan = "
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 32,
+            "name": "read",
+            "input": {
+              "limit": 60,
+              "offset": 205,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 3451
+          },
+          {
+            "round": 33,
+            "name": "read",
+            "input": {
+              "limit": 40,
+              "offset": 265,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanAssemblerImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 3122
+          },
+          {
+            "round": 34,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/PortfolioCommandSourceWritePlatformServiceImpl.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "logCommandSource|switch|processCommand"
+            },
+            "status": "completed",
+            "outputChars": 1700
+          },
+          {
+            "round": 34,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/external/ExternalResultController.java"
+            },
+            "status": "completed",
+            "outputChars": 3940
+          },
+          {
+            "round": 35,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-command",
+              "pattern": "disburse|loans"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 36,
+            "name": "grep",
+            "input": {
+              "glob": "**/main/**/*.java",
+              "limit": 25,
+              "path": "repos/fineract-repo",
+              "pattern": "disburseLoanApplication\\(\\)|CommandWrapperBuilder\\(\\)\\.disburseLoanApplication|approveLoanApplication\\(\\)"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 37,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "glob": "**/main/**/CommandWrapperBuilder.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "public CommandWrapper disburseLoan|public CommandWrapper approveLoan|LOAN_DISBURSE|LOAN_APPROVE"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 38,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo",
+              "pattern": "**/CommandWrapperBuilder.java"
+            },
+            "status": "completed",
+            "outputChars": 111
+          },
+          {
+            "round": 39,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+              "pattern": "disburseLoanAction|approveLoanApplication|loans/\\{loanId\\}"
+            },
+            "status": "completed",
+            "outputChars": 1026
+          },
+          {
+            "round": 40,
+            "name": "read",
+            "input": {
+              "limit": 80,
+              "offset": 1100,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java"
+            },
+            "status": "completed",
+            "outputChars": 2622
+          },
+          {
+            "round": 41,
+            "name": "grep",
+            "input": {
+              "context": 30,
+              "limit": 80,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+              "pattern": "private String stateTransitions"
+            },
+            "status": "completed",
+            "outputChars": 12086
+          },
+          {
+            "round": 42,
+            "name": "ls",
+            "input": {
+              "path": "repos/fineract-repo/fineract-command/src/main/java/org/apache/fineract/commands"
+            },
+            "status": "error",
+            "outputChars": 245
+          },
+          {
+            "round": 43,
+            "name": "find",
+            "input": {
+              "path": "repos/fineract-repo/fineract-command",
+              "pattern": "**/*.java"
+            },
+            "status": "completed",
+            "outputChars": 4693
+          },
+          {
+            "round": 44,
+            "name": "read",
+            "input": {
+              "limit": 120,
+              "offset": 50,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/PortfolioCommandSourceWritePlatformServiceImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 5739
+          },
+          {
+            "round": 45,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service",
+              "pattern": "jumpTo|findCommandHandler|executeCommand\\(wrapper|case \"LOAN\"|getHandlerFor"
+            },
+            "status": "completed",
+            "outputChars": 4802
+          },
+          {
+            "round": 46,
+            "name": "grep",
+            "input": {
+              "context": 10,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+              "pattern": "findCommandHandler\\(final CommandWrapper|private CommandHandler findCommandHandler"
+            },
+            "status": "completed",
+            "outputChars": 3739
+          },
+          {
+            "round": 47,
+            "name": "grep",
+            "input": {
+              "context": 2,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java",
+              "pattern": "isLoanResource|\"approveLoanApplication\"|\"disburseLoanApplication\"|getBean\\(\"approve|getBean\\(\"disburse"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 48,
+            "name": "read",
+            "input": {
+              "limit": 70,
+              "offset": 264,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/SynchronousCommandProcessingService.java"
+            },
+            "status": "completed",
+            "outputChars": 4560
+          },
+          {
+            "round": 49,
+            "name": "grep",
+            "input": {
+              "context": 15,
+              "glob": "**/main/**/CommandHandlerProvider.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "getHandler"
+            },
+            "status": "completed",
+            "outputChars": 4803
+          },
+          {
+            "round": 50,
+            "name": "read",
+            "input": {
+              "limit": 80,
+              "offset": 1,
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java"
+            },
+            "status": "completed",
+            "outputChars": 3442
+          },
+          {
+            "round": 51,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "@CommandType\\(entity = CommandType.Entity.LOAN, action = \"APPROVE\"|@CommandType\\(entity = CommandType.Entity.LOAN, action = \"DISBURSE\""
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 52,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "action = \"APPROVE\"|action = \"DISBURSE\""
+            },
+            "status": "completed",
+            "outputChars": 6705
+          },
+          {
+            "round": 53,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java"
+            },
+            "status": "completed",
+            "outputChars": 8172
+          },
+          {
+            "round": 53,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java",
+              "pattern": "approve|APPROVE"
+            },
+            "status": "completed",
+            "outputChars": 3087
+          },
+          {
+            "round": 54,
+            "name": "read",
+            "input": {
+              "limit": 110,
+              "offset": 460,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 6665
+          },
+          {
+            "round": 55,
+            "name": "read",
+            "input": {
+              "limit": 40,
+              "offset": 525,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 2371
+          },
+          {
+            "round": 55,
+            "name": "grep",
+            "input": {
+              "context": 5,
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/Loan.java",
+              "pattern": "public void disburse|validateActivityNotBeforeClientOrGroupTransferDate|isDisbursed"
+            },
+            "status": "completed",
+            "outputChars": 4253
+          },
+          {
+            "round": 56,
+            "name": "read",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/DisburseLoanCommandHandler.java"
+            },
+            "status": "completed",
+            "outputChars": 2395
+          },
+          {
+            "round": 56,
+            "name": "read",
+            "input": {
+              "limit": 60,
+              "offset": 40,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java"
+            },
+            "status": "completed",
+            "outputChars": 99
+          },
+          {
+            "round": 57,
+            "name": "read",
+            "input": {
+              "limit": 45,
+              "offset": 1700,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java"
+            },
+            "status": "completed",
+            "outputChars": 2468
+          },
+          {
+            "round": 57,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/compensation/CompensationTask.java"
+            },
+            "status": "completed",
+            "outputChars": 5056
+          },
+          {
+            "round": 58,
+            "name": "read",
+            "input": {
+              "limit": 35,
+              "offset": 855,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java"
+            },
+            "status": "completed",
+            "outputChars": 1912
+          },
+          {
+            "round": 58,
+            "name": "find",
+            "input": {
+              "path": "repos/mifos-web-repo",
+              "pattern": "**/loans-view/**/loan-actions*"
+            },
+            "status": "completed",
+            "outputChars": 31
+          },
+          {
+            "round": 59,
+            "name": "find",
+            "input": {
+              "path": "repos/external-simulator-repo/src",
+              "pattern": "**/*.java"
+            },
+            "status": "completed",
+            "outputChars": 1024
+          },
+          {
+            "round": 60,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 50,
+              "path": "repos/external-simulator-repo/src/main/java/com/rsd/simulator/SimulatorService.java",
+              "pattern": "submitPayment|callback|SUCCESS|REJECTED"
+            },
+            "status": "completed",
+            "outputChars": 6402
+          },
+          {
+            "round": 61,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanWritePlatformServiceJpaRepositoryImpl.java",
+              "pattern": "public CommandProcessingResult disburseLoan|public LoanTransaction disburseLoan|isApproved\\(\\)|throw new LoanOfficerAssignmentTransactionProcessingException"
+            },
+            "status": "completed",
+            "outputChars": 2489
+          },
+          {
+            "round": 62,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/LoanTransactionValidator.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "validateDisbursement|isApproved|checkOwnerShip|notActive|LoanStatus"
+            },
+            "status": "completed",
+            "outputChars": 2279
+          },
+          {
+            "round": 63,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "glob": "**/main/**/LoanTransactionValidatorImpl.java",
+              "limit": 50,
+              "path": "repos/fineract-repo",
+              "pattern": "validateDisbursement"
+            },
+            "status": "completed",
+            "outputChars": 9853
+          },
+          {
+            "round": 64,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanAccountDomainServiceJpa.java",
+              "pattern": "REPAID_IN_FULL|determineAndTransition|LOAN_OVERPAYMENT"
+            },
+            "status": "completed",
+            "outputChars": 2620
+          },
+          {
+            "round": 65,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo/fineract-provider/src/main/java",
+              "pattern": "REPAID_IN_FULL|handleRepayment|determineAndTransition\\(loan"
+            },
+            "status": "completed",
+            "outputChars": 5647
+          },
+          {
+            "round": 66,
+            "name": "grep",
+            "input": {
+              "context": 8,
+              "limit": 40,
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/service/LoanDownPaymentHandlerServiceImpl.java",
+              "pattern": "handleRepaymentOrRecoveryOrWaiverTransaction|determineAndTransition|REPAID_IN_FULL|LOAN_REPAYMENT"
+            },
+            "status": "completed",
+            "outputChars": 7512
+          },
+          {
+            "round": 67,
+            "name": "grep",
+            "input": {
+              "context": 6,
+              "glob": "**/main/**/*.java",
+              "limit": 40,
+              "path": "repos/fineract-repo",
+              "pattern": "notApproved|NOT_APPROVED|isNotApproved|LoanApplicationNotApproved"
+            },
+            "status": "completed",
+            "outputChars": 16
+          },
+          {
+            "round": 68,
+            "name": "grep",
+            "input": {
+              "context": 3,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "newLoanApplicationFromGroup|newIndividualLoanApplication\\("
+            },
+            "status": "completed",
+            "outputChars": 3024
+          },
+          {
+            "round": 69,
+            "name": "read",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentService.java"
+            },
+            "status": "completed",
+            "outputChars": 7956
+          },
+          {
+            "round": 70,
+            "name": "grep",
+            "input": {
+              "context": 4,
+              "glob": "**/main/**/*.java",
+              "limit": 30,
+              "path": "repos/fineract-repo",
+              "pattern": "@CommandType\\(entity = \"LOAN\", action = \"REPAYMENT\"\\)"
+            },
+            "status": "completed",
+            "outputChars": 1572
+          },
+          {
+            "round": 71,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownService.java",
+              "pattern": "public DrawdownOrder apply|setStatus\\(DrawdownOrder.Status.PROCESSING\\)|setBookingStatus\\(DrawdownOrder.BookingStatus.NONE\\)|public void submitPayment|public void onPaymentResult|EXTERNAL_SUCCESS_BOOKING_PENDING|public void book|isLoanActive|disburseLoan|confirmOccupy|releasePreOccupied|RETRY_NEEDED|terminal\\(\\)|public void queryAndSettle|preOccupy|createLoan|order.setStatus\\(DrawdownOrder.Status.SUCCESS\\)|order.setStatus\\(DrawdownOrder.Status.FAILED\\)"
+            },
+            "status": "completed",
+            "outputChars": 2998
+          },
+          {
+            "round": 71,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/credit/CreditService.java",
+              "pattern": "public .*apply|onApprovalResult|setStatus\\(CreditApplicationOrder.Status.APPROVED\\)|setStatus\\(CreditApplicationOrder.Status.REJECTED\\)|preOccupy|submitApproval"
+            },
+            "status": "completed",
+            "outputChars": 1520
+          },
+          {
+            "round": 72,
+            "name": "grep",
+            "input": {
+              "path": "repos/channel-service-repo/src/main/java/com/rsd/channel/ChannelService.java",
+              "pattern": "private String displayOf|case \"SUCCESS\", \"FAILED\"|default -> \"PROCESSING\""
+            },
+            "status": "completed",
+            "outputChars": 444
+          },
+          {
+            "round": 72,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/repay/RepaymentOrder.java",
+              "pattern": "enum Status|enum DeductionStatus|enum Type|terminal"
+            },
+            "status": "completed",
+            "outputChars": 565
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+              "pattern": "case LOAN_APPROVED|case LOAN_DISBURSED|case REPAID_IN_FULL|private LoanStatus getNextStatus|void determineAndTransition|LOAN_CREATED\\) && from == null|isRepaidInFull && isAllChargesPaid"
+            },
+            "status": "completed",
+            "outputChars": 1553
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+              "pattern": "SUBMITTED_AND_PENDING_APPROVAL\\(100|APPROVED\\(200|ACTIVE\\(300|CLOSED_OBLIGATIONS_MET\\(600|OVERPAID\\(700"
+            },
+            "status": "completed",
+            "outputChars": 892
+          },
+          {
+            "round": 73,
+            "name": "grep",
+            "input": {
+              "path": "repos/loan-middle-repo/src/main/java/com/rsd/middle/drawdown/DrawdownOrder.java",
+              "pattern": "public enum Status|public enum PaymentStatus|public enum BookingStatus|public boolean terminal"
+            },
+            "status": "completed",
+            "outputChars": 626
+          }
+        ]
+      }
+    }
+  ]
+}
