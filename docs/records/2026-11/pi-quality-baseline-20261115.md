@@ -1,12 +1,12 @@
 # Pi 问答质量基线：纯源码与 Business Context 配对实验（2026-11-15）
 
-> 状态：进行中。16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。另有一组 lifecycle 修复验证运行（4 次中完成 1 次）。本记录在剩余运行完成后更新，当前结论只覆盖已完成部分。
+> 状态：进行中。16 次基线运行已完成 7 次（native-frontend 4/4；native-lifecycle none 2/2、backbone 1/2）；`v2-strategy-code` 与 `biz-payment-pending` 尚未运行。lifecycle 修复验证完成 4 次：`none` 2/2 completed，`backbone` 2/2 因上游额度耗尽 failed。剩余运行因同一额度问题暂停，恢复后继续。
 
 ## 结论摘要（阶段性）
 
 - native-frontend：4 次运行都覆盖 5/6 检查项，第 6 项未被逐字声明但也没有把业务规则归到前端；没有发现凭空编造的路径或行号。低“引用确认率”主要因为生产核验只承认 `read` 原文，多数未确认引用实际在 grep 输出中可见。主要问题是末键后仍执行 5—36 次工具、3—22 次搜索，成本 0.33M—1.13M Token；A/B 正确性无可见差异，成本差异在两次重复内波动很大。
 - native-lifecycle：两次 none 都只读到 3/6 关键文件，连续漏掉 `CommandWrapperBuilder → 命令总线 → @CommandType → Handler` 这一层（check 5），无效调查代理 22/30；backbone r1 读到 4/6，仍未覆盖该层，并把成本推到 248 次工具、6.63M Token。该缺口的直接原因是 Pi 使用自建系统提示且带 `--no-context-files`，工作区已有的调查契约（“找到第一个入口并不代表问题已回答”）没有进入 Pi。
-- 针对性修复后，lifecycle none r1 读到 6/6 关键文件，答案覆盖命令构造、注册表和 Handler 路由，引用无未交付路径；成本 104 次工具、3.41M Token、542.7 秒。修复的稳定性、backbone 对照和 frontend 回归仍待完成。
+- 针对性修复后，lifecycle `none` 两轮都覆盖了命令构造、注册表和 Handler 路由（check 5）；关键文件分别为 6/6 和 4/6，成本 3.41M Token/542.7 秒与 6.16M Token/895.6 秒。第二轮接近 900 秒超时，修复解决了关系覆盖，但没有解决成本与停止问题。`backbone` 两轮因上游额度错误没有有效答案，Business Context 的修复后对照尚不成立。
 - 尚未完成的 `v2-strategy-code`、`biz-payment-pending` 决定不了 Business Context 是否有价值；现在不能据此下结论。
 
 ## 实验设置
@@ -83,3 +83,30 @@
 - 无效调查代理 22/30（占工具调用 26% 左右），空搜索 8/16、搜索后未读候选 14/14；none r2 的 61 次搜索中有 16 次无结果，是四次运行中最高的浪费。
 - 两次重复都漏同一组命令路由文件，说明这不是随机波动，而是当前 Pi 对该类“REST→命令→处理器”关系链的系统性缺口；同时说明“关键文件清单”里的导航信息本身没有进入模型，模型也未从问题中自行推出需要找 Handler。
 - backbone r1 读到 4/6：多读了 `CommandWrapperBuilder.java`，但答案仍未提到该文件；仍缺 `CommandHandlerProvider.java` 与 `LoanApplicationApprovalCommandHandler.java`，check 5 依然未覆盖。该次运行同时把 33 个文件、248 次工具、107 次搜索和 6.63M Token 投入调查，空搜索 35 次、重复调用 4 次、无效代理 55，是三组已完成的 lifecycle 运行中成本最高的一次。Business Context 没有带来该关系链的覆盖，反而伴随显著的范围扩张；单次样本，不能据此断言因果。
+
+## 针对性修复：命令链核实（2026-11-16）
+
+**根因**：Pi 启动时使用 `--no-context-files` 和自建 system prompt，工作区已有的调查契约（`CLAUDE.md` 中“找到第一个入口并不代表问题已回答”“根据实际调用、事件、路由继续调查”）没有进入 Pi；原提示只有通用工具规则，模型在 lifecycle 题上停在“经命令总线/服务层”，没有继续定位 Handler。
+
+**改动**：
+
+- `PiAgentRuntime._system_prompt` 增加关系清单与分层链路要求：入口、路由/命令/事件、实现、状态变化、例外逐项核实；Spring 沿 Controller → Command/事件 → Handler/注册表 → Service/状态机，Angular 沿组件 → Service → 拦截器/路由；题目要求的各项有源码依据后停止，不为背景扩大范围。
+- `usage.systemPromptSha256` 记录本轮系统提示指纹（含资料模式）；修复批次为 `c12fd22d7ef4c3a5`。
+
+**修复后运行**：
+
+| 组 | 重复 | 状态 | 关键文件 | 末键后工具/搜索 | 模型调用 | 工具调用 | 搜索 | 空搜索 | 无效代理 | 引用 确认/搜索见/未交付/无行号 | Token | 耗时 s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 1 | completed | 6/6 | 23/19 | 74 | 104 | 64 | 16 | 26 | 31/8/0/1 | 3,413,575 | 542.7 |
+| none | 2 | completed | 4/6 | 108/75 | 105 | 139 | 86 | 30 | 52 | 32/4/1/1 | 6,162,668 | 895.6 |
+| backbone | 1 | failed（额度） | 5/6 | 60/40 | 100 | 123 | 71 | 12 | 41 | — | — | 813.1 |
+| backbone | 2 | failed（额度） | 0/6 | — | 4 | 0 | 0 | 0 | 0 | — | — | 16.2 |
+
+**结论**：
+
+- 修复后 `none` 两轮都覆盖了 `CommandWrapperBuilder → 命令总线 → @CommandType 注册表 → LoanApplicationApprovalCommandHandler/DisburseLoanCommandHandler` 链，check 5 不再是重复性缺口；第一轮也读齐了 6/6 关键文件。
+- 第二轮关键文件 4/6（`CommandWrapperBuilder`、`CommandHandlerProvider` 未 `read`，但通过 grep 输出核对了相关行），成本 6.16M Token、895.6 秒，接近超时；末键后仍有 108 次工具、30 次空搜索。修复提升的是关系覆盖，不是成本或停止稳定性。
+- `backbone` 两轮返回上游 `502 ... code 1005 exceed quota limit`；第一轮在失败前已完成 100 次模型调用但无最终答案。这是供应商额度问题，不能算 Business Context 或修复本身的效果。
+- 修复后第二个 `none` 答案有 1 条错误模块路径引用（`fineract-loan/.../LoanTransactionValidatorImpl.java`；实际文件在 `fineract-provider/...`，同一内容另以 basename 引用并被读取确认），属于路径精度问题，不是凭空内容。
+
+**下一步**：额度恢复后补跑基线剩余 9 次与修复后的 `backbone` 两轮；再用 `native-frontend` 做一次修复后回归，确认新增提示没有扩大前端题成本。
