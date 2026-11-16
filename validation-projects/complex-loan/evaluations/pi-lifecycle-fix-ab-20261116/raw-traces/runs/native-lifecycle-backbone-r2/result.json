@@ -1,0 +1,122 @@
+{
+  "caseId": "native-lifecycle",
+  "category": "native_lifecycle",
+  "question": "在当前项目中，一笔贷款申请从提交、审批到放款，账户状态如何流转？状态定义和流转校验分别在代码哪里实现？请结合 REST 入口说明每次动作是如何触发状态变化的。",
+  "checks": [
+    "状态定义在 LoanStatus 枚举（fineract-core 模块），列出 SUBMITTED_AND_PENDING_APPROVAL(100)、APPROVED(200)、ACTIVE(300)、CLOSED_OBLIGATIONS_MET(600) 等关键状态",
+    "流转校验在 DefaultLoanLifecycleStateMachine（fineract-loan 模块），按 LoanEvent 事件判定，不是在 REST 层硬编码",
+    "LOAN_APPROVED 只允许从 SUBMITTED_AND_PENDING_APPROVAL 转入 APPROVED；LOAN_DISBURSED 从 APPROVED（或结清后）转入 ACTIVE",
+    "创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse",
+    "command 经 CommandWrapperBuilder 构造为 entity=LOAN 的命令，按 @CommandType 注解路由到对应 Handler（如 LoanApplicationApprovalCommandHandler）"
+  ],
+  "mode": "backbone",
+  "repeat": 2,
+  "status": "failed",
+  "answer": "",
+  "error": "Pi 模型请求失败：502: {\"type\":\"translation_failed\",\"message\":\"upstream returned invalid Anthropic message: {\\\"code\\\":1005,\\\"msg\\\":\\\"exceed quota limit\\\",\\\"logid\\\":\\\"20261116010135f2ff06f28e7c2f512b5c\\\"}\"}",
+  "errorType": "QueryRuntimeError",
+  "runId": null,
+  "conversationId": null,
+  "startedAt": "2026-11-16T01:01:19.460858+00:00",
+  "completedAt": null,
+  "elapsedSeconds": 16.18,
+  "modelRequested": "zcode/glm-5.3-flash",
+  "modelActual": null,
+  "piVersion": null,
+  "modeLabel": null,
+  "execution": {},
+  "usage": {},
+  "metrics": {
+    "modelCalls": 4,
+    "toolCalls": 0,
+    "toolErrors": 0,
+    "uniqueReadFiles": 0,
+    "readCalls": 0,
+    "searchCalls": 0,
+    "emptySearches": 0,
+    "candidateFiles": 0,
+    "unreadCandidates": [],
+    "unreadCandidateCount": 0,
+    "repeatedToolCalls": 0,
+    "searchesWithoutRead": 0,
+    "invalidInvestigationProxy": 0,
+    "repos": {},
+    "materialReads": {},
+    "references": {
+      "total": 0,
+      "confirmed": 0,
+      "searchSeen": 0,
+      "fileReadNotRange": 0,
+      "unseen": 0,
+      "pathOnly": 0,
+      "unseenReferences": [],
+      "unconfirmed": [],
+      "readFiles": [],
+      "semanticProof": null
+    },
+    "totalTokens": null,
+    "cost": null,
+    "durationMs": 16173.659,
+    "stopReason": null,
+    "keyFiles": [
+      {
+        "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/LoanStatus.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      },
+      {
+        "key": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      },
+      {
+        "key": "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      },
+      {
+        "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      },
+      {
+        "key": "repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      },
+      {
+        "key": "repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/LoanApplicationApprovalCommandHandler.java",
+        "read": false,
+        "firstRound": null,
+        "ranges": [],
+        "cited": false
+      }
+    ],
+    "keyFilesRead": 0,
+    "keyFilesTotal": 6,
+    "allKeyFilesRound": null,
+    "lastKeyFileRound": null,
+    "toolsAfterAllKeys": 0,
+    "searchesAfterAllKeys": 0,
+    "modelCallsAfterAllKeys": null,
+    "toolsAfterLastKey": 0,
+    "searchesAfterLastKey": 0,
+    "modelCallsAfterLastKey": null,
+    "reads": [],
+    "searches": [],
+    "toolTimeline": []
+  },
+  "traceFile": "trace.json",
+  "eventsFile": "events.jsonl",
+  "answerFile": "answer.md"
+}

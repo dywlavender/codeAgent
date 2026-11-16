@@ -11,9 +11,9 @@ repos/                   固定版本源码快照（gitignore，按 VERSIONS.md 
 requirements/            双方答题组均可读的项目说明（V0 原生范围）
 knowledge/business-context/  经过分类压缩的业务补充知识（D/E 组）
 knowledge/baseline/      历史完整主干（B 组保留，不再作为默认资料）
-evaluations/             评测题库（complex-loan.json，5 道原生题）
+evaluations/             评测题库（complex-loan.json，5 道原生题）、批次快照与 raw-traces/ 原始输出
 docs/                    设计与核查文档
-.data/                   本项目独立的数据库、工作区与评测记录（gitignore）
+.data/                   本项目独立的数据库、工作区与 Pi 会话（gitignore）
 ```
 
 ## 阶段状态

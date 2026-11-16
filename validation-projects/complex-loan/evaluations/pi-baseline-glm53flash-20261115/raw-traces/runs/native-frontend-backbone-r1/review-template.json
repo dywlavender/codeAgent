@@ -1,0 +1,53 @@
+{
+  "caseId": "native-frontend",
+  "mode": "backbone",
+  "repeat": 1,
+  "question": "Mifos X 前端在创建贷款申请、发起审批、放款和还款时，分别调用哪些服务方法和后端接口？API 地址前缀、租户标识和认证是如何统一处理的？",
+  "checks": [
+    "创建：create-loans-account.component.ts 的 submit() → loansService.createLoansAccount → POST /loans",
+    "审批/放款：loanActionButtons(loanId, 'approve'|'disburse', data) → POST /loans/{loanId}?command=...",
+    "还款：make-repayment.component.ts 解析模板交易类型 → submitLoanActionButton(loanId, data, command) → POST /loans/{loanId}/transactions?command=repayment",
+    "ApiPrefixInterceptor 统一拼接 /fineract-provider/api/v1 前缀；AuthenticationInterceptor 注入 Fineract-Platform-TenantId 头与 Basic/Bearer 认证",
+    "各业务域一个 service 文件（如 loans.service.ts），地址配置在 src/environments/environment.ts，可被运行时 window.env 覆盖",
+    "前端只组装与发送请求，业务规则全部在后端"
+  ],
+  "checksReview": [
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    },
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    },
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    },
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    },
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    },
+    {
+      "met": null,
+      "candidateQuote": "",
+      "reason": "",
+      "evidence": ""
+    }
+  ],
+  "issues": []
+}

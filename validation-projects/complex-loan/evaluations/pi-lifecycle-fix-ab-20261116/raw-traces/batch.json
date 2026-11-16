@@ -1,0 +1,23 @@
+{
+  "suites": [
+    {
+      "path": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/evaluations/complex-loan.json",
+      "name": "复杂贷款V0原生源码题库"
+    }
+  ],
+  "projectConfig": "/Users/dongyangwei/Documents/学习/代码对话2/validation-projects/complex-loan/project.config.json",
+  "projectId": "complex-loan-validation",
+  "cases": [
+    "native-lifecycle"
+  ],
+  "modes": [
+    "none",
+    "backbone"
+  ],
+  "repeats": 2,
+  "requestedModel": "zcode/glm-5.3-flash",
+  "timeoutSeconds": 900.0,
+  "thinking": null,
+  "keysFile": "validation-projects/complex-loan/evaluations/pi-quality-keys-20261115.json",
+  "startedAt": "2026-11-16T00:23:47.962404+00:00"
+}
