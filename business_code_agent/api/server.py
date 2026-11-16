@@ -15,11 +15,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 from business_code_agent.evaluation.service import EvaluationService
 from business_code_agent.codeintel.ast.service import AstService
 from business_code_agent.evaluation.retrieval_service import RetrievalEvaluationService
+from business_code_agent.knowledge.business_context import BusinessContextConflict, BusinessContextFiles
 from business_code_agent.platform.projects import ProjectContext, ProjectRegistry, ProjectRegistryError
 from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryRuntimeError, QueryService
+from business_code_agent.query.workspace import WorkspaceManager
 
 
 logger = logging.getLogger(__name__)
+CONTEXT_FILES_PATH = "/api/knowledge/context/files"
 
 
 def _user_facing_internal_error(exc: Exception) -> str:
@@ -127,6 +130,16 @@ def make_server(
                 data_root=context.ast_root,
             )
         return ast_services[key]
+
+    def business_context_for(context: ProjectContext) -> BusinessContextFiles:
+        if context.registered:
+            return BusinessContextFiles(context.business_context_root)
+        workspace = WorkspaceManager(
+            None, project_config=context.config_path, code_map_root=context.code_map_root,
+        )
+        knowledge = workspace.config.get("knowledge") or {}
+        editable = bool(knowledge.get("businessContextRoot")) or not knowledge.get("baselineRoot")
+        return BusinessContextFiles(workspace.business_context_root, editable=editable)
 
     class Handler(BaseHTTPRequestHandler):
         def _project_route(self, parsed):
@@ -314,7 +327,7 @@ def make_server(
                     from business_code_agent.knowledge.baseline import BaselineKnowledgeService
                     service = BaselineKnowledgeService(
                         context.open_db(), project_config=project_config,
-                        business_context_root=context.business_context_root if context.registered else None,
+                        business_context_root=business_context_for(context).root,
                     )
                     body = self._body()
                     self._json(200, service.refresh(parser=str(body.get("parser") or "claude")))
@@ -435,6 +448,15 @@ def make_server(
             try:
                 parsed = urlparse(self.path)
                 path, context = self._project_route(parsed)
+                if path.startswith(f"{CONTEXT_FILES_PATH}/"):
+                    if not self._require_admin(context):
+                        return
+                    body = self._body()
+                    self._json(200, business_context_for(context).save(
+                        unquote(path.removeprefix(f"{CONTEXT_FILES_PATH}/")),
+                        previous=body["previousContent"], content=body["content"],
+                    ))
+                    return
                 project_config = str(context.config_path) if context.config_path else None
                 evaluations = evaluation_for(context)
                 suite_match = re.fullmatch(r"/api/evaluation-suites/([^/]+)", path)
@@ -452,6 +474,8 @@ def make_server(
                     self._json(200, evaluations.save_review(review_match.group(1), review_match.group(2), body))
                     return
                 self._json(404, {"error": "not found"})
+            except BusinessContextConflict as exc:
+                self._json(409, {"error": str(exc)})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
                 self._json(400, {"error": str(exc)})
             except Exception as exc:
@@ -469,6 +493,19 @@ def make_server(
                         self._json(200, {"items": [{**legacy_context.to_dict(), "registered": False}]})
                     return
                 path, context = self._project_route(parsed)
+                if path == CONTEXT_FILES_PATH or path.startswith(f"{CONTEXT_FILES_PATH}/"):
+                    if not self._require_admin(context):
+                        return
+                    documents = business_context_for(context)
+                    if path == CONTEXT_FILES_PATH:
+                        self._json(200, documents.list())
+                    else:
+                        name = unquote(path.removeprefix(f"{CONTEXT_FILES_PATH}/"))
+                        try:
+                            self._json(200, documents.read(name))
+                        except FileNotFoundError:
+                            self._json(404, {"error": "业务文档不存在"})
+                    return
                 if path == "/api/project":
                     self._json(200, context.to_dict())
                     return

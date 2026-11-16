@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from business_code_agent.codeintel.ast.service import AstService
+from business_code_agent.knowledge.business_context import BusinessContextFiles
 from business_code_agent.query.agent.pi import PiAgentRuntime
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import (
@@ -150,8 +151,8 @@ class PiQueryServiceTest(unittest.TestCase):
                                mode="backbone")
         self.assertEqual(first["sessionId"], second["sessionId"])
 
-        (self.root / "business" / "terms.md").write_text(
-            "业务术语更新\n更多内容\n", encoding="utf-8")
+        BusinessContextFiles(self.root / "business").save(
+            "terms.md", previous="业务术语\n", content="业务术语更新\n更多内容\n")
         third = service.query("business changed", conversation_id=first["conversationId"],
                               mode="backbone")
         self.assertNotEqual(second["sessionId"], third["sessionId"])

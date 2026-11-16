@@ -7,9 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from business_code_agent.api.server import _user_facing_internal_error, make_server
+from business_code_agent.platform.projects import ProjectRegistry
 from business_code_agent.storage.schema import connect
 
 
@@ -106,13 +108,65 @@ class KnowledgeAdminApiTest(unittest.TestCase):
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 
+    def test_context_editor_uses_project_markdown_and_rejects_stale_writes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            registry = ProjectRegistry(root / "platform")
+            name = "rules/额度.md"
+            for project_id in ("alpha", "beta"):
+                config = root / f"{project_id}.json"
+                config.write_text(json.dumps({
+                    "project": {"id": project_id},
+                    "admin": {"apiTokenEnv": "TEST_ADMIN_TOKEN"},
+                }), encoding="utf-8")
+                context = registry.register(config)
+                source = context.business_context_root / name
+                source.parent.mkdir()
+                source.write_bytes(f"# {project_id}\r\n".encode("utf-8"))
+            with patch.dict("os.environ", {"TEST_ADMIN_TOKEN": "test-admin-token"}):
+                server = make_server(str(root / "legacy.db"), port=0, project_registry=registry)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    base = f"http://127.0.0.1:{server.server_port}/api/projects"
+                    files = f"{base}/alpha/knowledge/context/files"
+                    document = f"{files}/{quote(name, safe='')}"
+                    with self.assertRaises(HTTPError) as denied:
+                        _json_request(document, method="GET")
+                    self.assertEqual(401, denied.exception.code)
+                    denied.exception.close()
+                    token = "test-admin-token"
+                    self.assertEqual({"items": [name], "editable": True},
+                                     _json_request(files, token=token, method="GET"))
+                    original = _json_request(document, token=token, method="GET")
+                    self.assertEqual("# alpha\r\n", original["content"])
+                    edited = {"previousContent": original["content"], "content": "# 新约定\n"}
+                    self.assertEqual(edited["content"], _json_request(
+                        document, edited, token, method="PUT")["content"])
+                    with self.assertRaises(HTTPError) as stale:
+                        _json_request(document, edited, token, method="PUT")
+                    self.assertEqual(409, stale.exception.code)
+                    stale.exception.close()
+                    _json_request(f"{files}/new.md", {"previousContent": None, "content": "# 新文档\n"},
+                                  token, method="PUT")
+                    self.assertEqual(edited["content"],
+                                     (registry.get("alpha").business_context_root / name).read_text())
+                    self.assertEqual("# beta\r\n",
+                                     (registry.get("beta").business_context_root / name).read_bytes().decode())
+                    self.assertFalse((registry.get("beta").business_context_root / "new.md").exists())
+                finally:
+                    server.shutdown(); server.server_close(); thread.join(timeout=2)
 
-def _json_request(url: str, body: dict, token: str | None = None) -> dict:
+
+def _json_request(url: str, body: dict | None = None, token: str | None = None, *,
+                  method: str = "POST") -> dict:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = Request(url, method="POST", data=json.dumps(body, ensure_ascii=False).encode("utf-8"), headers=headers)
-    return json.loads(urlopen(request).read())
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    request = Request(url, method=method, data=data, headers=headers)
+    with urlopen(request) as response:
+        return json.load(response)
 
 
 if __name__ == "__main__":

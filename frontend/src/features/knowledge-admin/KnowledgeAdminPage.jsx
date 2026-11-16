@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react";
-import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tabs, Tag, Typography } from "antd";
 import { request } from "../../lib/api.js";
+import { BusinessContextEditor } from "./BusinessContextEditor.jsx";
 
 const TYPES = [
   ["", "全部类型"], ["SYSTEM", "系统"], ["BUSINESS_TERM", "业务术语"],
@@ -12,7 +13,27 @@ const PARSERS = [
   { value: "markdown", label: "Markdown 规则解析（无需模型）" },
 ];
 
-export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
+export function KnowledgeAdminPage({ projectId, adminUnlocked, onRequireUnlock }) {
+  return (
+    <div className="page-wrap">
+      <Typography.Title level={4} style={{ margin: "0 auto" }}>业务补充知识维护</Typography.Title>
+      <Tabs key={projectId} style={{ margin: "0 auto" }} items={[
+        {
+          key: "documents",
+          label: "业务文档",
+          children: <BusinessContextEditor adminUnlocked={adminUnlocked} onRequireUnlock={onRequireUnlock} />,
+        },
+        {
+          key: "projection",
+          label: "结构化视图",
+          children: <KnowledgeProjection onRequireUnlock={onRequireUnlock} />,
+        },
+      ]} />
+    </div>
+  );
+}
+
+function KnowledgeProjection({ onRequireUnlock }) {
   const [items, setItems] = useState([]);
   const [relations, setRelations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -40,7 +61,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { load("", ""); }, [projectId]);
+  useEffect(() => { load("", ""); }, []);
 
   async function refresh() {
     setRunning("refresh"); setError("");
@@ -61,12 +82,8 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
 
   const list = useMemo(() => [...items, ...relations], [items, relations]);
   return (
-    <div className="page-wrap">
-      <Flex justify="space-between" align="center" style={{ maxWidth: 1180, margin: "0 auto 14px", width: "100%" }}>
-        <div>
-          <Typography.Title level={4} style={{ margin: 0 }}>业务补充知识维护</Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 12.5 }}>查看和维护业务补充知识的结构化索引。问答 Agent 直接读取原始资料，不以这里的条目替代源码调查。</Typography.Text>
-        </div>
+    <>
+      <Flex justify="end" align="center" style={{ margin: "0 0 14px" }}>
         <Space>
           <Select value={parser} options={PARSERS} onChange={setParser} style={{ width: 190 }} />
           <Button onClick={() => { window.location.hash = "#/evaluation"; }}>验证问答效果</Button>
@@ -79,7 +96,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
         <Input.Search value={query} onChange={(event) => setQuery(event.target.value)} onSearch={() => load()} allowClear placeholder="搜索术语、能力、规则或关系" />
         <Select value={type} style={{ width: 150 }} options={TYPES.map(([value, label]) => ({ value, label }))} onChange={(value) => { setType(value); load(query, value); }} />
       </Flex>
-      <Splitter style={{ maxWidth: 1180, margin: "0 auto", width: "100%", height: "calc(100dvh - 255px)" }}>
+      <Splitter style={{ maxWidth: 1180, margin: "0 auto", width: "100%", height: "calc(100dvh - 280px)" }}>
         <Splitter.Panel defaultSize="38%" min="28%" max="52%">
           <div className="result-list">
             {loading ? <Skeleton active paragraph={{ rows: 8 }} style={{ padding: 16 }} /> : list.length === 0 ? (
@@ -91,7 +108,7 @@ export function KnowledgeAdminPage({ projectId, onRequireUnlock }) {
           <div className="detail-scroll">{selected ? <KnowledgeDetail item={selected} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一条知识查看业务说明、关系和调查入口" style={{ marginTop: 120 }} />}</div>
         </Splitter.Panel>
       </Splitter>
-    </div>
+    </>
   );
 }
 

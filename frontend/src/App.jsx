@@ -199,7 +199,7 @@ export default function App() {
         {page === "graph" && <GraphPage workspace={workspace} projectId={projects.projectId} />}
         {page === "evaluation" && <EvaluationPage projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "ast" && <AstPage projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
-        {page === "admin" && <KnowledgeAdminPage projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
+        {page === "admin" && <KnowledgeAdminPage projectId={projects.projectId} adminUnlocked={admin.unlocked} onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "settings" && (
           <SettingsPage
             workspace={workspace}
