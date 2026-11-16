@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from hashlib import sha256
@@ -29,6 +30,7 @@ from .sessions import (prepare_session_root, resolve_session_file,
 
 
 SEARCH_EXTENSION = Path(__file__).with_name("extension") / "codeagent_search.js"
+AST_EXTENSION = Path(__file__).with_name("extension") / "codeagent_ast.js"
 SEARCH_EXTENSION_COMMAND = "codeagent-readonly-search"
 
 
@@ -165,7 +167,7 @@ class PiAgentRuntime:
                                  allowed_roots=allowed_roots,
                                  call_callback=call_callback)
         system_prompt = self._system_prompt(context, prepared, mode=mode)
-        command = self._command(root, existing, system_prompt)
+        command = self._command(root, existing, system_prompt, prepared=prepared)
         system_prompt_hash = sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
         process_environment = {
             **self.environment,
@@ -180,6 +182,20 @@ class PiAgentRuntime:
                  if source.available and source.directory},
                 ensure_ascii=False),
         }
+        if prepared.ast_reader:
+            reader = prepared.ast_reader
+            material = reader.material
+            process_environment.update({
+                "CODEAGENT_PI_AST_SCOPE": json.dumps({
+                    "versionId": reader.version_id, "projectId": reader.project_id,
+                    "astRoot": str(material.root),
+                    "projectConfig": str(material.project_config) if material.project_config else None,
+                    "repositories": [{"repositoryId": repo.repository_id, "root": str(repo.root), "mount": repo.mount}
+                                     for repo in reader.repositories],
+                }, ensure_ascii=False),
+                "CODEAGENT_PI_AST_PYTHON": sys.executable,
+                "CODEAGENT_PI_AST_IMPORT_ROOT": str(Path(__file__).resolve().parents[4]),
+            })
         process = PiProcess(command, cwd=context.workspace,
                             environment=process_environment)
         cancelled = False
@@ -325,7 +341,7 @@ class PiAgentRuntime:
         return RuntimeResult(answer, str(session_file), events, usage,
                              status="incomplete" if incomplete else "completed")
 
-    def _command(self, root: Path, existing: Path | None, system_prompt: str) -> list[str]:
+    def _command(self, root: Path, existing: Path | None, system_prompt: str, *, prepared=None) -> list[str]:
         command = [
             *self.command,
             "--mode", "rpc",
@@ -335,8 +351,10 @@ class PiAgentRuntime:
             "--no-context-files", "--no-mcp", "--no-skills",
             "--no-prompt-templates", "--no-themes", "--no-approve",
             "--system-prompt", system_prompt,
-            "--tools", ",".join(PI_TOOL_NAMES),
+            "--tools", ",".join(prepared.pi_tool_names if prepared else PI_TOOL_NAMES),
         ]
+        if prepared and prepared.ast_reader:
+            command.extend(["-e", str(AST_EXTENSION)])
         if existing is not None:
             command.extend(["--session", str(existing)])
         else:

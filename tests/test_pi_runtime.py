@@ -348,20 +348,23 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         self.assertEqual(self.business.resolve(),
                          (backbone.path / "knowledge" / "business-context").resolve())
         ast = self.manager.prepare_pi(workspace_key="ast", mode="ast",
-                                      code_map_source=self.ast, repository_ids=["a"])
+                                      code_map_source=self.ast)
         self.assertEqual(self.ast.resolve(),
                          (ast.path / "knowledge" / "generated-code-map").resolve())
         self.assertFalse((ast.path / "knowledge" / "business-context").exists())
         combined = self.manager.prepare_pi(
             workspace_key="combined", mode="combined",
             business_context_source=self.business, code_map_source=self.code_map,
-            ast_source=self.ast, repository_ids=["a"])
+            ast_source=self.ast)
         self.assertEqual(self.business.resolve(),
                          (combined.path / "knowledge" / "business-context").resolve())
         self.assertEqual(self.code_map.resolve(),
                          (combined.path / "knowledge" / "generated-code-map").resolve())
         self.assertEqual(self.ast.resolve(),
                          (combined.path / "knowledge" / "ast").resolve())
+        scoped = self.manager.prepare_pi(
+            workspace_key="scoped", mode="combined", repository_ids=["a"], ast_source=self.ast)
+        self.assertFalse((scoped.path / "knowledge" / "ast").exists())
 
     def test_pi_capabilities_follow_the_material_mode(self):
         repository = self.root / "sources" / "a"
@@ -395,7 +398,7 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         combined = prepare_pi_capabilities(context, version="1", mode="combined")
         statuses = {status.capability: status for status in combined.statuses}
         self.assertEqual("ready", statuses["business_context"].status)
-        self.assertEqual("ready", statuses["ast"].status)
+        self.assertEqual("missing", statuses["ast"].status)
         self.assertEqual("ready", statuses["code_map"].status)
         self.assertEqual("disabled", statuses["search_code"].status)
 

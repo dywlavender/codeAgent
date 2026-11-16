@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import ToolStatus
 from business_code_agent.query.tools.files import CoreFiles
 
+if TYPE_CHECKING:
+    from business_code_agent.codeintel.ast.reader import AstReader
+
 
 PI_TOOL_NAMES = ("read", "grep", "find", "ls", "codemode")
+PI_AST_TOOL_NAMES = ("find_code_symbol", "get_code_symbol", "find_code_relations")
 
 _PI_MODE_KINDS = {
     "none": {"source", "requirements"},
@@ -25,6 +30,11 @@ class PreparedCapabilities:
     instructions: tuple[tuple[str, str], ...]
     statuses: tuple[ToolStatus, ...]
     files: CoreFiles | None = None
+    ast_reader: AstReader | None = None
+
+    @property
+    def pi_tool_names(self) -> tuple[str, ...]:
+        return PI_TOOL_NAMES + (PI_AST_TOOL_NAMES if self.ast_reader else ())
 
 
 class FileCapability:
@@ -144,8 +154,40 @@ class PiBusinessContextCapability(BusinessContextCapability):
         )
 
 
+def _prepare_pi_ast(context: RunContext, expected, ast_root) -> tuple[ToolStatus, AstReader | None]:
+    if "ast" not in expected or "ast" not in context.profile.materials:
+        return ToolStatus("ast", "disabled", "disabled"), None
+    source = next((item for item in context.materials if item.kind == "ast"), None)
+    if source is None or not source.version or source.status not in {"available", "not_mounted"}:
+        status = source.status if source else "missing"
+        if status in {"available", "not_mounted"}:
+            status = "missing"
+        reason = {"stale": "AST 资料需要手动更新", "missing": "尚无可查询的 AST 版本",
+                  "generating": "AST 正在生成", "failed": "AST 生成失败"}.get(status)
+        return ToolStatus("ast", "optional", status if status in {"missing", "stale"} else "unavailable",
+                          reason=reason or "尚无可查询的 AST 版本"), None
+    from business_code_agent.codeintel.ast.material import AstMaterial
+    from business_code_agent.codeintel.ast.reader import AstQueryError, AstReader, AstRepository
+
+    repositories = tuple(AstRepository(item.repository_id, item.directory, item.path)
+                         for item in context.materials
+                         if item.kind == "source" and item.available
+                         and item.repository_id in context.repository_ids)
+    if len(repositories) != len(context.repository_ids):
+        return ToolStatus("ast", "optional", "unavailable", version=source.version,
+                          reason="AST 无法映射全部授权仓库"), None
+    material = AstMaterial(project_config=context.project.config_path, data_root=ast_root)
+    reader = AstReader(material, source.version, repositories, project_id=context.project.project_id)
+    try:
+        # Workspace selection already checked source freshness for this turn.
+        reader.check(verify_sources=False)
+    except AstQueryError as exc:
+        return ToolStatus("ast", "optional", exc.status, version=source.version, reason=str(exc)), None
+    return ToolStatus("ast", "optional", "ready", PI_AST_TOOL_NAMES, source.version), reader
+
+
 def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
-                            mode: str | None = None,
+                            mode: str | None = None, ast_root=None,
                             providers=None) -> PreparedCapabilities:
     """Describe Pi's native tools without supplying LangChain tool objects."""
 
@@ -163,9 +205,15 @@ def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
         guidance = provider.instructions(context)
         if guidance:
             instructions.append((provider.id, guidance))
+    ast_status, ast_reader = _prepare_pi_ast(context, expected, ast_root)
+    statuses.append(ast_status)
+    if ast_reader:
+        instructions.append(("ast", "可用 find_code_symbol 定位符号，get_code_symbol 查看定义位置，"
+                             "find_code_relations 查询已索引的调用、继承和实现。"
+                             "这是固定 AST 版本的导航线索，空结果不代表关系不存在。"
+                             "具体实现用 read 读取返回的工程相对源码位置核实。"))
     for capability, kind, policy in (
         ("business_context", "business_context", context.profile.business_context),
-        ("ast", "ast", "optional"),
         ("code_map", "code_map", "optional"),
         ("hybrid_search", "hybrid_search", "disabled"),
     ):
@@ -183,7 +231,7 @@ def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
         ("contract_trace", context.profile.contract_trace),
     ):
         statuses.append(ToolStatus(capability, policy, "disabled"))
-    return PreparedCapabilities((), tuple(instructions), tuple(statuses))
+    return PreparedCapabilities((), tuple(instructions), tuple(statuses), ast_reader=ast_reader)
 
 
 def prepare_capabilities(context: RunContext, *, providers=None) -> PreparedCapabilities:

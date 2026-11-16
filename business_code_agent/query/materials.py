@@ -57,7 +57,8 @@ class MaterialManifest:
 
     @classmethod
     def from_workspace(cls, workspace, repositories=None, *, allowed=MATERIAL_KINDS,
-                       mode=None, ast_version=None, ast_status=None, versions=True):
+                       mode=None, ast_version=None, ast_status=None, versions=True,
+                       repository_mounts=None):
         root = Path(workspace)
         kinds = set(allowed) & _MODE_MATERIALS.get(mode, set(MATERIAL_KINDS))
         context = "knowledge/business-context"
@@ -86,15 +87,16 @@ class MaterialManifest:
         add("code_map", "自动代码地图", code_map)
         # The historical AST-only workspace uses the code map mount.
         add("ast", "AST 结构资料", code_map if mode == "ast" else "knowledge/ast",
-            ast_version, ast_status or "missing")
+            ast_version, "not_mounted" if ast_status == "available" else ast_status or "missing")
         add("requirements", "需求原文", "requirements")
         if "source" in kinds:
-            repos = root / "repos"
-            entries = sorted(repos.iterdir()) if repos.is_dir() else []
-            for entry in entries:
-                if entry.is_dir() and (repositories is None or entry.name in repositories):
-                    add("source", f"代码仓库 {entry.name}", f"repos/{entry.name}",
-                        repository_id=entry.name)
+            if repository_mounts is None:
+                repos = root / "repos"
+                entries = sorted(repos.iterdir()) if repos.is_dir() else []
+                repository_mounts = [(entry.name, f"repos/{entry.name}") for entry in entries
+                                     if entry.is_dir() and (repositories is None or entry.name in repositories)]
+            for repository_id, mount in repository_mounts:
+                add("source", f"代码仓库 {repository_id}", mount, repository_id=repository_id)
             if not any(source.kind == "source" for source in sources):
                 sources.append(MaterialSource("source", "代码仓库", "repos", None, "missing"))
         return cls(tuple(sources))

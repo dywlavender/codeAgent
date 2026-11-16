@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .generator import generate_ast_documents
-from .material import AstMaterial, source_stamp
+from .material import STAMP_IGNORED_PARTS, AstMaterial, source_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class AstService(AstMaterial):
                     name = f"repo-{number}"
                     repository_names.append((repository_id, name))
                     shutil.copytree(source, inputs / name,
-                                    ignore=shutil.ignore_patterns(".git", "node_modules", "target", ".venv", "__pycache__"))
+                                    ignore=shutil.ignore_patterns(*STAMP_IGNORED_PARTS))
                     record.update(phase=f"parsing:{repository_id}", progress=min(75, 20 + number * 15))
                 documents = generate_ast_documents(inputs, repository_names,
                                                    db_path=version_root / "index.db")

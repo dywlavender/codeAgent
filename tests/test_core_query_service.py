@@ -154,7 +154,7 @@ class CoreQueryServiceTest(unittest.TestCase):
         self.assertFalse((self.root / "retrieval-index").exists())
         self.assertFalse((self.root / "contract-index").exists())
 
-        with patch("business_code_agent.query.service.AstMaterial",
+        with patch("business_code_agent.codeintel.ast.material.AstMaterial",
                    side_effect=AssertionError("core must not inspect AST")), \
                 patch.object(WorkspaceManager, "ensure",
                              side_effect=AssertionError("core must not build combined")):

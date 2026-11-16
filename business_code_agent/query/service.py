@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from business_code_agent.codeintel.ast.material import AstMaterial
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.capabilities import (prepare_capabilities,
                                                     prepare_pi_capabilities)
@@ -742,7 +741,7 @@ class QueryService:
                 workspace_key=conversation["id"], mode=effective_mode,
                 repository_ids=repositories, **selection)
             manifest = MaterialManifest.from_workspace(
-                workspace.path, set(workspace.repository_ids) if workspace.repository_ids else None,
+                workspace.path, repository_mounts=workspace.repository_mounts,
                 allowed=profile.materials, mode=effective_mode,
                 ast_version=workspace.ast_version_id, ast_status=workspace.ast_status,
             )
@@ -757,7 +756,9 @@ class QueryService:
             )
             version = runtime.preflight()
             settings = runtime.execution_settings()
-            prepared = prepare_pi_capabilities(context, version=version, mode=effective_mode)
+            prepared = prepare_pi_capabilities(context, version=version, mode=effective_mode,
+                                               ast_root=self.ast_data_root)
+            settings = {**settings, "tools": list(prepared.pi_tool_names)}
             preparation = RunPreparation(manifest, prepared.statuses)
             execution = execution_snapshot(profile, manifest, prepared.statuses, settings=settings)
             execution["repositoryIds"] = list(workspace.repository_ids)
@@ -961,6 +962,8 @@ class QueryService:
         ast_source = None
         ast_status = None
         if mode in {"combined", "ast"}:
+            from business_code_agent.codeintel.ast.material import AstMaterial
+
             factory = self.ast_material_factory or (
                 lambda: AstMaterial(project_config=self.project_config, data_root=self.ast_data_root))
             ast = factory()

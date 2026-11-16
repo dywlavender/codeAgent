@@ -13,15 +13,15 @@ class AstReaderTest(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         root = Path(folder.name)
-        loan, other = root / "loan", root / "other"
-        loan.mkdir()
+        loan, other = root / ".data" / "repositories" / "loan", root / "other"
+        loan.mkdir(parents=True)
         other.mkdir()
         self.loan = loan
         self.other = other
         self.source = loan / "Loan.java"
         self.source.write_text(
             "package demo;\n"
-            "class Base {}\n"
+            "class Base { Loan loan; }\n"
             "interface Action { void submit(); }\n"
             "class Loan extends Base implements Action {\n"
             "    public void submit() { approve(); price(1); client.send(); }\n"
@@ -40,7 +40,7 @@ class AstReaderTest(unittest.TestCase):
         config = root / "project.json"
         config.write_text(json.dumps({
             "project": {"id": "ast-reader"},
-            "repositories": [{"id": "z-loan", "localPath": "loan"},
+            "repositories": [{"id": "z-loan", "localPath": ".data/repositories/loan"},
                              {"id": "a-other", "localPath": "other"}],
         }), encoding="utf-8")
         self.material = AstService(project_config=config, data_root=root / "ast")
@@ -60,6 +60,7 @@ class AstReaderTest(unittest.TestCase):
         return self.reader.find_symbol(query, repository)["symbols"][0]
 
     def test_java_typescript_and_same_name_candidates_are_readable_locations(self):
+        self.assertEqual("CLASS", self.match("Loan")["kind"])
         symbol = self.match("demo.Loan.approve()")
         self.assertEqual(("METHOD", "repos/z-loan/Loan.java", 6),
                          (symbol["kind"], symbol["path"], symbol["lineStart"]))

@@ -53,11 +53,12 @@ def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
         cached_files = (repo_cache.get(str(root)) or {}).get("files") or {}
         entries = {}
         for path in root.rglob("*"):
-            if not path.is_file() or STAMP_IGNORED_PARTS.intersection(path.parts):
+            relative_path = path.relative_to(root)
+            if STAMP_IGNORED_PARTS.intersection(relative_path.parts) or not path.is_file():
                 continue
             try:
                 stat = path.stat()
-                relative = path.relative_to(root).as_posix()
+                relative = relative_path.as_posix()
             except (OSError, ValueError):
                 continue
             files += 1

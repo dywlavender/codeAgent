@@ -7,7 +7,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from business_code_agent.codeintel.ast.service import AstService
 from business_code_agent.query.agent.pi import PiAgentRuntime
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import (
@@ -237,7 +239,7 @@ class PiQueryServiceTest(unittest.TestCase):
         self.assertEqual({"source", "requirements", "business_context", "code_map", "ast"},
                          kinds)
         statuses = {tool["capability"]: tool for tool in combined["execution"]["tools"]}
-        self.assertEqual("ready", statuses["ast"]["status"])
+        self.assertEqual("missing", statuses["ast"]["status"])
         self.assertEqual("ready", statuses["code_map"]["status"])
         self.assertEqual("ast-v1", combined["astVersionId"])
 
@@ -245,11 +247,44 @@ class PiQueryServiceTest(unittest.TestCase):
         ast_kinds = {source["kind"] for source in ast["execution"]["materials"]}
         self.assertEqual({"source", "requirements", "ast"}, ast_kinds)
         statuses = {tool["capability"]: tool for tool in ast["execution"]["tools"]}
-        self.assertEqual("ready", statuses["ast"]["status"])
+        self.assertEqual("missing", statuses["ast"]["status"])
         self.assertEqual("disabled", statuses["code_map"]["status"])
         root = service.workspace_manager.root / "pi" / _safe_name(ast["conversationId"])
         self.assertEqual((self.root / "ast").resolve(),
                          (root / "knowledge" / "generated-code-map").resolve())
+
+    def test_pi_ast_tools_are_versioned_optional_and_respect_scope(self):
+        ast = AstService(project_config=self.config)
+        ast.generate()
+        deadline = time.monotonic() + 5
+        while ast.status()["status"] == "generating" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        state = ast.status()
+        self.assertEqual("available", state["status"], state)
+        service = self.service()
+        scope = {"repositoryIds": ["a"]}
+
+        def ast_tool(run):
+            return next(item for item in run["execution"]["tools"] if item["capability"] == "ast")
+
+        with patch.object(AstService, "generate", side_effect=AssertionError("must remain manual")):
+            ready = service.query("查结构", mode="combined", scope=scope)
+            self.assertEqual("ready", ast_tool(ready)["status"])
+            self.assertEqual(state["currentVersionId"], ast_tool(ready)["version"])
+            self.assertIn("find_code_symbol", ready["execution"]["settings"]["tools"])
+            self.assertFalse(next(item["available"] for item in ready["execution"]["materials"]
+                                  if item["kind"] == "ast"))
+            disabled = service.query("只看源码", mode="none", scope=scope)
+            self.assertEqual("disabled", ast_tool(disabled)["status"])
+            self.assertNotIn("find_code_symbol", disabled["execution"]["settings"]["tools"])
+
+            (self.root / "sources" / "a" / "Main.java").write_text("class Main { int changed; }\n")
+            stale = service.query("继续查源码", mode="combined", scope=scope,
+                                  conversation_id=ready["conversationId"])
+            self.assertEqual("stale", ast_tool(stale)["status"])
+            self.assertEqual([], ast_tool(stale)["names"])
+            self.assertIn("read", stale["execution"]["settings"]["tools"])
+            self.assertEqual("completed", stale["status"])
 
     def test_runtime_failure_is_persisted_without_langchain_fallback(self):
         service = self.service("error")

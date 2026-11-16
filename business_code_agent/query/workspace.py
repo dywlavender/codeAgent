@@ -372,13 +372,15 @@ class WorkspaceManager:
         if unusable:
             raise WorkspaceError("授权仓库不可用，未调用模型：" + "；".join(unusable))
 
+        desired = {_safe_name(repository_id) for repository_id, _ in selected}
+        if len(desired) != len(selected):
+            raise WorkspaceError("本轮仓库标识转换为工作区目录后发生冲突")
         root = self.root / "pi" / _safe_name(workspace_key)
         root.mkdir(parents=True, exist_ok=True)
         repositories = root / "repos"
         knowledge = root / "knowledge"
         repositories.mkdir(exist_ok=True)
         knowledge.mkdir(exist_ok=True)
-        desired = {_safe_name(repository_id) for repository_id, _ in selected}
         for child in repositories.iterdir():
             if child.is_symlink() and child.name not in desired:
                 child.unlink()
@@ -412,6 +414,11 @@ class WorkspaceManager:
             ast_source = None
         else:
             ast_source = Path(ast_source).expanduser().resolve() if ast_source else None
+        if len(selected) < len(configured):
+            # Version-wide Markdown may refer to repositories outside this turn.
+            ast_source = None
+            if mode == "ast":
+                code_map_source = None
         if business_context_source:
             self._link_directory(business_context_link, business_context_source)
         else:

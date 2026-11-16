@@ -12,7 +12,7 @@ V2 已进入「架构设计与接口冻结」阶段，规范分为 [总体架构
 | 执行配置 | 现有 Profile/环境开关和 combined 等资料模式 | core-v1/legacy-v1；Profile 显式授权，禁用能力不探测 |
 | 上下文 | QueryService 传工作区、仓库范围、会话和预检对象 | 复用 ProjectContext 构建 RunContext，不再散传权限/资料配置 |
 | 扩展 | 既有 File/SearchCode/契约工具与 AST 文件投影 | AgentCapability 的 status/tools/instructions，不改变核心循环 |
-| AST 生命周期 | evaluation/ast_service.py，platform 有资料投影 | 阶段 3 收敛到 CodeIntel，Evaluation 只引用固定版本 |
+| AST 生命周期 | CodeIntel 管理手动生成的固定版本 | Pi 按资料模式查询符号和已索引的关系 |
 | 资料边界 | combined 可读业务资料、地图和可用 AST | core 仅源码/可选需求；其他资料按明确能力组合接入 |
 
 `claudecode` 的 `9a1c71e` 已提交 V2 设计和 V1 运行配置预备实现：`query/profile.py` 的解析、`materials.py` 的资料清单、`langchain_agent/preparation.py` 的工具预检，以及 QueryService 的 `execution_json/session_config_json` 持久化与会话重建，另含 Runtime、API、schema 和轨迹前端配套改动。不能再称这些为未提交工作树改动或称整包仅文档。
@@ -77,7 +77,7 @@ Python 负责：
 | `knowledge/` | 业务补充知识、业务关系、调查入口与图谱 |
 | `codeintel/` | 代码解析、索引、匹配、代码地图、跨系统调用边 |
 | `requirement/` | 需求原文领域 |
-| `evaluation/` | 效果验证与 AST 结构资料 |
+| `evaluation/` | 效果验证与历史评测 |
 | `platform/` | 工程配置与注册表 |
 | `storage/` | 数据库结构与迁移 |
 | `shared/` | 跨包共用工具 |
@@ -88,7 +88,7 @@ Python 负责：
 
 `storage/connections.py` 提供不应用主库 schema 的通用 SQLite 连接工厂，供契约索引等独立快照库复用；独立快照不得走 `schema.connect()`，后者会创建并迁移主库表。HTTP 层不直接调用 `storage`：请求级主库连接由 `ProjectContext.open_db()` 提供。
 
-为断开包级双向依赖，`query/` 不引用 `evaluation/` 与 `knowledge/`，`codeintel/` 不引用 `requirement/`；已断的边由 `tests/test_package_boundaries.py` 校验。只读 AST 资料投影位于 `platform/ast_material.py`，生成与源码新鲜度管理仍归 `evaluation/ast_service.py`，HTTP 组合根通过 `ast_material_factory` 注入完整服务；调查锚点解析与需求文档解析分别下沉到 `shared/entry_anchors.py`、`shared/docparse.py`，原领域模块保留兼容导出。
+`query/` 无需导入 `evaluation/` 与 `knowledge/`。`codeintel/` 独立于 `evaluation/`、`query/` 和 `requirement/`，依赖方向由 `tests/test_package_boundaries.py` 校验。`codeintel/ast/` 管理手动生成、版本与只读查询，旧 AST 导入保留兼容入口。调查锚点和需求文档解析分别由 `shared/entry_anchors.py`、`shared/docparse.py` 提供。
 
 `codeintel/contracts/` 管理显式准备的工程契约索引：`java.py` 生成窄范围 Java 表达式与局部分支结构，`resolve.py` 绑定调用、HTTP 配置、返回字段与实体成员，`rules.py` 连接真实 setter 写入点与相应返回成员，`index.py` 保存 SQLite 快照并增量更新，`query.py` 在资料范围、当前原文与预算内交付证据包。解析仅出现在准备命令中，不从问答调用。`query/langchain_agent/contracts.py` 适配工具与本轮补查状态，`contract_answer.py`、`business_answer.py` 提供可选的结构事实、业务分支解读和条件化建议；代码解析领域层不依赖 LangChain。
 
@@ -121,7 +121,7 @@ Python 负责：
 
 历史兼容和显式对照仍支持 none/backbone/ast：分别为基础资料、基础资料加业务补充、基础资料加 AST（不含业务补充）。工作区位于注册工程的 `workspaces/<project-id>/modes/{combined,none,backbone,ast}`（兼容单工程仍使用 `agent-workspaces`），模型会话不跨资料模式或 AST 版本复用；旧答案与资料版本不被改写。
 
-AST 由 `evaluation/ast_service.py` 管理。服务启动、读取评测就绪状态、进入 AST 页面、发起问答和启动实验都只读取状态，不生成 AST；只有用户在 AST 管理页点击生成或重新生成才会创建新版本。源码变化会将当前版本标为待更新，历史查询和已开始的实验仍引用它们各自记录的版本。
+AST 由 `codeintel/ast/` 管理。服务启动、读取评测就绪状态、进入 AST 页面、发起问答和启动实验都只读取状态，不生成 AST；只有用户在 AST 管理页点击生成或重新生成才会创建新版本。源码变化会将当前版本标为待更新，历史查询和已开始的实验仍引用它们各自记录的版本。
 
 ## 工程注册与隔离
 
@@ -257,6 +257,8 @@ event: error   data: {"error":"..."}
 LangChain 事件使用现有 status／tool／text 格式；兼容模式保留 CLI 事件。前端展示实际调查进度、最终回答、历史和反馈。
 
 ## 代码索引边界
+
+手动生成的 AST 可供 Pi 通过 `find_code_symbol`、`get_code_symbol`、`find_code_relations` 查询。服务端固定当前版本和仓库范围，Reader 返回可用 `read` 核实的源码位置。全仓范围可以同时读取版本 Markdown，限仓查询使用结构工具。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
 
 `codeintel/contracts/graph.py` 提供只读调用链投影，复用显式准备的 `contract-index/contracts.sqlite` 与工程源码根目录。`GET /api/projects/<projectId>/call-chains` 列出接口；`/<contractId>?version=...` 返回节点与定向边；`/<contractId>/evidence?version=...&node=...` 或 `&edge=...` 返回有行数上限的索引源码片段。版本变化拒绝旧引用，工程身份由 ProjectContext 与快照共同核对，不使用可变的全局工程。
 

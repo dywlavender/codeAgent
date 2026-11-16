@@ -148,7 +148,7 @@ business_code_agent/
 - 核心文件工具不应为后缀/忽略目录常量依赖 `codeintel/retrieval.py`；下一阶段在文件工具范围内收敛这类通用策略，不连带迁移检索算法。
 - `knowledge/` 不调用问答 Agent 主循环。现有知识维护中的模型能力不因此删除，但不能复用它建立第二套问答调查。
 - `codeintel/` 不生成最终业务答案、不依赖 LangChain；解析/生成与只读查询分开，生成仍由显式管理操作触发。
-- `evaluation/ → query/runtime` 是单向的公共接口消费。`query/` 不依赖 evaluation，`platform/` 不为问答导入 evaluation。AST 生命周期在阶段 3 移入 CodeIntel，评测只冻结和引用版本。
+- `evaluation/ → query/runtime` 是单向的公共接口消费。`query/` 不依赖 evaluation，`platform/` 不为问答导入 evaluation。AST 生命周期由 CodeIntel 管理，评测冻结并引用版本。
 - `api/` 与 CLI 是组合根，只构造/注入服务与提供传输；领域逻辑不得搬到路由。
 - ProjectContext 继续提供工程存储边界，底层 storage/shared 不反向依赖领域。已有包边界规则继续生效，V2 的更细隔离需要未来新增测试，不声称现有测试全部覆盖。
 

@@ -69,6 +69,7 @@ class AstReader:
                            OR instr(lower(s.name), ?) > 0)
                     ORDER BY CASE WHEN lower(s.qualified_name)=? THEN 0
                                   WHEN lower(s.name)=? THEN 1 ELSE 2 END,
+                             CASE WHEN s.kind='FIELD' THEN 1 ELSE 0 END,
                              s.qualified_name,c.repository_id,c.path,s.line_start
                     LIMIT ?""",
                 (*repositories, query, query, query, query, limit + 1),
@@ -139,8 +140,12 @@ class AstReader:
     @contextmanager
     def _open(self, *, verify_sources: bool = True):
         state = self.material._index()
+        if not state.get("currentVersionId"):
+            raise AstQueryError("missing", "尚无可查询的 AST 版本")
         if state.get("currentVersionId") != self.version_id:
             raise AstQueryError("stale", "本轮绑定的 AST 已不是当前版本")
+        if state.get("status") == "stale":
+            raise AstQueryError("stale", "AST 版本需要手动更新")
         if state.get("status") != "available":
             raise AstQueryError("unavailable", "本轮绑定的 AST 版本暂不可用")
         version = self.material.version(self.version_id)

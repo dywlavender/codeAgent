@@ -359,6 +359,8 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 `pi-v1` 使用 Pi 原生 `read`、`grep`、`find`、`ls`、`codemode`，不注册 LangChain 工具，不开放 `bash`／`edit`／`write`。`file_tools` 为 required；业务补充知识、AST、代码地图按模式为 optional，缺失只收缩本轮能力，不换 Profile、不生成索引。
 
+AST 在 `combined` 或显式 `ast` 模式下按可用版本装配。只有索引和授权映射可用时，Pi 才注册 `find_code_symbol`、`get_code_symbol`、`find_code_relations`。工具参数仅选择符号、仓库过滤和关系方向，工程、版本与允许范围由服务端提供。`ready` 表示本轮装配结构工具。组合模式在 AST 不可用时保留源码工具。当前实现的依据仍由 `read` 交付。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
+
 正常在线 API 入口固定进入 Pi；旧 Profile／Runtime 环境变量不能再覆盖这一选择。旧 Runtime 仅允许历史评测代码显式构造并注入。
 
 工作目录仍是只读授权视图，但软链接不是安全边界。`grep`／`find` 默认不跟随符号链接；只读扩展不再请求全局 `--follow`，而是从本轮授权真实根目录分别检索，并通过 `CODEAGENT_PI_MOUNTS` 把结果路径映射回工作区。仓库内部指向其他目录的软链接因此不会被遍历。扩展同时在 `tool_call` 前拦截越界路径、主目录路径和指向授权范围外的入口符号链接；`codemode` 的内层工具调用同样受检。该扩展不是 OS 沙箱，不能替代进程级隔离；工作区只挂载本轮授权的仓库和资料。范围展开为空时在调用模型前拒绝，`None` 与空数组不得混用。
