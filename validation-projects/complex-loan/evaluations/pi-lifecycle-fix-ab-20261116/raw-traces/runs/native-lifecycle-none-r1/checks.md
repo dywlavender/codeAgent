@@ -1,7 +1,7 @@
 # 逐项检查复核：native-lifecycle / none / r1
 
 - Run：`RUN-d8d7d719928e486ba7ea89efb228342a`；模型：zcode/glm-5.3-flash；状态：completed
-- 结论：通过 4、部分通过 1、未通过 0
+- 结论：通过 3、部分通过 2、未通过 0
 
 ## 1. 状态定义在 LoanStatus 枚举（fineract-core 模块），列出 SUBMITTED_AND_PENDING_APPROVAL(100)、APPROVED(200)、ACTIVE(300)、CLOSED_OBLIGATIONS_MET(600) 等关键状态
 
@@ -44,11 +44,12 @@
 
 ## 4. 创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse
 
-**结论：通过**
+**结论：部分通过**
 
 答案原句：
 > `fineract.createLoan` 调 `POST /loans` 创建借据（Fineract 借据落入 100 状态，`FineractClient.java:55-78`）
 > Fineract 侧链路：REST 入口 `POST /v1/loans/{loanId}?command=...` 的 `stateTransitions`
+> 中台不单独调用 Fineract 的 `command=approve`
 
 源码/资料依据：
 - repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java:608-630
@@ -56,7 +57,7 @@
 - repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:55-78
 - repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:89-95
 
-说明：答案给出创建走 POST /loans、放款走 POST /loans/{id}?command=disburse 的 REST 链路；审批入口在本轮中台链路缺位，但检查项要求的 REST 动作已说明。
+说明：答案覆盖创建走 POST /loans 和放款 POST /loans/{id}?command=disburse，并指出中台未调用 command=approve；但没有显式核实 Fineract 审批 REST 入口 POST /loans/{loanId}?command=approve 的分发与处理，审批动作未闭环，故降为部分通过。
 
 ## 5. command 经 CommandWrapperBuilder 构造为 entity=LOAN 的命令，按 @CommandType 注解路由到对应 Handler（如 LoanApplicationApprovalCommandHandler）
 
@@ -76,3 +77,4 @@
 ## 其它问题
 
 - 关键文件 6/6 已读取，但答案对审批命令 Handler 的分发说明缺失。
+- 检查项 4 只说明中台未调用 command=approve，没有核实 Fineract 审批 REST 入口，审批动作未闭环。

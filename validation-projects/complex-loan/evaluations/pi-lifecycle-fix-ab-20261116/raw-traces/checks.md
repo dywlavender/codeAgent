@@ -2,7 +2,7 @@
 
 | 案例 | 模式 | 重复 | 通过 | 部分通过 | 未通过 |
 | --- | --- | --- | --- | --- | --- |
-| native-lifecycle | none | 1 | 4 | 1 | 0 |
+| native-lifecycle | none | 1 | 3 | 2 | 0 |
 | native-lifecycle | none | 2 | 4 | 1 | 0 |
 
 ## native-lifecycle / none / r1
@@ -19,10 +19,10 @@
    - 答案：`LOAN_APPROVED`：仅 100→200（:124-129） … `LOAN_DISBURSED`：仅 200（或 600）→300（:134-142）
    - 依据：repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/domain/DefaultLoanLifecycleStateMachine.java:124-142
    - 说明：答案明确给出两个状态迁移的来源状态与目标状态。
-4. **通过** — 创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse
-   - 答案：`fineract.createLoan` 调 `POST /loans` 创建借据（Fineract 借据落入 100 状态，`FineractClient.java:55-78`） … Fineract 侧链路：REST 入口 `POST /v1/loans/{loanId}?command=...` 的 `stateTransitions`
+4. **部分通过** — 创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse
+   - 答案：`fineract.createLoan` 调 `POST /loans` 创建借据（Fineract 借据落入 100 状态，`FineractClient.java:55-78`） … Fineract 侧链路：REST 入口 `POST /v1/loans/{loanId}?command=...` 的 `stateTransitions` … 中台不单独调用 Fineract 的 `command=approve`
    - 依据：repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java:608-630；repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java:1313-1345；repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:55-78；repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:89-95
-   - 说明：答案给出创建走 POST /loans、放款走 POST /loans/{id}?command=disburse 的 REST 链路；审批入口在本轮中台链路缺位，但检查项要求的 REST 动作已说明。
+   - 说明：答案覆盖创建走 POST /loans 和放款 POST /loans/{id}?command=disburse，并指出中台未调用 command=approve；但没有显式核实 Fineract 审批 REST 入口 POST /loans/{loanId}?command=approve 的分发与处理，审批动作未闭环，故降为部分通过。
 5. **部分通过** — command 经 CommandWrapperBuilder 构造为 entity=LOAN 的命令，按 @CommandType 注解路由到对应 Handler（如 LoanApplicationApprovalCommandHandler）
    - 答案：`CommandWrapperBuilder.disburseLoanApplication`（`CommandWrapperBuilder.java:1164-1171`）→ 命令总线 `PortfolioCommandSourceWritePlatformServiceImpl.logCommandSource`（`PortfolioCommandSourceWritePlatformServiceImpl.java:54-78`）→ 按 `@CommandType(entity="LOAN", action=...)` 注册表路由（`CommandHandlerProvider.java:41-62,91-100`）→ `DisburseLoanCommandHandler`
    - 依据：repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/CommandWrapperBuilder.java:1164-1171；repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/service/PortfolioCommandSourceWritePlatformServiceImpl.java:54-78；repos/fineract-repo/fineract-core/src/main/java/org/apache/fineract/commands/provider/CommandHandlerProvider.java:91；repos/fineract-repo/fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/handler/DisburseLoanCommandHandler.java:35

@@ -47,10 +47,11 @@
     {
       "index": 4,
       "check": "创建走 POST /loans（LoansApiResource），审批/放款走 POST /loans/{loanId}?command=approve|disburse",
-      "verdict": "pass",
+      "verdict": "partial",
       "answerQuotes": [
         "`fineract.createLoan` 调 `POST /loans` 创建借据（Fineract 借据落入 100 状态，`FineractClient.java:55-78`）",
-        "Fineract 侧链路：REST 入口 `POST /v1/loans/{loanId}?command=...` 的 `stateTransitions`"
+        "Fineract 侧链路：REST 入口 `POST /v1/loans/{loanId}?command=...` 的 `stateTransitions`",
+        "中台不单独调用 Fineract 的 `command=approve`"
       ],
       "evidence": [
         "repos/fineract-repo/fineract-provider/src/main/java/org/apache/fineract/portfolio/loanaccount/api/LoansApiResource.java:608-630",
@@ -58,7 +59,7 @@
         "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:55-78",
         "repos/loan-middle-repo/src/main/java/com/rsd/middle/fineract/FineractClient.java:89-95"
       ],
-      "reason": "答案给出创建走 POST /loans、放款走 POST /loans/{id}?command=disburse 的 REST 链路；审批入口在本轮中台链路缺位，但检查项要求的 REST 动作已说明。"
+      "reason": "答案覆盖创建走 POST /loans 和放款 POST /loans/{id}?command=disburse，并指出中台未调用 command=approve；但没有显式核实 Fineract 审批 REST 入口 POST /loans/{loanId}?command=approve 的分发与处理，审批动作未闭环，故降为部分通过。"
     },
     {
       "index": 5,
@@ -77,6 +78,7 @@
     }
   ],
   "issues": [
-    "关键文件 6/6 已读取，但答案对审批命令 Handler 的分发说明缺失。"
+    "关键文件 6/6 已读取，但答案对审批命令 Handler 的分发说明缺失。",
+    "检查项 4 只说明中台未调用 command=approve，没有核实 Fineract 审批 REST 入口，审批动作未闭环。"
   ]
 }

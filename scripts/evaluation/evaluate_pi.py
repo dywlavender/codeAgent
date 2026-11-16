@@ -696,6 +696,14 @@ VERDICTS = {"pass": "通过", "partial": "部分通过", "fail": "未通过"}
 
 
 def check_review(review: dict, checks: list[str], answer: str | None = None) -> list[dict]:
+    """Validate review structure only.
+
+    This checks schema version, item/check alignment, verdict vocabulary, quote
+    presence in the supplied answer text, and that evidence looks like project
+    relative paths. It does not open evidence files or Trace records, so it
+    cannot confirm that cited lines exist or that the quoted source supports
+    the verdict. The verdict itself remains a manual judgement.
+    """
     if review.get("reviewSchemaVersion") != 2:
         raise ValueError("复核文件 reviewSchemaVersion 必须为 2")
     items = review.get("checksReview") or []
@@ -920,7 +928,11 @@ def main() -> int:
     report = sub.add_parser("report", help="从已有 runs 重新生成汇总")
     report.add_argument("--batch", type=Path, required=True)
     report.add_argument("--keys-file", type=Path)
-    review = sub.add_parser("review", help="校验逐项复核并生成 checks.md")
+    review = sub.add_parser(
+        "review",
+        help="校验逐项复核并生成 checks.md",
+        description="校验 review.json 的结构、判定、答案原句和工程相对证据路径，"
+                    "并生成 checks.md。不核对证据文件/行是否存在，也不判断语义正确性。")
     review.add_argument("--batch", type=Path, required=True)
     review.add_argument("--allow-unreviewed", action="store_true",
                         help="跳过还没有 review.json 的运行")

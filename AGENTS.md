@@ -20,7 +20,7 @@
 - Pi 会话文件限定在工程数据目录 `pi-sessions/`；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档和需求使用内容指纹，源码仓库使用文件元数据修订号，资料变化会隔离旧会话；旧 LangChain 会话不直接复用。Pi 失败不回退 LangChain。配置见 `.env.example` 的 `BUSINESS_CODE_PI_*`。
 - 在线模型选择来自 Pi 自身的 `get_available_models`（`GET /api/pi/models`），只返回安全展示字段；前端按工程保存选择，请求携带 `model`，留空使用 `BUSINESS_CODE_PI_MODEL`。2026-11-16 起问答默认模型为 `deepseek/gpt-6-luna`；换模型后必须新开评测批次，不能与 glm-5.3-flash 等旧批次混跑或续跑。模型进入会话身份，切换模型会重建 Pi 会话。
 - Pi 最终答案的引用会按本轮实际交付的 `read` 原文核验路径与行区间，记录在 usage/Trace；`semanticProof=false`，核验通过不等于语义正确。空范围展开后没有仓库时，必须在调用模型前拒绝，不能回退为全部仓库。
-- Pi 真实问答评测使用 `scripts/evaluation/evaluate_pi.py`，直接调用生产 `QueryService` 与 `PiAgentRuntime`；题库 checks 只留在评测侧，答案、Trace、模型/资料版本和调查计数写入独立批次。搜索与未读候选只是代理指标，不是答案正确性评分。引用按独立源码引用去重（同一 path+line 只计一次），Markdown 链接只按目标或可匹配标签生成一条记录；grep 上下文行不得作为候选文件。逐项复核用 `review` 命令生成 `checks.md`，结论固定为 pass/partial/fail，并附答案原句与工程相对证据。Pi 最终答案在输出前把临时绝对路径改为工程相对路径；Pi Trace 只保存模型调用摘要，不能标记为完整请求快照。
+- Pi 真实问答评测使用 `scripts/evaluation/evaluate_pi.py`，直接调用生产 `QueryService` 与 `PiAgentRuntime`；题库 checks 只留在评测侧，答案、Trace、模型/资料版本和调查计数写入独立批次。搜索与未读候选只是代理指标，不是答案正确性评分。引用按独立源码引用去重（同一 path+line 只计一次），Markdown 链接只按目标或可匹配标签生成一条记录；grep 上下文行不得作为候选文件。逐项复核用 `review` 命令生成 `checks.md`，结论固定为 pass/partial/fail，并附答案原句与工程相对证据。该命令只校验复核结构、判定词、答案原句是否出现在 `answer.md`，以及证据是否为工程相对路径；它不打开证据文件或 Trace，不核对文件/行是否存在或内容是否支持判定，语义正确性仍需人工阅读源码确认。Pi 最终答案在输出前把临时绝对路径改为工程相对路径；Pi Trace 只保存模型调用摘要，不能标记为完整请求快照。
 - 8／16 题同模型真实对照与现有模式验收尚未完成，工程测试或单次真实运行不能替代答案质量验收；旧 Runtime 的删除与历史评测入口调整另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
 
 ## CodeAgent V2 架构与接口冻结（2026-11-13）

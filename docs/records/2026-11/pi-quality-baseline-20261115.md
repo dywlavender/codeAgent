@@ -10,7 +10,7 @@
 
 - native-frontend：4 次运行都覆盖 5/6 检查项，第 6 项未被逐字声明但也没有把业务规则归到前端；没有发现凭空编造的路径或行号。低“引用确认率”主要因为生产核验只承认 `read` 原文，多数未确认引用实际在 grep 输出中可见。主要问题是末键后仍执行 5—36 次工具、3—22 次搜索，成本 0.33M—1.13M Token；A/B 正确性无可见差异，成本差异在两次重复内波动很大。
 - native-lifecycle：两次 none 都只读到 3/6 关键文件，连续漏掉 `CommandWrapperBuilder → 命令总线 → @CommandType → Handler` 这一层（check 5），无效调查代理 22/30；backbone r1 读到 4/6，仍未覆盖该层，并把成本推到 248 次工具、6.63M Token。该缺口的直接原因是 Pi 使用自建系统提示且带 `--no-context-files`，工作区已有的调查契约（“找到第一个入口并不代表问题已回答”）没有进入 Pi。
-- 针对性修复后，lifecycle `none` 两轮都显著改善了命令路由关系：r1 覆盖 `CommandWrapperBuilder → 命令总线 → @CommandType → DisburseLoanCommandHandler`，r2 覆盖命令总线、注册表和审批/放款 Handler。逐项复核均为 4 项通过、检查项 5 部分通过（r1 缺审批 Handler 分发；r2 未明确指出和读取 `CommandWrapperBuilder`），不能表述为 check 5 完整通过。关键文件分别为 6/6 和 4/6，成本 3.41M Token/542.7 秒与 6.16M Token/895.6 秒。第二轮接近 900 秒超时，修复改善了关系覆盖，但没有解决成本与停止问题。`backbone` 两轮因上游额度错误没有有效答案，Business Context 的修复后对照尚不成立。
+- 针对性修复后，lifecycle `none` 两轮都显著改善了命令路由关系：r1 覆盖 `CommandWrapperBuilder → 命令总线 → @CommandType → DisburseLoanCommandHandler`，r2 覆盖命令总线、注册表和审批/放款 Handler。逐项复核 r1 为 3 项通过、2 项部分通过、0 项未通过（检查项 4 未核实 Fineract 审批 REST 入口；检查项 5 缺审批 Handler 分发），r2 为 4 项通过、1 项部分通过、0 项未通过（检查项 5 未明确指出和读取 `CommandWrapperBuilder`），不能表述为 check 5 完整通过。关键文件分别为 6/6 和 4/6，成本 3.41M Token/542.7 秒与 6.16M Token/895.6 秒。第二轮接近 900 秒超时，修复改善了关系覆盖，但没有解决成本与停止问题。`backbone` 两轮因上游额度错误没有有效答案，Business Context 的修复后对照尚不成立。
 - 尚未完成的 `v2-strategy-code`、`biz-payment-pending` 决定不了 Business Context 是否有价值；现在不能据此下结论。
 
 ## 实验设置
@@ -108,7 +108,7 @@
 
 **结论**：
 
-- 逐项复核后，两轮都是 4 项通过、检查项 5 部分通过（[checks.md](../../../validation-projects/complex-loan/evaluations/pi-lifecycle-fix-ab-20261116/raw-traces/checks.md)）。r1 覆盖 `CommandWrapperBuilder → 命令总线 → @CommandType → DisburseLoanCommandHandler`，但缺少 `LoanApplicationApprovalCommandHandler` 的审批分发；r2 覆盖命令总线、注册表和审批/放款 Handler，但没有明确指出 `CommandWrapperBuilder`。因此“2/2 命令链覆盖”只能降级为关系调查改善，不能判定 check 5 完整通过。
+- 逐项复核后（[checks.md](../../../validation-projects/complex-loan/evaluations/pi-lifecycle-fix-ab-20261116/raw-traces/checks.md)）：r1 为 3 项通过、2 项部分通过、0 项未通过；r2 为 4 项通过、1 项部分通过、0 项未通过。r1 检查项 4 只说明中台未调用 `command=approve`，没有核实 Fineract 审批 REST 入口 `POST /loans/{loanId}?command=approve`，因此由通过降为部分通过；检查项 5 覆盖 `CommandWrapperBuilder → 命令总线 → @CommandType → DisburseLoanCommandHandler`，但缺少 `LoanApplicationApprovalCommandHandler` 的审批分发。r2 检查项 5 覆盖命令总线、注册表和审批/放款 Handler，但没有明确指出 `CommandWrapperBuilder`。因此“2/2 命令链覆盖”只能降级为关系调查改善，不能判定检查项完整通过。
 - 第二轮关键文件 4/6（`CommandWrapperBuilder`、`CommandHandlerProvider` 未 `read`，但通过 grep 输出核对了相关行；`LoanApplicationApprovalCommandHandler` 已读），成本 6.16M Token、895.6 秒，接近超时；末键后仍有 108 次工具、30 次空搜索。修复提升的是关系覆盖，不是成本或停止稳定性。
 - `backbone` 两轮返回上游 `502 ... code 1005 exceed quota limit`；第一轮在失败前已完成 100 次模型调用但无最终答案。这是供应商额度问题，不能算 Business Context 或修复本身的效果。
 - 修复后第二个 `none` 答案有 1 条错误模块路径引用（`fineract-loan/.../LoanTransactionValidatorImpl.java`；实际文件在 `fineract-provider/...`，同一内容另以 basename 引用并被读取确认），属于路径精度问题，不是凭空内容。
@@ -145,7 +145,7 @@
 - `verify_references` 现在按 Markdown 链接和独立源码引用去重，同一 path+line 只保留一条；支持缺段、重复 `repos/...` 前缀的路径归一化，并把绝对工作区路径还原为工程相对路径。
 - Pi 最终答案输出前会调用 `normalize_answer_paths`，只改写非规范的绝对路径，不改变短文件名或正常相对引用；原始模型答案仍保留在 Trace 调用记录中。
 - `evaluate_pi.py` 的 grep 解析只取行首路径，不再把 `path-260- content` 上下文行或内容片段当成候选文件；引用统计新增总数、独立引用去重、格式问题（绝对/缺段/重复根/无法归一化/其中格式错误数）。
-- 新增 `review` 命令：逐项复核使用 `pass/partial/fail`，要求答案原句必须出现在 `answer.md`、证据必须是工程相对路径，并生成单次与批次 `checks.md`。
+- 新增 `review` 命令：逐项复核使用 `pass/partial/fail`，要求答案原句必须出现在 `answer.md`、证据必须是工程相对路径，并生成单次与批次 `checks.md`。该校验只检查复核结构、判定词、引文是否存在于答案文本和证据路径形态；它不打开证据文件或 Trace，不核对文件/行是否存在，也不判断所引源码是否支持该判定，语义正确性仍需人工阅读源码确认。
 - Trace 元数据区分“模型调用摘要”和“完整请求快照”：Pi 的调用记录不再把空的 `messages/tools` 标成 `modelSnapshotAvailable`，并记录 `recordKind=message_summary`、`requestSnapshotAvailable=false`、`snapshotStage=pi_message_summary`；轨迹页会提示只保存摘要。
 - 这些改动只修正评测与展示，不改变 Pi 的调查策略；也不能把修正后的指标当成答案质量提升。下一步仍需在同源码、同提示、同模型设置下重跑配对测试。
 
