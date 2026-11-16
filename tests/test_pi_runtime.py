@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 from business_code_agent.platform.projects import ProjectContext
 from business_code_agent.query.agent.pi import PiAgentRuntime, PiConfigurationError
-from business_code_agent.query.agent.pi.events import PiEventAdapter, denied_tool_path
+from business_code_agent.query.agent.pi.events import (PiEventAdapter, answer_body,
+                                                       denied_tool_path, goal_coverage)
 from business_code_agent.query.capabilities import prepare_pi_capabilities
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.materials import MaterialManifest, MaterialSource
@@ -93,6 +94,36 @@ class PiRuntimeTest(unittest.TestCase):
         self.assertIn("找到第一个入口", prompt)
         self.assertIn("Handler/注册表", prompt)
         self.assertIn("题目要求的各项都有源码依据后停止调查", prompt)
+        self.assertIn("## 目标覆盖", prompt)
+
+    def test_goal_coverage_requires_delivered_read_evidence(self):
+        reads = [{"path": "repos/a/Main.java", "content": "line1\nline2\n",
+                  "lineStart": 10, "lineEnd": 11}]
+        answer = (
+            "答案正文。\n\n## 目标覆盖\n"
+            "- [已核实] 创建入口：`repos/a/Main.java:10-11`\n"
+            "- [已核实] 审批入口：`repos/a/Missing.java:1`\n"
+            "- [已核实] 混合证据：`repos/a/Main.java:10-11` 与 `repos/a/Other.java:1`\n"
+            "- [部分] 还款：已知 command，缺 Handler\n"
+            "- [未核实] 状态机例外\n")
+        coverage = goal_coverage(answer, reads, workspace="/workspace")
+        self.assertEqual(5, coverage["total"])
+        self.assertEqual(1, coverage["verified"])
+        self.assertEqual(1, coverage["partial"])
+        self.assertEqual(3, coverage["unverified"])
+        self.assertFalse(coverage["complete"])
+        self.assertEqual(["repos/a/Main.java:10-11"],
+                         coverage["goals"][0]["confirmedReferences"])
+        self.assertEqual("答案正文。", answer_body(answer))
+
+    def test_goal_coverage_marks_complete_only_when_every_goal_is_verified(self):
+        reads = [{"path": "repos/a/Main.java", "content": "line1\n",
+                  "lineStart": 1, "lineEnd": 1}]
+        answer = "## 目标覆盖\n- [已核实] 入口：`repos/a/Main.java:1`\n"
+        coverage = goal_coverage(answer, reads)
+        self.assertTrue(coverage["complete"])
+        self.assertEqual(1, coverage["verified"])
+        self.assertIsNone(goal_coverage("没有覆盖小节。", reads)["complete"])
 
     def test_normal_run_translates_events_and_persists_session(self):
         context, prepared, _ = self.context_and_prepared()
@@ -112,6 +143,7 @@ class PiRuntimeTest(unittest.TestCase):
         self.assertEqual("9.9.9", result.usage["piVersion"])
         self.assertEqual(16, len(result.usage["systemPromptSha256"]))
         self.assertEqual("fake/fake-model", result.usage["actualModel"])
+        self.assertIsNone(result.usage["investigation"]["goalCoverage"]["complete"])
         self.assertEqual([1, 1, 2, 2], [call["attempt"] for call in calls])
         self.assertEqual(["running", "completed", "running", "completed"],
                          [call["status"] for call in calls])

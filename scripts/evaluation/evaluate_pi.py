@@ -26,6 +26,7 @@ from business_code_agent.query.agent.citations import (canonical_citation_path,
                                                        match_reference_path,
                                                        verify_references)
 from business_code_agent.query.agent.pi import PiAgentRuntime
+from business_code_agent.query.agent.pi.events import answer_body
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import QueryService
 from business_code_agent.storage.schema import connect
@@ -262,10 +263,11 @@ def analyze_trace(trace: dict, keys=()) -> dict:
     references = (usage.get("verification") or {})
     answer = str(run.get("answer") or "")
     if answer:
-        # Re-parse the archived answer so old traces use the same deduplication
-        # and path rules as current production verification.
+        # Re-parse the archived answer body so old traces use the same
+        # deduplication and path rules; goal-coverage citations are checked
+        # separately and must not inflate answer reference counts.
         reference_items = verify_references(
-            answer, read_outputs, workspace=workspace)["references"]
+            answer_body(answer), read_outputs, workspace=workspace)["references"]
     else:
         reference_items = references.get("references") or []
     search_lines: dict[str, set[int]] = {}
@@ -409,6 +411,81 @@ def analyze_trace(trace: dict, keys=()) -> dict:
                                and (call.get("round") or 0) > last_key_round)
     searches_after_last_key = sum(1 for call in search_calls if last_key_round is not None
                                   and (call.get("round") or 0) > last_key_round)
+    stopping = {
+        "postKeyToolCalls": 0,
+        "postKeyNovelCalls": 0,
+        "postKeyRedundantCalls": 0,
+        "postKeyUnusedSearchCalls": 0,
+        "postKeyUnclassifiedCalls": 0,
+        "postKeyNewFiles": 0,
+        "postKeyNewReadCalls": 0,
+        "postKeyNovelCandidatePaths": 0,
+        "postKeyUnusedCandidatePaths": 0,
+    }
+    seen_ranges: dict[str, list[list[int]]] = {}
+    seen_paths: set[str] = set()
+    read_paths_seen: set[str] = set()
+    for call in ordered:
+        after_key = (last_key_round is not None
+                     and (call.get("round") or 0) > last_key_round)
+        if call["status"] == "error":
+            if after_key:
+                stopping["postKeyToolCalls"] += 1
+                stopping["postKeyUnclassifiedCalls"] += 1
+            continue
+        if call["status"] != "completed":
+            continue
+        name, arguments = call["name"], call["input"] or {}
+        if name == "read":
+            path = relative(arguments.get("path") or "")
+            output = call.get("output") or ""
+            if not path or not output:
+                continue
+            try:
+                start = max(1, int(arguments.get("offset", 1)))
+            except (TypeError, ValueError):
+                start = 1
+            lines = output.splitlines()
+            ranges = [[start, start + len(lines) - 1]] if lines else []
+            uncovered = [item for item in ranges
+                         if not read_covers(seen_ranges.get(path) or [], *item)]
+            if after_key:
+                stopping["postKeyToolCalls"] += 1
+                if uncovered:
+                    stopping["postKeyNovelCalls"] += 1
+                    stopping["postKeyNewReadCalls"] += 1
+                    if path not in read_paths_seen:
+                        stopping["postKeyNewFiles"] += 1
+                else:
+                    stopping["postKeyRedundantCalls"] += 1
+            seen_ranges.setdefault(path, []).extend(ranges)
+            seen_paths.add(path)
+            read_paths_seen.add(path)
+            continue
+        if name in {"grep", "find"}:
+            found = []
+            for line in (call.get("output") or "").splitlines():
+                candidate = _candidate_path(line, name, relative)
+                if candidate:
+                    found.append(candidate)
+            new_paths = [path for path in found if path not in seen_paths]
+            used_paths = [path for path in new_paths if path in read_paths]
+            unused_paths = [path for path in new_paths if path not in read_paths]
+            if after_key:
+                stopping["postKeyToolCalls"] += 1
+                if used_paths:
+                    stopping["postKeyNovelCalls"] += 1
+                    stopping["postKeyNovelCandidatePaths"] += len(used_paths)
+                elif unused_paths:
+                    stopping["postKeyUnusedSearchCalls"] += 1
+                    stopping["postKeyUnusedCandidatePaths"] += len(unused_paths)
+                else:
+                    stopping["postKeyRedundantCalls"] += 1
+            seen_paths.update(found)
+            continue
+        if after_key:
+            stopping["postKeyToolCalls"] += 1
+            stopping["postKeyUnclassifiedCalls"] += 1
     return {
         "modelCalls": usage.get("modelCalls") or len(trace.get("calls") or []),
         "toolCalls": len(ordered),
@@ -459,6 +536,9 @@ def analyze_trace(trace: dict, keys=()) -> dict:
         "modelCallsAfterLastKey": ((round_no - last_key_round)
                                    if round_no is not None and last_key_round is not None
                                    else None),
+        "stopping": stopping,
+        "goalCoverage": ((usage.get("investigation") or {}).get("goalCoverage")
+                          if isinstance(usage.get("investigation"), dict) else None),
         "reads": [
             {"path": path, **entry}
             for path, entry in sorted(reads.items(),
@@ -651,6 +731,32 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
                     f"{metrics.get('toolsAfterLastKey')} 次、搜索 "
                     f"{metrics.get('searchesAfterLastKey')} 次、模型调用 "
                     f"{metrics.get('modelCallsAfterLastKey')} 次")
+            stopping = metrics.get("stopping") or {}
+            classified = ((stopping.get("postKeyNovelCalls") or 0)
+                          + (stopping.get("postKeyUnusedSearchCalls") or 0)
+                          + (stopping.get("postKeyRedundantCalls") or 0))
+            if classified:
+                lines.append(
+                    f"- 末键后证据：可判定工具 {classified} 次（新增 "
+                    f"{stopping.get('postKeyNovelCalls')}／新候选未读 "
+                    f"{stopping.get('postKeyUnusedSearchCalls')}／未新增 "
+                    f"{stopping.get('postKeyRedundantCalls')}），其中新读文件 "
+                    f"{stopping.get('postKeyNewFiles')}、新行区间读取 "
+                    f"{stopping.get('postKeyNewReadCalls')}、被读取的新候选路径 "
+                    f"{stopping.get('postKeyNovelCandidatePaths')}、未读的新候选路径 "
+                    f"{stopping.get('postKeyUnusedCandidatePaths')}；ls/codemode 等未分类 "
+                    f"{stopping.get('postKeyUnclassifiedCalls')} 次")
+            coverage = metrics.get("goalCoverage")
+            if isinstance(coverage, dict):
+                if coverage.get("total"):
+                    complete = coverage.get("complete")
+                    lines.append(
+                        f"- 目标覆盖：{coverage['total']} 项；已核实 "
+                        f"{coverage.get('verified', 0)}、部分 {coverage.get('partial', 0)}、"
+                        f"未核实 {coverage.get('unverified', 0)}；模型声明完整："
+                        f"{'是' if complete else '否' if complete is False else '未声明'}")
+                else:
+                    lines.append("- 目标覆盖：模型未声明目标清单")
             refs = metrics.get("references") or {}
             issues = refs.get("formatIssues") or {}
             if refs.get("total"):

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from business_code_agent.query.agent.citations import (normalize_answer_paths,
+                                                       reference_text,
                                                        verify_references)
 
 
@@ -16,6 +18,73 @@ CallCallback = Callable[[dict[str, Any]], None]
 
 _PATH_KEYS = {"path", "paths", "directory", "dir", "cwd", "file", "files"}
 _PATH_TOOLS = {"read", "grep", "find", "ls"}
+_GOAL_HEADING = re.compile(r"^#{2,4}\s*目标覆盖\s*[:：]?\s*$")
+_GOAL_ITEM = re.compile(r"^\s*[-*]\s*\[(已核实|部分|未核实)\]\s*(.*)$")
+_GOAL_STATUS = {"已核实": "verified", "部分": "partial", "未核实": "unverified"}
+
+
+def answer_body(answer: str) -> str:
+    """Return the answer without the trailing goal-coverage section."""
+    text = str(answer or "")
+    lines = text.replace("\r\n", "\n").splitlines()
+    start = next((index for index, line in enumerate(lines)
+                  if _GOAL_HEADING.match(line.strip())), None)
+    if start is None:
+        return text
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if re.match(r"^#{1,6}\s", lines[index].strip()):
+            end = index
+            break
+    return "\n".join(lines[:start] + lines[end:]).strip()
+
+
+def goal_coverage(answer: str, reads, *, workspace=None) -> dict[str, Any]:
+    """Parse the model's goal checklist and verify its cited read evidence.
+
+    A goal is only ``verified`` when the model marked it 已核实 and every
+    line-cited reference in that item was delivered by a read in this run (at
+    least one such reference is required). The remainder are reported as gaps;
+    no section means the model made no completeness claim.
+    """
+    lines = str(answer or "").replace("\r\n", "\n").splitlines()
+    start = next((index for index, line in enumerate(lines)
+                  if _GOAL_HEADING.match(line.strip())), None)
+    if start is None:
+        return {"total": 0, "verified": 0, "partial": 0, "unverified": 0,
+                "complete": None, "goals": []}
+    goals = []
+    for line in lines[start + 1:]:
+        if re.match(r"^#{1,6}\s", line.strip()):
+            break
+        match = _GOAL_ITEM.match(line)
+        if not match:
+            continue
+        status = _GOAL_STATUS[match.group(1)]
+        text = match.group(2).strip()
+        references = verify_references(text, reads, workspace=workspace)["references"]
+        line_references = [reference for reference in references
+                           if reference.get("line") is not None]
+        confirmed = [reference for reference in line_references
+                     if reference.get("confirmed")]
+        if status == "verified" and (not line_references
+                                      or len(confirmed) != len(line_references)):
+            status = "unverified"
+        goals.append({
+            "status": status,
+            "text": text[:300],
+            "confirmedReferences": [reference_text(reference)
+                                     for reference in confirmed][:5],
+        })
+    counts = {status: sum(1 for goal in goals if goal["status"] == status)
+              for status in ("verified", "partial", "unverified")}
+    return {
+        "total": len(goals),
+        **counts,
+        "complete": (all(goal["status"] == "verified" for goal in goals)
+                     if goals else None),
+        "goals": goals,
+    }
 
 
 def message_text(message: Mapping[str, Any] | None) -> str:
@@ -420,7 +489,8 @@ class PiEventAdapter:
         return str(value) if value else None
 
     def usage(self) -> dict[str, Any]:
-        verification = verify_references(self.answer(), self.reads,
+        answer = self.answer()
+        verification = verify_references(answer_body(answer), self.reads,
                                          workspace=self.workspace)
         return {
             "modelCalls": self.model_calls,
@@ -438,4 +508,8 @@ class PiEventAdapter:
             "semanticProof": False,
             "verification": verification,
             "references": verification["references"],
+            "investigation": {
+                "goalCoverage": goal_coverage(
+                    answer, self.reads, workspace=self.workspace),
+            },
         }

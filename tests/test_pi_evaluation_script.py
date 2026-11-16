@@ -79,6 +79,92 @@ class PiEvaluationMetricsTest(unittest.TestCase):
         self.assertEqual({"a": {"reads": 1, "searches": 1},
                           "b": {"reads": 0, "searches": 2}}, metrics["repos"])
 
+    def test_stopping_metrics_separate_novel_and_redundant_post_key_work(self):
+        trace = {
+            "run": {"workspace": "/tmp/workspace", "usage": {}},
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-key", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 1, "limit": 2},
+                    "output": "line1\nline2\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-1", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/a", "pattern": "needle"},
+                    "output": "repos/a/Y.java:4:  needle();\n"}},
+                {"eventType": "model", "payload": {"attempt": 2}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-again", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 1, "limit": 2},
+                    "output": "line1\nline2\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-new", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/Z.java", "offset": 1, "limit": 2},
+                    "output": "zeta1\nzeta2\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-2", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/a", "pattern": "needle"},
+                    "output": "repos/a/Y.java:4:  needle();\nrepos/a/W.java:9:  needle();\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-w", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/W.java", "offset": 9, "limit": 2},
+                    "output": "w1\nw2\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "grep-3", "name": "grep", "status": "completed",
+                    "input": {"path": "repos/a", "pattern": "other"},
+                    "output": "repos/a/V.java:3:  other();\n"}},
+                {"eventType": "tool", "payload": {
+                    "id": "ls-1", "name": "ls", "status": "completed",
+                    "input": {"path": "repos/a"}, "output": "X.java\nZ.java\n"}},
+            ],
+        }
+        stopping = evaluate_pi.analyze_trace(trace, ["X.java"])["stopping"]
+        self.assertEqual(6, stopping["postKeyToolCalls"])
+        self.assertEqual(3, stopping["postKeyNovelCalls"])
+        self.assertEqual(1, stopping["postKeyRedundantCalls"])
+        self.assertEqual(1, stopping["postKeyUnusedSearchCalls"])
+        self.assertEqual(1, stopping["postKeyUnclassifiedCalls"])
+        self.assertEqual(2, stopping["postKeyNewFiles"])
+        self.assertEqual(2, stopping["postKeyNewReadCalls"])
+        self.assertEqual(1, stopping["postKeyNovelCandidatePaths"])
+        self.assertEqual(1, stopping["postKeyUnusedCandidatePaths"])
+
+    def test_goal_coverage_citations_do_not_inflate_answer_references(self):
+        trace = {
+            "run": {
+                "workspace": "/tmp/workspace",
+                "answer": ("见 `repos/a/X.java:1`。\n\n## 目标覆盖\n"
+                           "- [已核实] 入口：`repos/a/X.java:1`\n"
+                           "- [已核实] 其他：`repos/a/Y.java:2`\n"),
+                "usage": {},
+            },
+            "events": [
+                {"eventType": "model", "payload": {"attempt": 1}},
+                {"eventType": "tool", "payload": {
+                    "id": "read-1", "name": "read", "status": "completed",
+                    "input": {"path": "repos/a/X.java", "offset": 1, "limit": 1},
+                    "output": "line1\n"}},
+            ],
+        }
+        refs = evaluate_pi.analyze_trace(trace)["references"]
+        self.assertEqual(1, refs["total"])
+        self.assertEqual(1, refs["confirmed"])
+        self.assertEqual(0, refs["unseen"])
+
+    def test_goal_coverage_is_reported_from_usage(self):
+        trace = {
+            "run": {"workspace": "/tmp/workspace", "usage": {"investigation": {
+                "goalCoverage": {
+                    "total": 2, "verified": 1, "partial": 1, "unverified": 0,
+                    "complete": False, "goals": [],
+                },
+            }}},
+            "events": [],
+        }
+        coverage = evaluate_pi.analyze_trace(trace)["goalCoverage"]
+        self.assertEqual(2, coverage["total"])
+        self.assertFalse(coverage["complete"])
+
     def test_reference_provenance_separates_search_seen_and_unseen(self):
         trace = {
             "run": {
