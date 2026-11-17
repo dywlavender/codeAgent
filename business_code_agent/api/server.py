@@ -674,15 +674,18 @@ def make_server(
                     config, mounts = guide_configuration(context)
                     if repo_id and repo_id not in mounts:
                         raise ValueError("请选择本工程已登记的仓库")
-                    repository_only = repo_id or (apps[0]["repositoryId"] if app_id else None)
-                    selected = {repository_only} if repository_only else {app["repositoryId"] for app in apps}
+                    selected = {repo_id} if repo_id else {app["repositoryId"] for app in apps}
                     navigation = build_navigation(
                         config, {key: mount for key, mount in mounts.items() if key in selected},
-                        context.project_id, context.project_name, system_ids=() if repository_only else (system_id,),
+                        context.project_id, context.project_name, system_ids=() if repo_id else (system_id,),
                     )
+                    scope = {"repositoryIds": [repo_id]} if repo_id else {"systemIds": [system_id]}
+                    if app_id and not repo_id:
+                        navigation["applications"] = [app for app in navigation["applications"] if app["id"] == app_id]
+                        scope["applicationIds"] = [app_id]
                     docs = load_system_guides(context.system_guides_root, navigation)
                     self._json(200, {
-                        "scope": {"repositoryIds": [repository_only]} if repository_only else {"systemIds": [system_id]},
+                        "scope": scope,
                         "guidance": render_system_guidance(navigation, docs),
                         "documents": [doc.workspace_path for doc in docs],
                         "applications": navigation["applications"],

@@ -200,7 +200,7 @@ python3 -m unittest discover -s tests -v
 cd frontend && npm test && npm run build
 ```
 
-工程测试覆盖 Runtime、工作区、QueryService、事件归一化和前端 SSE。真实问答用 `scripts/evaluation/evaluate_pi.py` 固定模型与资料执行配对，结合原始 Trace 和逐项复核判断答案质量。
+工程测试覆盖 Runtime、工作区、QueryService、事件归一化、前端 SSE 和资料中心页面交互。真实问答用 `scripts/evaluation/evaluate_pi.py` 固定模型与资料执行配对，结合原始 Trace 和逐项复核判断答案质量。
 
 更完整的设计说明见 [当前架构](docs/spec/architecture.md)。
 

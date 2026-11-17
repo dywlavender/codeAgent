@@ -20,13 +20,13 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
   const [draftRun, setDraftRun] = useState(null);
   const [showTrace, setShowTrace] = useState(false);
   const [preview, setPreview] = useState(null);
-  const [repository, setRepository] = useState("");
   const [pending, setPending] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const dirty = document && draft !== (document.content ?? "");
   const discard = () => !dirty || window.confirm("放弃当前未保存的修改？");
+  const repository = preview?.scope.repositoryIds?.[0] ?? "";
 
   function showError(reason) {
     if (reason.status === 401) onRequireUnlock?.();
@@ -45,7 +45,6 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
     setDocument(file);
     setDraft(file.content ?? "");
     setPreview(effective);
-    setRepository("");
     setEvidence([]);
     setDraftRun(null);
     setMessage("");
@@ -165,12 +164,11 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
                 ? <div className="system-guide-preview"><Markdown>{draft}</Markdown></div>
                 : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="使用模板或输入 Markdown" /> },
               { key: "effective", label: "生效内容", children: <Flex vertical gap={8}>
-                  <Select aria-label="导航预览范围" value={repository} disabled={Boolean(pending) || !target}
-                    options={[{ value: "", label: target?.applicationId ? "应用关联的仓库" : "当前系统" },
-                      ...repositoryIds.map((id) => ({ value: id, label: `仓库 ${id}` }))]}
-                    onChange={(value) => {
-                      setRepository(value); work("preview", () => refreshPreview(target, value));
-                    }} />
+                  <Select aria-label="导航预览视角" value={repository} disabled={Boolean(pending) || !target}
+                    options={[{ value: "", label: target?.applicationId ? "应用视角" : "系统视角" },
+                      ...repositoryIds.map((id) => ({ value: id, label: `仓库视角 · ${id}` }))]}
+                    onChange={(value) => work("preview", () => refreshPreview(target, value))} />
+                  <Typography.Text type="secondary">问答中的源码访问按仓库授权。</Typography.Text>
                   {preview?.guidance ? <>
                     <pre className="system-guide-effective">{preview.guidance}</pre>
                     {preview.documents.length > 0 && <Typography.Text type="secondary">

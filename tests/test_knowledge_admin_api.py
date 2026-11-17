@@ -222,12 +222,25 @@ class KnowledgeAdminApiTest(unittest.TestCase):
             config.write_text(json.dumps({
                 "project": {"id": "guides"},
                 "systems": [{"id": "core"}, {"id": "ops"}],
-                "repositories": [{"id": "loan", "localPath": "loan"}],
+                "repositories": [{"id": "loan", "localPath": "loan"},
+                                 {"id": "reports", "localPath": "reports"}],
                 "applications": [{"id": "api", "systemId": "core", "repositoryId": "loan", "sourceRoot": "src"},
-                                 {"id": "job", "systemId": "ops", "repositoryId": "loan", "sourceRoot": "job"}],
+                                 {"id": "audit", "systemId": "core", "repositoryId": "loan", "sourceRoot": "audit"},
+                                 {"id": "job", "systemId": "ops", "repositoryId": "loan", "sourceRoot": "job"},
+                                 {"id": "export", "systemId": "ops", "repositoryId": "reports", "sourceRoot": "src"}],
             }))
             registry = ProjectRegistry(root / "platform")
-            registry.register(config)
+            context = registry.register(config)
+            for name, text in {
+                "core/SYSTEM.md": "核心系统通用规则",
+                "core/applications/audit.md": "审计应用特殊规则",
+                "ops/SYSTEM.md": "运营系统通用规则",
+                "ops/applications/job.md": "运营任务特殊规则",
+                "ops/applications/export.md": "报表应用特殊规则",
+            }.items():
+                guide = context.system_guides_root / name
+                guide.parent.mkdir(parents=True, exist_ok=True)
+                guide.write_text(text, encoding="utf-8")
             server = make_server(str(root / "legacy.db"), port=0, project_registry=registry)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -249,10 +262,30 @@ class KnowledgeAdminApiTest(unittest.TestCase):
                 file = base + "/file?systemId=core&applicationId=api"
                 self.assertIsNone(_json_request(file, method="GET")["content"])
                 _json_request(base + "/file", {**target, "content": result["content"], "previousContent": None}, method="PUT")
-                self.assertIn("在本应用中定位接口", _json_request(base + "/preview?systemId=core", method="GET")["guidance"])
-                self.assertNotIn("在本应用中定位接口", _json_request(base + "/preview?systemId=ops", method="GET")["guidance"])
-                self.assertIn("在本应用中定位接口", _json_request(base + "/preview?systemId=ops&repositoryId=loan",
-                                                                      method="GET")["guidance"])
+                system = _json_request(base + "/preview?systemId=core", method="GET")
+                self.assertEqual({"systemIds": ["core"]}, system["scope"])
+                self.assertEqual(["api", "audit"], [app["id"] for app in system["applications"]])
+                self.assertIn("核心系统通用规则", system["guidance"])
+                self.assertIn("审计应用特殊规则", system["guidance"])
+                self.assertNotIn("运营系统通用规则", system["guidance"])
+
+                application = _json_request(base + "/preview?systemId=core&applicationId=api", method="GET")
+                self.assertEqual({"systemIds": ["core"], "applicationIds": ["api"]}, application["scope"])
+                self.assertEqual(["api"], [app["id"] for app in application["applications"]])
+                self.assertEqual(["knowledge/system-guides/core/SYSTEM.md",
+                                  "knowledge/system-guides/core/applications/api.md"], application["documents"])
+                self.assertIn("核心系统通用规则", application["guidance"])
+                self.assertIn("在本应用中定位接口", application["guidance"])
+                self.assertNotIn("审计应用特殊规则", application["guidance"])
+                self.assertNotIn("运营任务特殊规则", application["guidance"])
+
+                repository = _json_request(base + "/preview?systemId=core&applicationId=api&repositoryId=loan",
+                                           method="GET")
+                self.assertEqual({"repositoryIds": ["loan"]}, repository["scope"])
+                self.assertEqual(["api", "audit", "job"], [app["id"] for app in repository["applications"]])
+                self.assertIn("运营系统通用规则", repository["guidance"])
+                self.assertIn("运营任务特殊规则", repository["guidance"])
+                self.assertNotIn("报表应用特殊规则", repository["guidance"])
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 
