@@ -1,10 +1,22 @@
 .system-guides { overflow-y: auto; }
 .system-guides > * { margin: 0 auto var(--space-3); }
+.guides-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.guides-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
+.guides-heading p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
+.guides-heading .ant-tag { align-self: center; }
 .system-guides-grid { display: grid; grid-template-columns: minmax(155px, .8fr) minmax(0, 1.7fr) minmax(0, 1.25fr); gap: var(--space-3); align-items: start; }
 .system-guide-preview, .system-guide-effective { max-height: 62vh; overflow: auto; overflow-wrap: anywhere; }
 .system-guide-preview h1 { font-size: var(--type-lg); }
 .system-guide-preview h2 { font-size: var(--type-md); }
 .system-guide-effective { margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-well); white-space: pre-wrap; font: var(--type-sm)/1.65 var(--font-code); }
+.system-guide-foot { margin: 0; color: var(--color-text-faint); font-size: var(--type-xs); }
+.guide-tree-note { margin: 10px 2px 0; color: var(--color-text-faint); font-size: var(--type-xs); line-height: 1.7; }
+.guide-scope-note { padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-muted); }
+.guide-scope-note b { display: block; font-size: var(--type-sm); color: var(--color-text); }
+.guide-scope-note p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-xs); line-height: 1.65; }
+.guide-kv { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px 10px; margin: 0; font-size: var(--type-xs); }
+.guide-kv dt { color: var(--color-text-faint); }
+.guide-kv dd { margin: 0; color: var(--color-text-secondary); overflow-wrap: anywhere; line-height: 1.6; }
 @media (max-width: 1060px) {
   .system-guides-grid { grid-template-columns: minmax(155px, 1fr) minmax(0, 3fr); }
   .system-guides-grid > :last-child { grid-column: 1 / -1; }

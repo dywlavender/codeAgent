@@ -379,6 +379,7 @@ body { background: var(--canvas); color: var(--ink); overflow: hidden; font-fami
 .page-topbar, .agent-topbar { height: var(--component-topbar-height); min-height: var(--component-topbar-height); display: flex; align-items: center; gap: 8px; padding: 0 18px; flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-surface-raised); }
 .page-topbar .ant-btn, .agent-topbar .ant-btn { color: var(--color-text-secondary); }
 .page-topbar-title, .project-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-size: 13px; font-weight: 600; }
+.topbar-crumb-sep { color: var(--color-text-faint); font-weight: 400; margin: 0 3px; }
 .agent-topbar .project-title { max-width: min(62vw, 680px); }
 .runtime-indicator { margin-left: auto; color: var(--color-text-faint); font-size: 11px; }
 .workspace-caption { color: var(--color-text-faint); }

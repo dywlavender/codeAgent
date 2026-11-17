@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Drawer, Empty, Flex, Input, Select, Skeleton } from "antd";
+import { Button, Empty, Flex, Input, Select, Skeleton, Splitter } from "antd";
 import { request } from "../../lib/api.js";
 import { CallChainCanvas } from "../graph/CallChainView.jsx";
 
@@ -13,6 +13,17 @@ const graphNode = (symbol, column) => ({
   application: symbol.repositoryId, column,
   location: { path: symbol.path, start: symbol.lineStart },
 });
+
+/* 未解析/原始调用以虚线“线索”节点进入画布：点击仍打开调用处源码，但不推断目标实现。 */
+function clueNode(node, edge) {
+  return {
+    id: `clue:${edge.relationId}`,
+    label: edge.targetName || "未知目标", displayName: edge.targetName,
+    subtitle: CLUE[edge.status] || "线索", type: "UNRESOLVED", state: "unresolved",
+    application: edge.from.repositoryId, column: node.column + 1,
+    location: { path: edge.location?.path || edge.from.path, start: edge.location?.lineStart ?? edge.from.lineStart },
+  };
+}
 
 function expandGraph(previous, node, groups) {
   const nodes = new Map((previous?.nodes || [node]).map((item) => [item.id, item]));
@@ -29,7 +40,17 @@ function expandGraph(previous, node, groups) {
         label: edge.relationType, kind: edge.relationType, state: "current",
       });
     }
-    for (const edge of [...result.unresolved, ...result.rawCalls]) clues.set(edge.relationId, edge);
+    for (const edge of [...result.unresolved, ...result.rawCalls]) {
+      clues.set(edge.relationId, edge);
+      if (edge.from.symbolId && !nodes.has(`clue:${edge.relationId}`)) {
+        nodes.set(`clue:${edge.relationId}`, clueNode(node, edge));
+        edges.set(`clue:${edge.relationId}`, {
+          id: `clue:${edge.relationId}`, source: edge.from.symbolId, target: `clue:${edge.relationId}`,
+          label: CLUE[edge.status] || "线索", kind: "UNRESOLVED", state: "unresolved",
+          relationId: edge.relationId,
+        });
+      }
+    }
   }
   return {
     rootId: previous?.rootId || node.id, nodes: [...nodes.values()], edges: [...edges.values()],
@@ -105,67 +126,80 @@ export function AstGraph({ versionId, repositories, onInvalidated }) {
   }
 
   const node = graph?.nodes.find((item) => item.id === focused);
-  const clues = graph?.clues.filter((edge) => edge.from.symbolId === focused) || [];
-  return <div className="call-chain-view">
-    <Flex wrap gap={8}>
-      <Select aria-label="仓库筛选" style={{ minWidth: 165 }} value={repositoryId} disabled={pending}
-        options={[{ value: "", label: "全部仓库" }, ...repositories.map((repo) => ({ value: repo.id, label: repo.id }))]}
-        onChange={(value) => { setRepositoryId(value); setGraph(null); setResult(null); setError(""); }} />
-      <Input.Search aria-label="符号名称" placeholder="类名、方法名或全限定名" value={query} enterButton="搜索"
-        style={{ flex: "1 1 260px" }} loading={pending} onSearch={search}
-        onChange={(event) => setQuery(event.target.value)} />
-      <Select aria-label="关系类型" style={{ minWidth: 145 }} value={relationType} disabled={pending}
-        options={[{ value: "", label: "全部关系" }, ...RELATIONS.map((x) => ({ value: x, label: x }))]}
-        onChange={(value) => {
-          setRelationType(value);
-          if (node) explore({ ...node, column: 0 }, BOTH, value, true);
-        }} />
-    </Flex>
-    {error && <Alert type="error" showIcon title={error} />}
-    {result && <Select aria-label="搜索结果" placeholder="选择一个符号查看关系"
-      disabled={pending} options={result.symbols.map((item) => ({
-        value: item.symbolId, label: `${item.qualifiedName} · ${item.repositoryId}:${item.lineStart}`,
-      }))}
-      notFoundContent="未找到符号" onChange={(id) => {
-        const symbol = result.symbols.find((item) => item.symbolId === id);
-        explore(graphNode(symbol, 0), BOTH, relationType, true);
-      }} />}
-    {node && <Flex gap={8} wrap align="center">
-      <code>{node.label}</code>
-      <Button disabled={pending} onClick={() => explore(node, ["incoming"])}>展开上游</Button>
-      <Button disabled={pending} onClick={() => explore(node, ["outgoing"])}>展开下游</Button>
-      <Button disabled={pending} onClick={() => openSource(node.id)}>查看源码</Button>
-    </Flex>}
-    {graph
-      ? <CallChainCanvas chain={graph} graphLabel="AST 代码关系图" selection={{ id: focused }}
-          onSelect={(item) => {
-            if (pending) return;
-            if (item.kind === "node") setFocused(item.id);
-            else {
-              const edge = graph.edges.find((value) => value.id === item.id);
-              openSource(edge.source, edge.id);
-            }
+  const clueCount = graph?.clues.length || 0;
+  return <Splitter className="ast-explorer">
+    <Splitter.Panel defaultSize="23%" min="18%" max="34%">
+      <div className="ast-explorer-side">
+        <Select aria-label="仓库筛选" style={{ width: "100%" }} value={repositoryId} disabled={pending}
+          options={[{ value: "", label: "全部仓库" }, ...repositories.map((repo) => ({ value: repo.id, label: repo.id }))]}
+          onChange={(value) => { setRepositoryId(value); setGraph(null); setResult(null); setError(""); }} />
+        <Input.Search aria-label="符号名称" placeholder="类名、方法名或全限定名" value={query} enterButton="搜索"
+          loading={pending} onSearch={search}
+          onChange={(event) => setQuery(event.target.value)} />
+        <Select aria-label="关系类型" style={{ width: "100%" }} value={relationType} disabled={pending}
+          options={[{ value: "", label: "全部关系" }, ...RELATIONS.map((x) => ({ value: x, label: x }))]}
+          onChange={(value) => {
+            setRelationType(value);
+            if (node && !node.id.startsWith("clue:")) explore({ ...node, column: 0 }, BOTH, value, true);
           }} />
-      : pending ? <Skeleton active /> : <Empty description="搜索并选择一个符号开始查看关系" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-    {graph?.truncated && <p className="call-chain-caption">部分关系已按单次结果上限截断。</p>}
-    {clues.length > 0 && <details className="call-chain-version">
-      <summary>未连线的调用和关系线索（{clues.length}）</summary>
-      <Flex gap={4} wrap>{clues.map((edge) => <Button size="small" key={edge.relationId}
-        disabled={pending} onClick={() => openSource(edge.from.symbolId, edge.relationId)}>
-        {CLUE[edge.status]} · {edge.targetName} · {edge.location.lineStart}
-      </Button>)}</Flex>
-    </details>}
-    <Drawer open={Boolean(source)} onClose={() => setSource(null)} title="源码位置" size={640}>
-      {source && <section className="call-chain-source">
-        <div className="call-chain-source-path">{source.path}:{source.focusLine}</div>
-        <pre><code>{source.content.split("\n").map((line, i) => {
-          const number = source.lineStart + i;
-          return number <= source.lineEnd
-            ? <React.Fragment key={number}>{String(number).padStart(4)}  {line}{"\n"}</React.Fragment>
-            : null;
-        })}</code></pre>
-        {source.truncated && <p>源码片段已截断。</p>}
-      </section>}
-    </Drawer>
-  </div>;
+        <div className="ast-symbol-list" aria-label="搜索结果">
+          {result?.symbols?.length
+            ? result.symbols.map((item) => <button key={item.symbolId}
+                aria-label={`${item.qualifiedName} · ${item.repositoryId}:${item.lineStart}`}
+                className={`r-row ast-symbol-row ${item.symbolId === node?.id ? "on" : ""}`}
+                onClick={() => explore(graphNode(item, 0), BOTH, relationType, true)}>
+                <span className="r-glyph">⌘</span>
+                <span className="r-copy"><b>{item.qualifiedName}</b><small>{item.repositoryId}:{item.lineStart}</small></span>
+              </button>)
+            : result ? <p className="ast-side-hint">未找到匹配符号。</p>
+              : <p className="ast-side-hint">搜索后选择一个符号开始查看关系。</p>}
+        </div>
+        {error && <p className="ast-side-error">{error}</p>}
+      </div>
+    </Splitter.Panel>
+    <Splitter.Panel>
+      <div className="ast-explorer-main">
+        {node && !node.id.startsWith("clue:") && <Flex gap={8} wrap align="center" className="ast-explorer-toolbar">
+          <code>{node.label}</code>
+          <Button disabled={pending} onClick={() => explore(node, ["incoming"])}>展开上游</Button>
+          <Button disabled={pending} onClick={() => explore(node, ["outgoing"])}>展开下游</Button>
+          <Button disabled={pending} onClick={() => openSource(node.id)}>查看源码</Button>
+        </Flex>}
+        {graph
+          ? <CallChainCanvas chain={graph} graphLabel="AST 代码关系图" selection={{ id: focused }}
+              onSelect={(item) => {
+                if (pending) return;
+                if (item.kind === "node") {
+                  if (item.id.startsWith("clue:")) {
+                    const clueEdge = graph.edges.find((value) => value.id === item.id);
+                    if (clueEdge) openSource(clueEdge.source, clueEdge.relationId);
+                    return;
+                  }
+                  setFocused(item.id);
+                } else {
+                  const edge = graph.edges.find((value) => value.id === item.id);
+                  if (edge) openSource(edge.source, edge.relationId || edge.id);
+                }
+              }} />
+          : pending ? <Skeleton active /> : <Empty description="搜索并选择一个符号开始查看关系" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+        {clueCount > 0 && <p className="call-chain-caption">虚线节点是尚未解析的调用线索（{clueCount}）；没有连线不等于不存在调用。</p>}
+        {graph?.truncated && <p className="call-chain-caption">部分关系已按单次结果上限截断。</p>}
+      </div>
+    </Splitter.Panel>
+    <Splitter.Panel defaultSize="24%" min="18%" max="34%">
+      <div className="detail-scroll ast-source-pane" aria-label="源码位置">
+        {source ? <section className="call-chain-source ast-source-inline">
+          <div className="call-chain-source-path">{source.path}:{source.focusLine}</div>
+          <pre><code>{source.content.split("\n").map((line, i) => {
+            const number = source.lineStart + i;
+            return number <= source.lineEnd
+              ? <React.Fragment key={number}>{String(number).padStart(4)}  {line}{"\n"}</React.Fragment>
+              : null;
+          })}</code></pre>
+          {source.truncated && <p>源码片段已截断。</p>}
+        </section> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="点击画布中的节点或连线，在这里查看定义位置和调用原文" />}
+      </div>
+    </Splitter.Panel>
+  </Splitter>;
 }

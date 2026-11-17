@@ -1,15 +1,22 @@
 const PAGE_IDS = ["agent", "library", "guides", "graph", "evaluation", "ast", "admin", "settings"];
 
 const PAGE_LABELS = {
-  agent: "新对话",
-  library: "资料总览",
+  agent: "代码问答",
+  library: "知识总览",
   guides: "系统导航",
   graph: "知识图谱",
   ast: "AST 结构",
   evaluation: "效果验证",
-  admin: "业务补充知识维护",
+  admin: "业务知识",
   settings: "工程设置",
 };
+
+/* 知识中心五个页面共享顶栏面包屑；其余页面只显示自身名称。 */
+const KNOWLEDGE_CENTER = new Set(["library", "guides", "graph", "ast", "admin"]);
+
+function pageGroup(page) {
+  return KNOWLEDGE_CENTER.has(page) ? "知识中心" : null;
+}
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#\/?/, "").split("?", 1)[0];
@@ -23,4 +30,4 @@ function setProjectInUrl(projectId) {
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-export { PAGE_IDS, PAGE_LABELS, pageFromHash, setProjectInUrl };
+export { PAGE_IDS, PAGE_LABELS, pageGroup, pageFromHash, setProjectInUrl };

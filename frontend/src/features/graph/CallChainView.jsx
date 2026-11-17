@@ -82,7 +82,7 @@ export function CallChainView({ projectId }) {
       : !catalog?.items.length ? <Empty description="当前索引没有可展示的接口。" />
         : !chain ? !error && <Skeleton active paragraph={{ rows: 7 }} />
           : <CallChainCanvas chain={chain} selection={selection} onSelect={setSelection} />}
-    {chain && <p className="call-chain-caption">静态调用关系 · 覆盖已索引的返回依赖调用 · 点击节点或连线查看源码</p>}
+    {chain && <p className="call-chain-caption">静态结构导航 · 覆盖已索引的返回依赖调用 · 不代表完整运行调用链 · 点击节点或连线查看源码</p>}
     <Drawer open={Boolean(selection)} onClose={() => setSelection(null)} title={selectedNode?.label || selectedEdge?.label || "源码依据"}
       size={560} mask={false} className="call-chain-drawer">
       {selectedNode && <div className="call-chain-inspector-title"><span>{selectedNode.application}</span><code>{selectedNode.route}</code></div>}
@@ -171,7 +171,7 @@ export function CallChainCanvas({ chain, selection, onSelect, graphLabel = "接�
           tabIndex={0} role="button" aria-label={`${typeLabel} ${node.label}`}
           onClick={(e) => activate(e, { kind: "node", id: node.id })} onKeyDown={(e) => activate(e, { kind: "node", id: node.id })}>
           <rect width={CARD.width} height={CARD.height} rx="12" />
-          <text x="18" y="25" className="call-chain-node-type">{typeLabel}{node.state === "stale" ? " · 待更新" : node.state === "unavailable" ? " · 不可读取" : ""}</text>
+          <text x="18" y="25" className="call-chain-node-type">{typeLabel}{node.state === "stale" ? " · 待更新" : node.state === "unavailable" ? " · 不可读取" : node.state === "unresolved" ? " · 线索" : ""}</text>
           <text x="18" y="53" className="call-chain-node-owner">{owner.length > 26 ? owner.slice(0, 25) + "…" : owner}</text>
           <text x="18" y="77" className="call-chain-node-method">{method.length > 30 ? method.slice(0, 29) + "…" : method}</text>
           {routeLines.map((line, i) => <text key={i} x="18" y={101 + i * 15} className="call-chain-node-route">{line.length > 32 ? line.slice(0, 31) + "…" : line}</text>)}

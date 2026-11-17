@@ -119,30 +119,41 @@ test("AST page searches symbols, expands neighbors, opens call-site source and c
     if (path === "/symbols/apply/source") return Response.json({
       path: apply.path, focusLine: 5, lineStart: 5, lineEnd: 5, content: "check();",
     });
-    const relations = url.searchParams.get("direction") === "incoming" ? [] :
-      path === "/symbols/apply/relations" ? [relation(apply, check)] : [relation(check, validate)];
-    return Response.json({ relations, unresolved: [], rawCalls: [] });
+    if (path === "/symbols/check/source") return Response.json({
+      path: apply.path, focusLine: 9, lineStart: 9, lineEnd: 9, content: "riskService.check();",
+    });
+    const outgoing = path === "/symbols/apply/relations" ? [relation(apply, check)] : [relation(check, validate)];
+    const relations = url.searchParams.get("direction") === "incoming" ? [] : outgoing;
+    const rawCalls = path === "/symbols/check/relations"
+      ? [{ relationId: "check-raw", from: check, targetName: "riskService.check()",
+          location: { lineStart: 9 }, status: "raw" }]
+      : [];
+    return Response.json({ relations, unresolved: [], rawCalls });
   }, "ast");
 
-  await click(textElement('[role="tab"]', "代码关系图"));
   await inputText(document.querySelector('input[aria-label="符号名称"]'), "Loan.apply");
   await click(textElement("button", "搜索"));
-  await choose("搜索结果", "Loan.apply · loan:4");
+  await click(document.querySelector('[aria-label="Loan.apply · loan:4"]'));
   assert.ok(document.querySelector('[aria-label="CALLS：Loan.apply → Loan.check"]'));
   await click(document.querySelector('[aria-label$="Loan.check"]:not([aria-label^="CALLS"])'));
   await click(textElement("button", "展开下游"));
   assert.ok(document.querySelector('[aria-label="CALLS：Loan.check → Loan.validate"]'));
+  assert.ok(document.querySelector('[aria-label="待解析 riskService.check()"]'), "未解析调用应以线索节点显示");
+
+  await click(document.querySelector('[aria-label="待解析 riskService.check()"]'));
+  let pane = document.querySelector(".ast-source-pane");
+  assert.match(pane.textContent, /repos\/loan\/Loan.java:9/);
+  assert.match(pane.textContent, /riskService\.check\(\);/);
 
   await click(document.querySelector('[aria-label="CALLS：Loan.apply → Loan.check"]'));
-  const source = document.querySelector('[role="dialog"]');
-  assert.match(source.textContent, /repos\/loan\/Loan.java:5/);
-  assert.match(source.textContent, /check\(\);/);
+  pane = document.querySelector(".ast-source-pane");
+  assert.match(pane.textContent, /repos\/loan\/Loan.java:5/);
+  assert.match(pane.textContent, /check\(\);/);
   assert.deepEqual(requests.map(([path, query]) => [path, query.query || query.direction || query.relationId]), [
     ["/symbols", "Loan.apply"], ["/symbols/apply/relations", "incoming"],
     ["/symbols/apply/relations", "outgoing"], ["/symbols/check/relations", "outgoing"],
-    ["/symbols/apply/source", "apply-check"],
+    ["/symbols/check/source", "check-raw"], ["/symbols/apply/source", "apply-check"],
   ]);
-  await click(source.querySelector('button[aria-label="Close"]'));
 
   stale = true;
   await click(textElement("button", "展开上游"));
@@ -205,7 +216,6 @@ test("System Guide switches navigation views and publishes an edited draft on co
   const guidance = () => document.querySelector(".system-guide-effective").textContent;
   const previewView = () => document.querySelector('[aria-label="导航预览视角"]').closest(".ant-select").textContent;
   const editor = () => document.querySelector('textarea[aria-label="系统导航 Markdown"]');
-  await click(textElement('[role="tab"]', "生效内容"));
   assert.match(guidance(), /中台通用规则\n审计应用规则/);
   assert.match(previewView(), /系统视角/);
   await click(textElement(".ant-tree-title", "审批应用"));
@@ -221,7 +231,7 @@ test("System Guide switches navigation views and publishes an edited draft on co
   assert.equal(saves.length, 0);
   assert.equal(guidance(), "中台通用规则");
   await inputText(editor(), reviewed);
-  await click(textElement("button", "发布"));
+  await click(textElement("button", "发布导航"));
   assert.deepEqual(saves, [{ systemId: "core", applicationId: "api", previousContent: null, content: reviewed }]);
   assert.match(guidance(), /人工核对后的规则/);
 
@@ -248,16 +258,17 @@ test("materials overview switches projects and displays each project's projectio
     });
   }, "library");
 
-  assert.match(document.body.textContent, /业务关系图待更新/);
+  assert.match(document.body.textContent, /需要处理：业务关系图已落后于最新业务文档/);
+  assert.match(document.body.textContent, /知识图谱待更新/);
   assert.match(document.body.textContent, /审批需求.md/);
   await choose("选择工程", "运营工程");
   assert.equal(new URL(window.location.href).searchParams.get("projectId"), "beta");
   await act(async () => {
     const navigated = once(window, "hashchange", { signal: AbortSignal.timeout(2000) });
-    textElement('[role="menuitem"]', "资料总览").click();
+    textElement('[role="menuitem"]', "知识总览").click();
     await navigated;
   });
-  assert.match(document.body.textContent, /业务关系图已同步/);
+  assert.match(document.body.textContent, /知识图谱已同步/);
   assert.match(document.body.textContent, /运营需求.md/);
-  assert.doesNotMatch(document.body.textContent, /待更新|审批需求.md/);
+  assert.doesNotMatch(document.body.textContent, /待更新|需要处理|审批需求.md/);
 });

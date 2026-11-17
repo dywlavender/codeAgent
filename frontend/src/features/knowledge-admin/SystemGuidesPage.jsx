@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Tabs, Tree, Typography } from "antd";
+import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Tabs, Tag, Tree, Typography } from "antd";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { request } from "../../lib/api.js";
 import { TraceDrawer } from "../query/TraceDrawer.jsx";
 import "./system-guides.css";
@@ -11,11 +12,18 @@ function targetParams(system, app) {
   return { systemId: system.id, ...(app ? { applicationId: app.id } : {}) };
 }
 
+const SCOPE_NOTES = {
+  system: ["系统视角", "系统通用导航 + 本系统下应用导航。未发布草稿不参与问答。"],
+  application: ["应用视角", "所属系统的通用规则 + 当前应用的补充导航。"],
+  repository: ["仓库视角", "显示该仓库关联的应用与对应系统规则；源码访问仍按仓库授权。"],
+};
+
 export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) {
   const [systems, setSystems] = useState(null);
   const [target, setTarget] = useState(null);
   const [document, setDocument] = useState(null);
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState("preview");
   const [evidence, setEvidence] = useState([]);
   const [draftRun, setDraftRun] = useState(null);
   const [showTrace, setShowTrace] = useState(false);
@@ -106,7 +114,8 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
       setDraft(suggestion.content);
       setEvidence(suggestion.sourceFiles);
       setDraftRun(suggestion.runId);
-      setMessage("草稿已生成，核对后可发布");
+      setMode("edit");
+      setMessage("草稿已生成，核对后可发布；草稿不直接生效");
     });
   }
 
@@ -118,9 +127,25 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
       title: `${app.name}${app.published ? " · 已发布" : ""}`,
     })),
   }));
+  const publishedCount = (systems || []).flatMap((system) => [system, ...system.applications])
+    .filter((item) => item.published).length;
   const repositoryIds = [...new Set((systems || []).flatMap((system) =>
     system.applications.map((app) => app.repositoryId)))];
+  const scope = preview?.scope || {};
+  const scopeKind = scope.repositoryIds?.length ? "repository"
+    : scope.applicationIds?.length ? "application" : "system";
+  const [scopeLabel, scopeNote] = SCOPE_NOTES[scopeKind];
   return <div className="page-wrap system-guides">
+    <div className="guides-heading">
+      <div><h1>系统导航</h1><p>按系统和应用维护代码查找规则；这些文档用于导航，不代替源码事实。</p></div>
+      {systems?.length ? <Flex gap={8} wrap>
+        <Tag bordered={false}>已发布 {publishedCount} 份</Tag>
+        <Button disabled={!target || Boolean(pending)} loading={pending === "draft"} onClick={() => {
+          if (discard()) generate();
+        }}>AI 生成草稿</Button>
+        <Button type="primary" disabled={!dirty || Boolean(pending)} loading={pending === "save"} onClick={save}>发布导航</Button>
+      </Flex> : null}
+    </div>
     {error && <Alert type="error" showIcon title={error} action={document
       ? <Button size="small" disabled={Boolean(pending)}
           onClick={() => { if (discard()) work("load", () => loadTarget(target)); }}>重新打开</Button>
@@ -134,49 +159,55 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
               disabled={Boolean(pending)} onSelect={(_, info) => {
                 if (info.selected && discard()) work("load", () => loadTarget(info.node.params));
               }} />
+            <p className="guide-tree-note">选择左侧系统或应用查看它自己的导航内容；不会自动复制其他应用的入口列表。</p>
           </Card>
           <Card title={document?.name || "导航文档"} size="small" className="system-guide-editor">
             {document ? <Flex vertical gap={10}>
-              <Input.TextArea aria-label="系统导航 Markdown" value={draft} rows={19}
-                style={{ fontFamily: "var(--font-code)" }} readOnly={Boolean(pending)}
-                onChange={(event) => { setDraft(event.target.value); setMessage(""); }} />
-              <Flex justify="end" gap={6} wrap>
-                <Button disabled={Boolean(pending)} onClick={() => {
-                  if ((!draft || window.confirm("用模板替换编辑区内容？"))) {
-                    setDraft(document.template); setEvidence([]); setMessage("");
-                  }
-                }}>使用模板</Button>
-                <Button disabled={Boolean(pending)} loading={pending === "draft"} onClick={() => {
-                  if (discard()) generate();
-                }}>AI 生成草稿</Button>
-                <Button type="primary" disabled={!dirty || Boolean(pending)} loading={pending === "save"} onClick={save}>发布</Button>
-              </Flex>
-              {evidence.length > 0 && <details>
-                <summary>草稿调查读取的源码（{evidence.length}）</summary>
-                <ul>{evidence.map((file) => <li key={file}><code>{file}</code></li>)}</ul>
-              </details>}
-              {draftRun && <Button type="link" onClick={() => setShowTrace(true)}>查看草稿调查</Button>}
+              <Tabs size="small" activeKey={mode} onChange={setMode} items={[
+                { key: "preview", label: "内容预览", children: draft
+                  ? <div className="system-guide-preview"><Markdown remarkPlugins={[remarkGfm]}>{draft}</Markdown></div>
+                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="尚未编写内容；切换到「编辑 Markdown」使用模板或 AI 草稿" /> },
+                { key: "edit", label: "编辑 Markdown", children: <Flex vertical gap={10}>
+                  <Input.TextArea aria-label="系统导航 Markdown" value={draft} rows={19}
+                    style={{ fontFamily: "var(--font-code)" }} readOnly={Boolean(pending)}
+                    onChange={(event) => { setDraft(event.target.value); setMessage(""); }} />
+                  <Flex justify="end" gap={6} wrap>
+                    <Button disabled={Boolean(pending)} onClick={() => {
+                      if ((!draft || window.confirm("用模板替换编辑区内容？"))) {
+                        setDraft(document.template); setEvidence([]); setMessage("");
+                      }
+                    }}>使用模板</Button>
+                  </Flex>
+                  {evidence.length > 0 && <details>
+                    <summary>草稿调查读取的源码（{evidence.length}）</summary>
+                    <ul>{evidence.map((file) => <li key={file}><code>{file}</code></li>)}</ul>
+                  </details>}
+                  {draftRun && <Button type="link" onClick={() => setShowTrace(true)}>查看草稿调查</Button>}
+                </Flex> },
+              ]} />
+              <p className="system-guide-foot">已发布版本与编辑草稿分离：草稿发布后才参与问答导航。</p>
             </Flex> : <Skeleton active />}
           </Card>
-          <Card title="导航预览" size="small">
-            <Tabs items={[
-              { key: "draft", label: "编辑区", children: draft
-                ? <div className="system-guide-preview"><Markdown>{draft}</Markdown></div>
-                : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="使用模板或输入 Markdown" /> },
-              { key: "effective", label: "生效内容", children: <Flex vertical gap={8}>
-                  <Select aria-label="导航预览视角" value={repository} disabled={Boolean(pending) || !target}
-                    options={[{ value: "", label: target?.applicationId ? "应用视角" : "系统视角" },
-                      ...repositoryIds.map((id) => ({ value: id, label: `仓库视角 · ${id}` }))]}
-                    onChange={(value) => work("preview", () => refreshPreview(target, value))} />
-                  <Typography.Text type="secondary">问答中的源码访问按仓库授权。</Typography.Text>
-                  {preview?.guidance ? <>
-                    <pre className="system-guide-effective">{preview.guidance}</pre>
-                    {preview.documents.length > 0 && <Typography.Text type="secondary">
-                      可按需读取 {preview.documents.length} 份导航文档
-                    </Typography.Text>}
-                  </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此范围未登记可装配的应用导航" />}
-                </Flex> },
-            ]} />
+          <Card title="实际生效的导航" size="small" extra={<Tag bordered={false}>只读</Tag>}>
+            <Flex vertical gap={8}>
+              <Select aria-label="导航预览视角" value={repository} disabled={Boolean(pending) || !target}
+                options={[{ value: "", label: target?.applicationId ? "应用视角" : "系统视角" },
+                  ...repositoryIds.map((id) => ({ value: id, label: `仓库视角 · ${id}` }))]}
+                onChange={(value) => work("preview", () => refreshPreview(target, value))} />
+              <div className="guide-scope-note"><b>{scopeLabel}</b><p>{scopeNote}</p></div>
+              <dl className="guide-kv">
+                <dt>使用方式</dt><dd>作为本轮问答的导航摘要；完整文档可按需读取</dd>
+                <dt>事实依据</dt><dd>定位线索，不能代替当前源码内容</dd>
+                <dt>管理方式</dt><dd>管理员修改并确认后发布</dd>
+              </dl>
+              {preview?.guidance ? <>
+                <pre className="system-guide-effective">{preview.guidance}</pre>
+                {preview.documents.length > 0 && <Typography.Text type="secondary">
+                  可按需读取 {preview.documents.length} 份导航文档
+                </Typography.Text>}
+              </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此范围未登记可装配的应用导航" />}
+            </Flex>
           </Card>
         </div>}
       <TraceDrawer projectId={projectId} runId={showTrace ? draftRun : null} onClose={() => setShowTrace(false)} />

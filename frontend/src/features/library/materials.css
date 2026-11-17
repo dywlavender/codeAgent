@@ -1,6 +1,26 @@
 .materials-page { display: grid; grid-auto-rows: max-content; gap: var(--space-4); overflow-y: auto; }
 .materials-page > * { width: 100%; margin-inline: auto; }
+.materials-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.materials-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
+.materials-heading p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
+.materials-pending .ant-alert-message b { font-weight: 650; }
 .materials-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 205px), 1fr)); gap: var(--space-3); }
+.materials-two { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr); gap: var(--space-3); align-items: start; }
+.materials-side { display: grid; gap: var(--space-3); min-width: 0; }
+.materials-hint { color: var(--color-text-faint); font-size: var(--type-xs); font-weight: 400; }
+.materials-coop { margin: 0 0 var(--space-3); color: var(--color-text-secondary); font-size: var(--type-sm); }
+.cap-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; }
+.cap-row .r-copy small { display: block; margin-top: 3px; }
+.cap-go { color: var(--color-brand-strong); font-size: var(--type-sm); font-weight: 600; }
+.cap-row:hover .cap-go { color: var(--color-brand); }
+.kb-flow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; margin-bottom: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-muted); }
+.kb-flow:last-child { margin-bottom: 0; }
+.kb-flow-num { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--color-brand-soft); color: var(--color-brand-strong); font-size: 11px; font-weight: 700; }
+.kb-flow b { display: block; font-size: var(--type-sm); color: var(--color-text); }
+.kb-flow small { display: block; margin-top: 2px; color: var(--color-text-faint); font-size: var(--type-xs); }
 .material-origin { overflow-wrap: anywhere; }
 .material-origin div { color: var(--color-text-secondary); font-size: var(--type-sm); margin-top: var(--space-1); }
 .raw-material-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-4); margin: 0 0 var(--space-3); background: var(--color-well); border-radius: var(--radius-sm); font: var(--type-sm)/1.65 var(--font-code); }
+@media (max-width: 1060px) {
+  .materials-two { grid-template-columns: 1fr; }
+}

@@ -27,11 +27,15 @@ const TYPE_OPTIONS = [
 ];
 
 export function GraphPage(props) {
+  /* 业务关系投影是默认视图；?view=calls 直达契约调用链次级视图。 */
   const [view, setView] = useState(() =>
-    new URLSearchParams(window.location.hash.split("?")[1]).get("view") === "business" ? "business" : "calls");
+    new URLSearchParams(window.location.hash.split("?")[1]).get("view") === "calls" ? "calls" : "business");
   return <div className="page-wrap graph-feature">
-    <div className="graph-feature-heading"><h1>图谱</h1><Segmented value={view} onChange={setView}
-      options={[{ label: "调用链", value: "calls" }, { label: "业务关系", value: "business" }]} /></div>
+    <div className="graph-feature-heading">
+      <div><h1>知识图谱</h1><p>探索业务实体、流程与规则的关联；图谱来源于业务知识原文的结构化投影。</p></div>
+      <Segmented value={view} onChange={setView}
+        options={[{ label: "业务关系", value: "business" }, { label: "接口调用链", value: "calls" }]} />
+    </div>
     {view === "calls" ? <CallChainView key={props.projectId} projectId={props.projectId} /> : <BusinessGraphPanel {...props} />}
   </div>;
 }
@@ -298,7 +302,7 @@ function GraphCanvas({ nodes, edges, selectedId, onSelect }) {
         </svg>
       )}
       {nodes.length > 0 && (
-        <div className="graph-hint">滚轮缩放 · 拖拽平移 · 双击复位</div>
+        <div className="graph-hint">点击节点查看业务定义、关联关系和原文来源 · 滚轮缩放 · 拖拽平移 · 双击复位</div>
       )}
     </div>
   );
@@ -336,6 +340,13 @@ function NodeInspector({ node, neighbors, onSelect }) {
           ))}
         </Flex>
       )}
+      <Typography.Text type="secondary" style={{ display: "block", marginTop: 12, fontSize: 11.5 }}>
+        业务关系来自知识投影，不等同于代码里的直接 CALLS。
+      </Typography.Text>
+      <Typography.Text type="secondary" className="doc-label" style={{ display: "block", margin: "16px 0 8px" }}>
+        知识来源
+      </Typography.Text>
+      <div className="knowledge-line" style={{ fontSize: 11 }}>{node.sourceId || "未登记来源文档"}</div>
     </Card>
   );
 }

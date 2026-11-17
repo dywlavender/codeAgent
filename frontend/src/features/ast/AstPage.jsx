@@ -17,7 +17,7 @@ export function AstPage({ projectId, onRequireUnlock }) {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [tab, setTab] = useState("index");
+  const [tab, setTab] = useState("explore");
 
   async function load(signal) {
     const value = await request("/api/ast", {}, signal);
@@ -66,6 +66,9 @@ export function AstPage({ projectId, onRequireUnlock }) {
 
   const current = status?.current;
   const [label, color] = AST_STATUS[status?.status] || AST_STATUS.missing;
+  const stats = current?.statistics;
+  /* 关系解析覆盖有限时提前说明边界：没有连线不等于不存在调用。 */
+  const lowCoverage = status?.status === "available" && stats && (stats.relationCount ?? 0) < 10;
   const graph = status?.status === "available"
     ? <AstGraph key={status.currentVersionId} versionId={status.currentVersionId}
         repositories={current?.sourceRepositories || []} onInvalidated={refresh} />
@@ -77,7 +80,12 @@ export function AstPage({ projectId, onRequireUnlock }) {
   return <div className="page-wrap ast-page" style={{ overflowY: "auto" }}>
     <Flex justify="space-between" align="center" wrap gap={8} style={{ margin: "0 auto" }}>
       <div className="page-heading compact-heading">
-        <div><h1>AST 结构</h1><p>按符号查找调用、继承与实现，点击源码位置核对实际代码。</p></div>
+        <div>
+          <h1>AST 结构</h1>
+          <p>快速定位类与方法、查询调用与继承关系；具体实现以源码为准。</p>
+          {stats && <p className="ast-heading-stats">已索引 <b>{stats.symbolCount}</b> 符号 · <b>{stats.relationCount}</b> 条已解析关系
+            <Tag color={color} style={{ marginLeft: 8 }}>{label}</Tag></p>}
+        </div>
       </div>
       <Flex gap={8}>
         <Button icon={<ArrowClockwise size={15} />} onClick={refresh}>刷新状态</Button>
@@ -89,6 +97,11 @@ export function AstPage({ projectId, onRequireUnlock }) {
     </Flex>
     {error && <Alert type="error" showIcon title={error} style={{ margin: "12px auto" }} />}
     <Tabs style={{ margin: "0 auto" }} activeKey={tab} onChange={setTab} items={[
+      { key: "explore", label: "关系探索", children: <>
+        {lowCoverage && <Alert className="ast-coverage-hint" type="warning" showIcon
+          title="已解析关系数量较少。没有连线不等于不存在调用；可继续查看调用线索并使用代码问答读取源码。" />}
+        {graph}
+      </> },
       { key: "index", label: "索引管理", children: status
         ? <div className="ast-grid">
             <Card className="panel-card ast-status-card">
@@ -112,7 +125,6 @@ export function AstPage({ projectId, onRequireUnlock }) {
             </Card>
           </div>
         : <Skeleton active /> },
-      { key: "graph", label: "代码关系图", children: graph },
     ]} />
   </div>;
 }

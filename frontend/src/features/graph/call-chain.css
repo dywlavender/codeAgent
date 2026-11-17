@@ -1,6 +1,7 @@
 .graph-feature { gap: var(--space-4); }
-.graph-feature-heading { display: flex; align-items: center; gap: var(--space-5); }
+.graph-feature-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
 .graph-feature-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
+.graph-feature-heading p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
 .call-chain-view { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; flex: 1; }
 .call-chain-toolbar { display: flex; align-items: center; gap: var(--space-3); }
 .call-chain-select { width: min(720px, calc(100% - 90px)); }
@@ -37,6 +38,32 @@
 .call-chain-source pre { background: var(--color-well); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-3); overflow: auto; max-height: 440px; font: 12px/1.8 var(--font-code); }
 .call-chain-version { margin-top: var(--space-5); color: var(--color-text-faint); font-size: var(--type-sm); }
 .call-chain-version code { display: block; margin-top: var(--space-2); overflow-wrap: anywhere; }
+
+/* ===== AST 关系探索三栏 ===== */
+.ast-coverage-hint { margin-bottom: var(--space-3); }
+.ast-heading-stats { margin: 6px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
+.ast-heading-stats b { color: var(--color-text); font-weight: 650; }
+.ast-explorer { height: max(480px, calc(100dvh - 285px)); }
+.ast-explorer .ant-splitter-panel { overflow: hidden; }
+.ast-explorer-side { display: flex; flex-direction: column; gap: var(--space-2); height: 100%; padding: var(--space-3); overflow-y: auto; }
+.ast-symbol-list { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 120px; overflow-y: auto; }
+.ast-symbol-row { width: 100%; }
+.ast-symbol-row .r-copy b { overflow-wrap: anywhere; font-weight: 600; font-size: 12px; }
+.ast-symbol-row .r-copy small { color: var(--color-text-faint); font-size: 10.5px; font-family: var(--font-code); }
+.ast-side-hint { margin: var(--space-3) 0; color: var(--color-text-faint); font-size: var(--type-sm); }
+.ast-side-error { margin: var(--space-2) 0 0; color: var(--color-danger); font-size: var(--type-xs); overflow-wrap: anywhere; }
+.ast-explorer-main { display: flex; flex-direction: column; gap: var(--space-2); height: 100%; padding: var(--space-3); min-width: 0; }
+.ast-explorer-toolbar { flex-wrap: wrap; }
+.ast-explorer-toolbar code { font-size: var(--type-sm); overflow-wrap: anywhere; }
+.ast-explorer-main .call-chain-canvas { flex: 1; height: auto; min-height: 380px; }
+.ast-explorer-main .call-chain-caption { margin: 0; }
+.ast-source-pane { padding: var(--space-3); overflow-y: auto; height: 100%; }
+.ast-source-inline { margin: 0; }
+.ast-source-inline pre { max-height: none; }
+@media (max-width: 900px) {
+  .ast-explorer { height: auto; }
+  .ast-explorer .ant-splitter-panel { min-height: 300px; }
+}
 @media (max-width: 760px) {
   .call-chain-canvas { min-height: 370px; }
   .graph-feature-heading { gap: var(--space-3); }

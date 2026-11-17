@@ -61,20 +61,26 @@ export function AppSidebar({
           selectedKeys={[page]}
           onClick={({ key }) => navigate(key)}
           items={[
-            { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "当前对话" },
             {
               type: "group",
-              label: "资料中心",
+              label: "知识中心",
               children: [
-                { key: "library", icon: <BookOpen size={16.5} />, label: "资料总览" },
+                { key: "library", icon: <BookOpen size={16.5} />, label: "知识总览" },
                 ...(admin.zoneVisible ? [{ key: "guides", icon: <BookOpen size={16.5} />, label: "系统导航" }] : []),
                 { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
                 { key: "ast", icon: <Graph size={16.5} />, label: "AST 结构" },
                 ...(admin.zoneVisible ? [{ key: "admin", icon: <ShieldCheck size={16.5} />, label: "业务知识" }] : []),
               ],
             },
-            { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
-            { key: "settings", icon: <Gear size={16.5} />, label: "工程设置" },
+            {
+              type: "group",
+              label: "其他",
+              children: [
+                { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "代码问答" },
+                { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
+                { key: "settings", icon: <Gear size={16.5} />, label: "工程设置" },
+              ],
+            },
           ]}
         />
         <RecentConversations history={history} query={query} />
