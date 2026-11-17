@@ -9,6 +9,8 @@ import "./trace.css";
 const FILTERS = [{ label: "全部", value: "all" }, { label: "模型", value: "model" },
   { label: "工具", value: "tool" }, { label: "调度", value: "retrieval" }];
 const AST_TOOLS = new Set(["find_code_symbol", "get_code_symbol", "find_code_relations"]);
+const PROMPT_SECTIONS = { role: "角色", behavior: "调查与回答", project: "本轮工程与资料",
+  navigation: "系统导航", capabilities: "能力说明" };
 function parsed(value) { try { return JSON.parse(value); } catch { return null; } }
 function json(value) {
   if (typeof value !== "string") return JSON.stringify(value, null, 2);
@@ -89,11 +91,36 @@ export function TraceDrawer({ projectId, runId, onClose }) {
         </> },
         ...(execution?.materials?.length ? [{ key: "materials", label: "本轮资料",
           children: <MaterialUse run={trace.run} steps={timeline} /> }] : []),
+        ...(trace.systemPrompt ? [{ key: "prompt", label: "系统提示词",
+          children: <PromptSnapshot prompt={trace.systemPrompt} /> }] : []),
         ...(execution?.profileId ? [{ key: "execution", label: "运行配置", children: <JsonBlock value={execution} /> }] : []),
         { key: "raw", label: "完整记录", children: <JsonBlock value={trace} /> },
       ]} />
     </>}
   </Drawer>;
+}
+
+function PromptSnapshot({ prompt }) {
+  const observed = prompt.observed || [];
+  return <>
+    <p className="trace-note">{prompt.variant === "layered" ? "分层候选" : "现行提示词"} · {prompt.sessionResumed ? "复用会话" : "新会话"}</p>
+    {observed.length ? observed.map((snapshot, index) => <section key={index}>
+      <h4>{observed.length === 1 ? "Pi 请求前的生效提示词" : `Pi 生效提示词 ${index + 1}`}</h4>
+      <pre className="trace-code">{snapshot.text}</pre>
+      <details><summary>已启用工具的说明</summary><ul>
+        {snapshot.tools.map((tool) => <li key={tool.name}><strong>{tool.name}</strong> {tool.description}</li>)}
+      </ul></details>
+    </section>) : <>
+      <p className="trace-note">未观测到 Pi 请求前的提示词。这里显示 CodeAgent 提交的内容。</p>
+      <pre className="trace-code">{prompt.text}</pre>
+      <p className="trace-note">配置工具 · {prompt.enabledTools.join("、")}</p>
+    </>}
+    <details><summary>CodeAgent 装配片段</summary>
+      {prompt.sections.map((section) => <section key={section.kind}>
+        <h4>{PROMPT_SECTIONS[section.kind]}</h4><pre className="trace-code">{section.text}</pre>
+      </section>)}
+    </details>
+  </>;
 }
 
 function MaterialUse({ run, steps }) {

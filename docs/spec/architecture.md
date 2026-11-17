@@ -117,9 +117,13 @@ python -m business_code_agent.cli serve-query --db .data/unused.db --project-reg
 
 Pi 会话文件保存在工程数据目录 `pi-sessions/`。工程、范围、Profile、资料模式或版本、模型或相关 Pi 配置变化时重建会话。历史 LangChain 或 Claude 会话独立保留。
 
+现行提示词和分层候选共用 Pi Runtime。分层候选把调查、证据和作答规则放在行为段，把当前工程、资料路径与 System Guide 放在工程上下文。工具描述由各工具提供。候选用 `evaluate_pi.py run --prompt-variants baseline,layered` 与现行提示词配对运行，提示词分组进入候选会话配置。
+
 最终答案的临时绝对源码路径规范为工程相对路径。运行记录依据本轮 `read` 交付的原文核验引用路径和行区间，`grep` 命中只作导航。核验不判断结论是否被原文语义支持。复杂题的“目标覆盖”由模型逐项声明；每项标为已核实且至少有一条带行号引用，并且其带行号引用均通过核验时，才把该项计为 verified。全部自报项通过只说明这些声明有本轮交付依据，原问题的完整性仍需复核。
 
 `QueryService` 从 Run 创建起持续保存 Trace，记录模型调用摘要、工具输入和输出、状态、用量与错误。归档保存在工程的 `query-traces/<runId>.json`，取消或失败也保留；Pi 模型摘要不作为完整请求快照。问答页可查看和导出 Trace。旧 Runtime 的程序补查、facts／contracts 收尾和 SearchCode 不参与这条链路。
+
+Trace 的「系统提示词」显示 CodeAgent 提交的片段、Pi 在请求前报告的生效文本和启用工具说明，以及是否复用会话。运行中先展示已装配内容，结束时归档观测值。模型调用记录仍以摘要提供。
 
 ## Conversation / Run / Event
 

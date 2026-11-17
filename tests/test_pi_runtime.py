@@ -91,15 +91,28 @@ class PiRuntimeTest(unittest.TestCase):
 
     def test_system_prompt_requires_route_and_handler_chain(self):
         context, prepared, _ = self.context_and_prepared(mode="none")
-        prompt = self.runtime()._system_prompt(context, prepared, mode="none")
+        prompt = self.runtime()._system_prompt(context, prepared, mode="none")["text"]
         self.assertIn("找到第一个入口", prompt)
         self.assertIn("注册点与实际处理器", prompt)
         self.assertIn("题目要求的各项都有源码依据后停止调查", prompt)
         self.assertIn("## 目标覆盖", prompt)
         guidance = "## 当前工程导航\n任务入口由当前系统的注册点定位。"
         prompt = self.runtime()._system_prompt(
-            replace(context, system_guidance=guidance), prepared, mode="none")
+            replace(context, system_guidance=guidance), prepared, mode="none")["text"]
         self.assertIn(guidance, prompt)
+
+    def test_layered_prompt_separates_behavior_and_authorized_project_context(self):
+        context, prepared, _ = self.context_and_prepared(mode="none", repositories=("a",))
+        guidance = "## 当前工程导航\n按系统查找入口。"
+        runtime = self.runtime(prompt_variant="layered")
+        prompt = runtime._system_prompt(replace(context, system_guidance=guidance), prepared, mode="none")
+        self.assertEqual(["behavior", "project", "navigation"], [part["kind"] for part in prompt["sections"]])
+        self.assertEqual(prompt["text"], "".join(part["text"] for part in prompt["sections"]))
+        self.assertIn("方法内部的条件与分支以正文为准", prompt["text"])
+        self.assertIn("repos/a/", prompt["text"])
+        self.assertNotIn("repos/b/", prompt["text"])
+        self.assertNotIn("Pi 原生工具", prompt["text"])
+        self.assertEqual("layered", runtime.with_model("deepseek/other").prompt_variant)
 
     def test_goal_coverage_requires_delivered_read_evidence(self):
         reads = [{"path": "repos/a/Main.java", "content": "line1\nline2\n",

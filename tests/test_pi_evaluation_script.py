@@ -390,6 +390,20 @@ class PiEvaluationMetricsTest(unittest.TestCase):
             self.assertIn("biz-payment-pending/backbone/r2", plan["runs"])
             self.assertFalse(output.exists())
 
+    def test_prompt_variant_plan_pairs_runs_and_alternates_the_starting_arm(self):
+        root = Path(__file__).resolve().parents[1]
+        suite = root / "validation-projects/complex-loan/evaluations/complex-loan.json"
+        with tempfile.TemporaryDirectory() as folder:
+            completed = subprocess.run([
+                sys.executable, str(SCRIPT), "run", "--suite", str(suite), "--case", "native-frontend",
+                "--prompt-variants", "baseline,layered", "--repeats", "2", "--output", folder, "--plan",
+            ], capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual([
+            "native-frontend/none/baseline/r1", "native-frontend/none/layered/r1",
+            "native-frontend/none/layered/r2", "native-frontend/none/baseline/r2",
+        ], json.loads(completed.stdout)["runs"])
+
 
 if __name__ == "__main__":
     unittest.main()

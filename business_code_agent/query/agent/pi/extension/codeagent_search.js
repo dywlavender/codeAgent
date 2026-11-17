@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { accessSync, constants, realpathSync } from "node:fs";
+import { accessSync, appendFileSync, constants, realpathSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -159,6 +159,24 @@ const findSchema = Type.Object({
 });
 
 export default function (pi) {
+  const capturePath = process.env.CODEAGENT_PI_PROMPT_TRACE;
+  if (capturePath) {
+    let previous;
+    pi.on("before_provider_request", (_event, ctx) => {
+      const active = new Set(pi.getActiveTools());
+      const tools = pi.getAllTools().filter(({ name }) => active.has(name))
+        .map(({ name, description }) => ({ name, description }));
+      const snapshot = JSON.stringify({ text: ctx.getSystemPrompt(), tools });
+      if (snapshot !== previous) {
+        try {
+          appendFileSync(capturePath, snapshot + "\n", "utf8");
+          previous = snapshot;
+        } catch {
+          // A failed trace write leaves the model request untouched.
+        }
+      }
+    });
+  }
   pi.on("tool_call", async (event) => {
     if (BLOCKED_TOOLS.has(event.toolName)) {
       return { block: true, reason: "CodeAgent 只读模式禁用该工具" };

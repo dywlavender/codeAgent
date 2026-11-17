@@ -197,7 +197,7 @@ def _prepare_pi_ast(context: RunContext, expected, ast_root, *, required: bool) 
 def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
                             mode: str | None = None, ast_root=None,
                             providers=None) -> PreparedCapabilities:
-    """Describe Pi's native tools without supplying LangChain tool objects."""
+    """Describe active Pi tools. Instruction text is retained for the baseline prompt."""
 
     expected = _PI_MODE_KINDS.get(mode or "combined", _PI_MODE_KINDS["combined"])
     selected = [PiFileCapability(version)]

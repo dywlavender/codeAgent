@@ -820,6 +820,7 @@ class QueryService:
             }
             if isinstance(runtime, PiAgentRuntime):
                 ask_kwargs["call_callback"] = archive.record_call
+                ask_kwargs["prompt_callback"] = archive.record_system_prompt
             if verify_ast:
                 ask_kwargs["prepared_callback"] = bind_prepared
             raw_result = runtime.ask(question, **ask_kwargs)

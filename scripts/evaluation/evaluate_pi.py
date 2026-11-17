@@ -26,6 +26,7 @@ from business_code_agent.query.agent.citations import (canonical_citation_path,
                                                        match_reference_path,
                                                        verify_references)
 from business_code_agent.query.agent.pi import PiAgentRuntime
+from business_code_agent.query.agent.pi.prompts import PROMPT_VARIANTS
 from business_code_agent.query.agent.pi.events import answer_body
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import QueryService
@@ -48,6 +49,10 @@ def _write(path: Path, value) -> None:
 def _safe_name(value: str) -> str:
     text = "".join(char if char.isalnum() or char in "._-" else "-" for char in str(value))
     return text.strip(".-") or "run"
+
+
+def _run_group(record: dict) -> str:
+    return "/".join(value for value in (record["mode"], record.get("promptVariant")) if value)
 
 
 def _project_config(suite_path: Path, suite: dict, override: Path | None) -> Path:
@@ -557,8 +562,7 @@ def analyze_trace(trace: dict, keys=()) -> dict:
 
 def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
             project_config: Path, project_id: str, timeout: float,
-            thinking: str | None, keys, output: Path) -> dict:
-    run_id = f"{_safe_name(case['id'])}-{mode}-r{repeat}"
+            thinking: str | None, keys, output: Path, prompt_variant: str = "baseline") -> dict:
     started_at = _now()
     with tempfile.TemporaryDirectory(prefix="pi-eval-") as folder:
         root = Path(folder)
@@ -568,7 +572,7 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
         env["BUSINESS_CODE_PI_TIMEOUT"] = str(timeout)
         runtime = PiAgentRuntime(
             profile=PI, environment=env, model=model, timeout=timeout,
-            session_root=root / "pi-sessions", thinking=thinking)
+            session_root=root / "pi-sessions", thinking=thinking, prompt_variant=prompt_variant)
         service = QueryService(
             connect(str(db_path)), db_path=str(db_path),
             project_config=str(project_config), project_id=project_id,
@@ -576,7 +580,7 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
             retrieval_root=root / "retrieval-index", runtime=runtime)
         started = time.monotonic()
         try:
-            result = service.query(case["question"], mode=mode, model=model)
+            result = service.query(case["question"], mode=mode, model=model, scope=case.get("scope"))
         except Exception as exc:
             result = {"status": "failed", "errorType": type(exc).__name__,
                       "error": str(exc)[:500], "answer": "", "events": [],
@@ -604,6 +608,7 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
         "question": case["question"],
         "checks": case.get("checks") or [],
         "mode": mode,
+        "promptVariant": prompt_variant,
         "repeat": repeat,
         "status": result.get("status"),
         "answer": result.get("answer") or "",
@@ -630,7 +635,7 @@ def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
     (output / "review-template.json").write_text(json.dumps({
         "reviewSchemaVersion": 2,
         "reviewStatus": "unreviewed",
-        "caseId": case["id"], "mode": mode, "repeat": repeat,
+        "caseId": case["id"], "mode": mode, "promptVariant": prompt_variant, "repeat": repeat,
         "question": case["question"], "checks": case.get("checks") or [],
         "checksReview": [{
             "index": index,
@@ -659,7 +664,7 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
         "generatedAt": _now(),
         "batch": str(batch),
         "runs": [{key: result.get(key) for key in (
-            "caseId", "category", "mode", "repeat", "status", "runId",
+            "caseId", "category", "mode", "promptVariant", "repeat", "status", "runId",
             "modelRequested", "modelActual", "piVersion", "elapsedSeconds")}
                  | {"metrics": result.get("metrics") or {}}
                  for result in results],
@@ -689,7 +694,7 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
             not_delivered = ((refs.get("fileReadNotRange") or 0) + (refs.get("unseen") or 0)
                              if refs else None)
             lines.append(
-                f"| {row['mode']} | {row['repeat']} | {row['status']} | "
+                f"| {_run_group(row)} | {row['repeat']} | {row['status']} | "
                 f"{row.get('modelActual') or row.get('modelRequested') or '—'} | "
                 f"{key_text} | {metrics.get('lastKeyFileRound', '—')} | "
                 f"{metrics.get('toolsAfterLastKey', '—')}/{metrics.get('searchesAfterLastKey', '—')} | "
@@ -710,7 +715,7 @@ def summarize(batch: Path, keys_by_case: dict[str, list[str]] | None = None) -> 
         lines.extend(["", "**评测检查项（仅评测器）**", ""])
         lines.extend(f"{index}. {check}" for index, check in enumerate(first.get("checks") or [], 1))
         for row in rows:
-            lines.extend(["", f"### {row['mode']} / 第 {row['repeat']} 次", "",
+            lines.extend(["", f"### {_run_group(row)} / 第 {row['repeat']} 次", "",
                           f"- 状态：{row['status']}；Run：`{row.get('runId') or '—'}`；"
                           f"实际模型：{row.get('modelActual') or '—'}；Pi：{row.get('piVersion') or '—'}"])
             if row.get("error"):
@@ -846,7 +851,7 @@ def check_review(review: dict, checks: list[str], answer: str | None = None) -> 
 def _review_markdown(result: dict, items: list[dict]) -> str:
     counts = {key: sum(1 for item in items if item["verdict"] == key) for key in VERDICTS}
     lines = [
-        f"# 逐项检查复核：{result['caseId']} / {result['mode']} / r{result['repeat']}",
+        f"# 逐项检查复核：{result['caseId']} / {_run_group(result)} / r{result['repeat']}",
         "",
         f"- Run：`{result.get('runId') or '—'}`；模型：{result.get('modelActual') or '—'}；"
         f"状态：{result.get('status') or '—'}",
@@ -877,16 +882,16 @@ def _review_markdown(result: dict, items: list[dict]) -> str:
 
 def _batch_review_markdown(rows: list[tuple[dict, list[dict]]]) -> str:
     lines = ["# Pi 逐项检查复核汇总", "",
-             "| 案例 | 模式 | 重复 | 通过 | 部分通过 | 未通过 |",
+             "| 案例 | 组 | 重复 | 通过 | 部分通过 | 未通过 |",
              "| --- | --- | --- | --- | --- | --- |"]
     for result, items in rows:
         counts = {key: sum(1 for item in items if item["verdict"] == key)
                   for key in VERDICTS}
-        lines.append(f"| {result['caseId']} | {result['mode']} | {result['repeat']} | "
+        lines.append(f"| {result['caseId']} | {_run_group(result)} | {result['repeat']} | "
                      f"{counts['pass']} | {counts['partial']} | {counts['fail']} |")
     lines.append("")
     for result, items in rows:
-        lines.extend([f"## {result['caseId']} / {result['mode']} / r{result['repeat']}", ""])
+        lines.extend([f"## {result['caseId']} / {_run_group(result)} / r{result['repeat']}", ""])
         for index, item in enumerate(items, 1):
             quote = " … ".join(item.get("answerQuotes") or [])
             evidence = "；".join(item.get("evidence") or [])
@@ -950,14 +955,20 @@ def command_run(args) -> int:
     modes = [value.strip() for value in args.modes.split(",") if value.strip()]
     if not modes:
         raise ValueError("--modes 不能为空")
+    variants = list(dict.fromkeys(value.strip() for value in (args.prompt_variants or "baseline").split(",")))
+    if any(value not in PROMPT_VARIANTS for value in variants):
+        raise ValueError("--prompt-variants 仅接受 baseline,layered")
+    prompt_config = {"promptVariants": variants if args.prompt_variants else None}
     project_id = _project_id(project_config)
     keys_by_case = load_keys(args.keys_file)
     output = args.output.expanduser().resolve()
-    plan = [(case, mode, repeat) for case in cases for mode in modes
-            for repeat in range(1, args.repeats + 1)]
+    plan = [(case, mode, repeat, variant) for case in cases for mode in modes
+            for repeat in range(1, args.repeats + 1)
+            for variant in (variants if repeat % 2 else reversed(variants))]
     if args.plan:
         print(json.dumps({"projectId": project_id, "runs": [
-            f"{case['id']}/{mode}/r{repeat}" for case, mode, repeat in plan]},
+            "/".join([case["id"], mode, *([variant] if args.prompt_variants else []), f"r{repeat}"])
+            for case, mode, repeat, variant in plan]},
             ensure_ascii=False, indent=2))
         return 0
     if output.exists() and any(output.iterdir()):
@@ -968,6 +979,7 @@ def command_run(args) -> int:
             "cases": [case["id"] for case in cases], "modes": modes,
             "repeats": args.repeats, "requestedModel": args.model,
             "timeoutSeconds": args.timeout, "thinking": args.thinking,
+            **prompt_config,
         })
     output.mkdir(parents=True, exist_ok=True)
     if not args.resume:
@@ -976,22 +988,24 @@ def command_run(args) -> int:
             "projectId": project_id, "cases": [case["id"] for case in cases],
             "modes": modes, "repeats": args.repeats, "requestedModel": args.model,
             "timeoutSeconds": args.timeout, "thinking": args.thinking,
+            **prompt_config,
             "keysFile": str(args.keys_file) if args.keys_file else None,
             "startedAt": _now(),
         })
-    for index, (case, mode, repeat) in enumerate(plan, 1):
-        folder = output / "runs" / f"{_safe_name(case['id'])}-{_safe_name(mode)}-r{repeat}"
+    for index, (case, mode, repeat, variant) in enumerate(plan, 1):
+        group = f"{_safe_name(mode)}-{variant}" if args.prompt_variants else _safe_name(mode)
+        folder = output / "runs" / f"{_safe_name(case['id'])}-{group}-r{repeat}"
         if args.resume and (folder / "result.json").is_file():
             print(f"[{index}/{len(plan)}] 已完成，跳过：{folder.name}", flush=True)
             continue
         if folder.is_dir() and any(folder.iterdir()):
             raise ValueError(f"运行目录存在未完成文件，请人工确认后再续跑：{folder}")
         folder.mkdir(parents=True, exist_ok=True)
-        print(f"[{index}/{len(plan)}] {case['id']} mode={mode} repeat={repeat}", flush=True)
+        print(f"[{index}/{len(plan)}] {case['id']} mode={mode} prompt={variant} repeat={repeat}", flush=True)
         record = run_one(case, mode=mode, repeat=repeat, model=args.model,
                          project_config=project_config, project_id=project_id,
                          timeout=args.timeout, thinking=args.thinking,
-                         keys=keys_by_case.get(case["id"]) or (), output=folder)
+                         keys=keys_by_case.get(case["id"]) or (), output=folder, prompt_variant=variant)
         print(json.dumps({"status": record["status"], "runId": record["runId"],
                           "actualModel": record["modelActual"],
                           "answerChars": len(record.get("answer") or ""),
@@ -1020,6 +1034,7 @@ def main() -> int:
                      help="题库文件，可重复；多个题库必须指向同一 projectConfig")
     run.add_argument("--case", action="append", help="案例 ID，可重复；省略表示全部")
     run.add_argument("--modes", default="none", help="逗号分隔，如 none,backbone,ast")
+    run.add_argument("--prompt-variants", help="显式对照提示词，如 baseline,layered")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--model", default=os.environ.get("BUSINESS_CODE_PI_MODEL") or None)
     run.add_argument("--project-config", type=Path)

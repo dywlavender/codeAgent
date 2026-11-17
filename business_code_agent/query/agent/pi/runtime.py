@@ -14,6 +14,7 @@ import time
 import uuid
 from hashlib import sha256
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
 from business_code_agent.query.capabilities import (PI_TOOL_NAMES,
@@ -25,6 +26,7 @@ from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from .events import PiEventAdapter
 from .models import read_model_catalog
 from .process import PiProcess, PiProcessError
+from .prompts import PROMPT_VARIANTS, system_prompt as build_system_prompt
 from .sessions import (prepare_session_root, resolve_session_file,
                        session_root as project_session_root, validate_session_file)
 
@@ -51,8 +53,12 @@ class PiAgentRuntime:
     def __init__(self, *, profile: AgentProfile, environment: Mapping[str, str] | None = None,
                  command: str | list[str] | tuple[str, ...] | None = None,
                  model: str | None = None, timeout: float | None = None,
-                 session_root: str | Path | None = None, thinking: str | None = None):
+                 session_root: str | Path | None = None, thinking: str | None = None,
+                 prompt_variant: str = "baseline"):
         self.profile = profile
+        if prompt_variant not in PROMPT_VARIANTS:
+            raise PiConfigurationError(f"未知的 Pi 提示词版本：{prompt_variant}")
+        self.prompt_variant = prompt_variant
         # Pi is a child process: it needs the host environment (PATH, provider
         # credentials, proxy settings) plus any explicit overrides.
         self.environment = {**os.environ, **(environment or {})}
@@ -89,6 +95,7 @@ class PiAgentRuntime:
             "timeoutSeconds": self.timeout,
             "thinking": self.thinking,
             "sessionRoot": str(self.session_root) if self.session_root else None,
+            **({"promptVariant": self.prompt_variant} if self.prompt_variant != "baseline" else {}),
         }
 
     def with_model(self, model: str | None) -> "PiAgentRuntime":
@@ -99,7 +106,7 @@ class PiAgentRuntime:
         clone = PiAgentRuntime(
             profile=self.profile, environment=self.environment, command=self.command,
             model=selected, timeout=self.timeout, session_root=self.session_root,
-            thinking=self.thinking)
+            thinking=self.thinking, prompt_variant=self.prompt_variant)
         clone._version = self._version
         clone._version_error = self._version_error
         return clone
@@ -152,7 +159,7 @@ class PiAgentRuntime:
     def ask(self, question: str, *, context: RunContext,
             prepared=None, session_id: str | None = None, event_callback=None,
             cancel_check=None, call_callback=None, prepared_callback=None,
-            mode: str | None = None) -> RuntimeResult:
+            prompt_callback=None, mode: str | None = None) -> RuntimeResult:
         started = time.monotonic()
         version = self.preflight()
         if prepared is None:
@@ -175,6 +182,7 @@ class PiAgentRuntime:
         process_environment = {
             **self.environment,
             "CODEAGENT_PI_WORKSPACE": str(Path(context.workspace).resolve()),
+            "CODEAGENT_PI_PROMPT_VARIANT": self.prompt_variant,
             "CODEAGENT_PI_ROOTS": json.dumps(
                 [str(Path(context.workspace).resolve()),
                  *(str(Path(root).resolve()) for root in allowed_roots)],
@@ -189,9 +197,14 @@ class PiAgentRuntime:
         timed_out = False
         session_file = existing
         process = None
+        prompt_capture = TemporaryDirectory(prefix="pi-prompt-") if prompt_callback else None
+        snapshot = None
+        if prompt_capture:
+            capture_path = Path(prompt_capture.name) / "observed.jsonl"
+            process_environment["CODEAGENT_PI_PROMPT_TRACE"] = str(capture_path)
         try:
             try:
-                process, state_data, actual_model, system_prompt = self._start_checked(
+                process, state_data, actual_model, prompt = self._start_checked(
                     root, existing, context, prepared, mode, adapter, process_environment)
             except _AstExtensionUnavailable as exc:
                 prepared = prepared.without_pi_ast(str(exc))
@@ -199,11 +212,16 @@ class PiAgentRuntime:
                 session_file = resolve_session_file(root, fallback_session)
                 self._emit(emit, "status", phase="ast_unavailable", capability="ast",
                            label=f"{exc}，本轮继续使用文件工具")
-                process, state_data, actual_model, system_prompt = self._start_checked(
+                process, state_data, actual_model, prompt = self._start_checked(
                     root, session_file, context, prepared, mode, adapter, process_environment)
             else:
                 if prepared_callback:
                     prepared_callback(prepared)
+            system_prompt = prompt["text"]
+            if prompt_callback:
+                snapshot = {**prompt, "sessionResumed": session_file is not None,
+                            "enabledTools": list(prepared.pi_tool_names), "observed": []}
+                prompt_callback(snapshot)
             session_file = validate_session_file(
                 root, state_data.get("sessionFile"), require_exists=False)
 
@@ -276,6 +294,17 @@ class PiAgentRuntime:
         finally:
             if process is not None:
                 process.close()
+            if prompt_capture:
+                try:
+                    if snapshot and capture_path.is_file():
+                        try:
+                            observed = [json.loads(line) for line in capture_path.read_text(encoding="utf-8").splitlines()]
+                        except (OSError, ValueError):
+                            observed = []
+                        if observed:
+                            prompt_callback({**snapshot, "observed": observed})
+                finally:
+                    prompt_capture.cleanup()
 
         usage = adapter.usage()
         usage["systemPromptSha256"] = sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
@@ -345,8 +374,8 @@ class PiAgentRuntime:
                 "CODEAGENT_PI_AST_PYTHON": sys.executable,
                 "CODEAGENT_PI_AST_IMPORT_ROOT": str(Path(__file__).resolve().parents[4]),
             })
-        system_prompt = self._system_prompt(context, prepared, mode=mode)
-        command = self._command(root, existing, system_prompt, prepared=prepared)
+        prompt = self._system_prompt(context, prepared, mode=mode)
+        command = self._command(root, existing, prompt["text"], prepared=prepared)
         process = PiProcess(command, cwd=context.workspace, environment=env)
         try:
             process.start()
@@ -366,7 +395,7 @@ class PiAgentRuntime:
                     and AST_EXTENSION.name in process.diagnostics()):
                 raise _AstExtensionUnavailable("Pi AST 扩展启动失败") from exc
             raise
-        return process, state_data, actual_model, system_prompt
+        return process, state_data, actual_model, prompt
 
     def _command(self, root: Path, existing: Path | None, system_prompt: str, *, prepared=None) -> list[str]:
         command = [
@@ -392,54 +421,8 @@ class PiAgentRuntime:
             command.extend(["--thinking", self.thinking])
         return command
 
-    def _system_prompt(self, context: RunContext, prepared, *, mode: str | None) -> str:
-        purposes = {
-            "source": "源码，核实当前实现",
-            "requirements": "需求原文，说明业务目标",
-            "business_context": "业务补充知识，解释术语、职责与业务约定",
-            "code_map": "自动代码地图，只用于定位文件和符号",
-            "system_guide": "系统代码导航，说明如何查找代码",
-        }
-        roots = "\n".join(
-            f"- {source.path}/：{purposes.get(source.kind, source.kind)}"
-            for source in context.materials if source.directory is not None
-        ) or "- 本轮没有可读资料"
-        guidance = "\n".join(text for _, text in prepared.instructions if text)
-        navigation = f"{context.system_guidance}\n\n" if context.system_guidance else ""
-        mode_label = {
-            "none": "无主干（源码与需求）",
-            "backbone": "有主干（源码、需求与业务补充知识）",
-            "ast": "AST（源码、需求与结构关系索引）",
-            "combined": "组合资料（全部已授权资料）",
-        }.get(mode or "", mode or "组合资料")
-        return (
-            "你是 CodeAgent 的只读代码问答 Agent，负责基于本轮授权资料回答用户问题。"
-            "你不修改文件，也不执行 shell 命令。\n\n"
-            f"当前工程：{context.project.project_id}；资料模式：{mode_label}。\n"
-            "本轮授权资料根（全部是相对当前工作目录的路径）：\n"
-            f"{roots}\n\n"
-            f"{navigation}"
-            "调查规则：\n"
-            "- 只允许读取上述根目录下的相对路径；禁止绝对路径、..、~/.pi、/opt 等目录。\n"
-            "- 你可以使用 read、grep、find、ls、codemode。工具顺序由你根据问题决定，"
-            "不要求固定流程；已知文件直接 read，需要定位时用 grep/find/ls，"
-            "可用 codemode 并行读取和过滤大输出。\n"
-            "- 没有 edit、write、bash，不要尝试修改文件或执行命令。\n"
-            "- 先确认问题要求哪些关系（入口、路由/命令/事件、实现、状态变化、例外），"
-            "逐项核实；找到第一个入口或只看到“命令总线/服务层”等概括，"
-            "不代表关系已经说明，要继续定位实际分发、注册或处理器代码。\n"
-            "- 根据工程导航和源码定位实际入口。遇到间接分发时，继续核实注册点与实际处理器。"
-            "定位符号、注解或注册表可用 grep/find；不确定模块路径时可用 ls。\n"
-            "- 题目要求的各项都有源码依据后停止调查并作答；不要为补充背景扩大范围。\n"
-            "- 回答末尾增加“## 目标覆盖”小节：逐条列出问题要求的关系，以 "
-            "[已核实]/[部分]/[未核实] 开头；[已核实] 必须附本轮 read 交付的真实路径和行号，"
-            "[部分]/[未核实] 写明缺口。仍有未完成目标时继续调查；简单事实查询可省略该小节。\n"
-            "- 源码是当前实现的依据；业务知识解释术语和业务约定；需求说明目标；"
-            "系统导航、代码地图和 AST 提供定位线索，实际实现由源码核实。\n"
-            "- 关键结论必须给出真实文件路径和行号；未确认的内容明确标注为未核实或证据缺口。\n"
-            "- 用中文直接回答问题，不要复述工具调用过程。\n"
-            + (f"\n能力说明：\n{guidance}\n" if guidance else "")
-        )
+    def _system_prompt(self, context: RunContext, prepared, *, mode: str | None) -> dict:
+        return build_system_prompt(context, prepared, mode, self.prompt_variant)
 
     def _verify_search_extension(self, process: PiProcess,
                                  adapter: PiEventAdapter) -> set[str]:

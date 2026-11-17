@@ -94,6 +94,10 @@ class RunTraceArchive:
         self.value.setdefault("run", {}).update(fields)
         self.write()
 
+    def record_system_prompt(self, snapshot):
+        self.value["systemPrompt"] = snapshot
+        self.write()
+
     def finish(self, **run):
         self.refresh()
         self.value["run"].update(run)

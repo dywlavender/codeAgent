@@ -34,20 +34,27 @@ function query(operation, params, signal, versionId) {
 
 export default function (pi) {
   const { versionId } = JSON.parse(process.env.CODEAGENT_PI_AST_SCOPE);
+  const layered = process.env.CODEAGENT_PI_PROMPT_VARIANT === "layered";
   const tools = [
     {
       name: "find_code_symbol", operation: "find_symbol",
-      description: "Find indexed classes, methods or web symbols. Returns workspace source paths and line ranges for read.",
+      description: layered
+        ? "Find indexed classes, methods or web symbols by name. Returns definition paths and line ranges without source bodies."
+        : "Find indexed classes, methods or web symbols. Returns workspace source paths and line ranges for read.",
       parameters: Type.Object({ query: queryText(), repositoryId: Type.Optional(queryText()), limit }),
     },
     {
       name: "get_code_symbol", operation: "get_symbol",
-      description: "Locate a symbol by its symbolId from the same AST version.",
+      description: layered
+        ? "Locate an indexed symbol by its symbolId. Returns definition metadata and source coordinates in the current AST version."
+        : "Locate a symbol by its symbolId from the same AST version.",
       parameters: Type.Object({ symbolId: queryText() }),
     },
     {
       name: "find_code_relations", operation: "find_relations",
-      description: "Find indexed calls, inheritance or implementations. Results are navigation; raw calls do not identify a target.",
+      description: layered
+        ? "Locate indexed call sites, inheritance or implementations. Resolved edges include source coordinates, not method bodies. Raw calls may lack a target. No match does not establish that a relationship is absent."
+        : "Find indexed calls, inheritance or implementations. Results are navigation; raw calls do not identify a target.",
       parameters: Type.Object({
         symbolId: queryText(),
         relationType: Type.Optional(Type.Union([Type.Literal("CALLS"), Type.Literal("INHERITS"), Type.Literal("IMPLEMENTS")])),
