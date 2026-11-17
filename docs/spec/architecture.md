@@ -53,10 +53,9 @@ CodeAgent 负责授权与工作区装配、运行互斥、取消、事件转发�
 | 需求原文 | `requirements/` | 说明被提出的目标 |
 | 业务补充知识 | `knowledge/business-context/` | 术语、业务约定、系统职责和例外 |
 | 自动代码地图 | `knowledge/generated-code-map/` | 文件、符号和结构导航 |
-| 手动 AST | `knowledge/ast/`（组合模式） | 版本化结构导航 |
 | 系统代码导航 | `knowledge/system-guides/`（可选工作区副本） | 系统查找规则和应用补充，可按需读取 |
 
-`combined` 是在线默认，业务资料、代码地图和 AST 按已准备的实际状态可用。显式 `none` 只提供基础资料；`backbone` 在同一基础上增加业务补充；`ast` 只额外提供当前可用的手动 AST，兼容路径为 `knowledge/generated-code-map/`。组合模式在 AST 不可用时继续；显式 AST 模式在没有可用版本时报告配置错误。只有用户显式生成 AST 才会创建版本，启动、浏览状态和问答都不会生成。
+`combined` 是在线默认，按已准备的状态提供业务资料、Code Map 和 AST 关系工具。`none` 提供基础文件，`backbone` 额外提供业务补充，`ast` 额外要求可用的结构索引与工具。AST 作为有版本的工具资料记录在 Manifest 中。手动生成才会创建版本。
 
 源码目录通过链接挂载。未指定范围时使用当前工程所有登记仓库；指定范围后，按配置展开系统与仓库 ID。未知 ID、空仓库集合和不可读取的必需仓库会在调用模型前失败。Pi 的只读检索扩展从授权真实根目录搜索，将结果映射回工作区路径，不用全局跟随链接。工作目录本身不是系统级隔离边界。
 
@@ -167,7 +166,11 @@ event: error   data: {"error":"..."}
 
 ## 代码索引边界
 
-手动生成的 AST 可供 Pi 通过 `find_code_symbol`、`get_code_symbol`、`find_code_relations` 查询。服务端固定当前版本和仓库范围，Reader 返回可用 `read` 核实的源码位置。全仓范围可读取 Code Map 和 AST Markdown，限仓范围通过结构工具查询授权仓库。AST 扩展启动检查失败时，Pi 用文件工具继续，运行记录说明降级原因。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
+手动生成的 AST 版本仅包含 `index.db` 和 `metadata.json`。Pi 的 `find_code_symbol`、`get_code_symbol`、`find_code_relations` 及前端关系图共用 Reader。查询固定工程、当前版本与仓库范围。已变更的源码需重新生成索引。Pi 在 `combined` 中可降级使用文件工具，显式 `ast` 要求结构工具就绪。Code Map 继续以独立文件资料供全仓组合问答。
+
+`GET /api/ast/symbols` 按名称定位符号，`/api/ast/symbols/<id>/relations` 展开一层关系，`/api/ast/symbols/<id>/source` 显示索引定位的当前源码片段。三个接口均支持 `versionId` 与仓库限制 `repositoryId`。关系查询支持 `direction` 和 `relationType`。
+
+资料中心用 `GET /api/materials` 汇总当前工程的导航文档、业务原文、投影、AST 与原始资料。管理员可用 `/api/knowledge/system-guides` 浏览、编辑、生成草稿和预览生效内容，并将原始文件上传到需求资料目录。问答 Trace 保存本轮装配情况与实际调用和交付。见[阶段 6](agent-migration-plan.md#阶段-6资料中心与代码结构可视化)。
 
 `codeintel/contracts/graph.py` 提供只读调用链投影，复用显式准备的 `contract-index/contracts.sqlite` 与工程源码根目录。`GET /api/projects/<projectId>/call-chains` 列出接口；`/<contractId>?version=...` 返回节点与定向边；`/<contractId>/evidence?version=...&node=...` 或 `&edge=...` 返回有行数上限的索引源码片段。版本变化拒绝旧引用，工程身份由 ProjectContext 与快照共同核对，不使用可变的全局工程。
 

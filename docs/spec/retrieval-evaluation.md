@@ -196,7 +196,9 @@ POST     /api/projects/<projectId>/retrieval-evaluations/<id>/method-comparisons
 
 检索收益应在开发题上改善、经新保留题复验，并在允许继续搜索的正式 Agent 中减少关键错误或在同等质量下降低成本。2026-11-02 用户确认默认程序调度按需复用已有工具，这是执行策略变更，不表示已经满足收益验收。生产接入位于 `query/langchain_agent/runtime.py` 与 `coordinator.py`，资料版本与会话重用由 `query/service.py` 管理；不把全部检索步骤写成每题固定流程。后续需同模型、同预算比较文件基线、同工具自由调查与程序调度，保留 basic/files/off 对照。
 
-## 结构化检索对照（2026-11-13，阶段 0 验收标准）
+## 历史结构化检索对照（2026-11-13，阶段 0 验收标准）
+
+本节保留旧 LangChain 实验的设置与指标。新的 AST 结构索引对照使用 `scripts/evaluation/evaluate_pi.py run --modes none,ast`。AST 组使用手动生成的可用版本，报告记录每轮实际装配的版本。见[阶段 6](agent-migration-plan.md#阶段-6资料中心与代码结构可视化)。
 
 在改图查询、向量或收敛路由之前，先用固定对照验证“结构化精确检索”相对“Agent 自读 AST md”的真实收益。对照挂在真实 LangChain Agent 上（`scripts/evaluation/evaluate_langchain.py`），两侧资料完全一致、同一模型、同一预算，唯一差异是实验臂多一个绑定冻结 AST `index.db` 的 `SearchSymbols` 工具（FTS5 精确符号检索，返回 fqn 和 file:line 定位线索，结论仍需 Read 核实）。
 

@@ -42,7 +42,9 @@ export async function request(path, options = {}, signal) {
   if (response.status === 401 && adminPath) {
     storage?.removeItem(adminStorageKey(projectId));
   }
-  if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);
+  if (!response.ok) throw Object.assign(new Error(body.error || `请求失败 (${response.status})`), {
+    status: response.status, runId: body.runId,
+  });
   return body;
 }
 

@@ -5,6 +5,7 @@ import {
 } from "antd";
 import { request } from "../../lib/api.js";
 import { CallChainView } from "./CallChainView.jsx";
+import { ProjectionNotice } from "../knowledge-admin/ProjectionNotice.jsx";
 
 const TYPE_STYLE = {
   PROJECT: { glyph: "工", color: "#0b6a63", soft: "#e6f2f1" },
@@ -26,7 +27,8 @@ const TYPE_OPTIONS = [
 ];
 
 export function GraphPage(props) {
-  const [view, setView] = useState("calls");
+  const [view, setView] = useState(() =>
+    new URLSearchParams(window.location.hash.split("?")[1]).get("view") === "business" ? "business" : "calls");
   return <div className="page-wrap graph-feature">
     <div className="graph-feature-heading"><h1>图谱</h1><Segmented value={view} onChange={setView}
       options={[{ label: "调用链", value: "calls" }, { label: "业务关系", value: "business" }]} /></div>
@@ -89,6 +91,7 @@ function BusinessGraphPanel({ workspace, projectId }) {
   return (
     <div className="business-graph-panel">
       <div style={{ maxWidth: 1280, margin: "0 auto", width: "100%" }}>
+        <ProjectionNotice state={data?.projection} onOpen={() => { window.location.hash = "#/admin"; }} />
         <Flex gap={12} align="center" wrap="wrap" style={{ marginBottom: 14 }}>
           <Segmented options={filterOptions} value={nodeType} onChange={(v) => { setNodeType(v); load(query, v); }} />
           <Input

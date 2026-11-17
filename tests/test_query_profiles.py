@@ -132,7 +132,7 @@ class MaterialManifestTest(TemporaryWorkspaceTest):
                 with self.subTest(mode=mode, allowed=allowed):
                     manifest = MaterialManifest.from_workspace(self.root, allowed=allowed, mode=mode)
                     self.assertEqual(expected & set(allowed), {source.kind for source in manifest.sources})
-                    self.assertEqual(len(manifest.sources), len(manifest.readable()))
+                    self.assertEqual((expected & set(allowed)) - {"ast"}, {source.kind for source in manifest.readable()})
 
     def test_repository_scope_filters_manifest_and_file_roots(self):
         for repo in ("a", "b"):
@@ -165,26 +165,27 @@ class MaterialManifestTest(TemporaryWorkspaceTest):
         for relative in ("knowledge/ast", "knowledge/generated-code-map"):
             (self.root / relative).mkdir(parents=True)
         manifests = [MaterialManifest.from_workspace(
-            self.root, allowed=("ast", "code_map"), mode="combined", ast_version=version,
+            self.root, allowed=("ast", "code_map"), mode="combined", ast_version=version, ast_status="available",
         ) for version in ("ast-v1", "ast-v2")]
         for manifest, version in zip(manifests, ("ast-v1", "ast-v2")):
             with self.subTest(version=version):
                 sources = {source.kind: source for source in manifest.sources}
                 self.assertEqual({"ast", "code_map"}, set(sources))
-                self.assertEqual("knowledge/ast", sources["ast"].path)
+                self.assertIsNone(sources["ast"].path)
+                self.assertTrue(sources["ast"].available)
                 self.assertEqual("knowledge/generated-code-map", sources["code_map"].path)
                 self.assertNotEqual(sources["ast"].directory, sources["code_map"].directory)
                 self.assertEqual(version, sources["ast"].to_dict()["version"])
                 self.assertIsNone(sources["code_map"].to_dict()["version"])
 
-    def test_historical_ast_mode_uses_code_map_mount_without_changing_source_kind(self):
+    def test_ast_mode_exposes_an_index_without_file_roots(self):
         (self.root / "knowledge/generated-code-map").mkdir(parents=True)
         manifest = MaterialManifest.from_workspace(
-            self.root, allowed=("ast", "code_map"), mode="ast", ast_version="historical-ast",
+            self.root, allowed=("ast", "code_map"), mode="ast", ast_version="ast-v1", ast_status="available",
         )
         self.assertEqual(1, len(manifest.sources))
         source = manifest.sources[0]
-        self.assertEqual(("ast", "knowledge/generated-code-map", "historical-ast", "available"),
+        self.assertEqual(("ast", None, "ast-v1", "available"),
                          (source.kind, source.path, source.version, source.status))
 
     def test_missing_materials_serialize_status_and_are_not_readable(self):
@@ -207,7 +208,7 @@ class MaterialManifestTest(TemporaryWorkspaceTest):
                 self.assertEqual({
                     "kind": "requirements", "label": "需求原文", "path": "requirements",
                     "directory": None, "purpose": "核对需求目标和验收约束", "status": "missing",
-                    "available": False, "version": None,
+                    "available": False, "version": None, "delivery": "files",
                 }, requirement)
 
     def test_current_limitation_authorized_missing_repository_is_omitted_when_peer_exists(self):
@@ -317,8 +318,8 @@ class PrepareToolsTest(TemporaryWorkspaceTest):
 
 class ExecutionSnapshotTest(TemporaryWorkspaceTest):
     def test_snapshot_records_profile_materials_tool_versions_model_and_settings(self):
-        (self.root / "knowledge/ast").mkdir(parents=True)
-        materials = MaterialManifest.from_workspace(self.root, allowed=("ast",), ast_version="ast-version-7")
+        materials = MaterialManifest.from_workspace(
+            self.root, allowed=("ast",), ast_version="ast-version-7", ast_status="available")
         profile = resolve_profile({"BUSINESS_CODE_AGENT_RUNTIME": "langchain",
                                    "BUSINESS_CODE_AGENT_WORKFLOW": "tracked",
                                    "BUSINESS_CODE_AGENT_ANSWER_MODE": "facts",
@@ -345,9 +346,9 @@ class ExecutionSnapshotTest(TemporaryWorkspaceTest):
         self.assertEqual({
             "profileId": "tracked-legacy-v1", "investigation": "tracked", "answerMode": "facts",
             "model": "snapshot-model", "settings": expected_settings,
-            "materials": [{"kind": "ast", "label": "AST 结构资料", "path": "knowledge/ast",
-                           "directory": str(self.root / "knowledge/ast"), "purpose": "定位手动生成的版本化结构资料",
-                           "status": "available", "available": True, "version": "ast-version-7"}],
+            "materials": [{"kind": "ast", "label": "AST 关系索引", "path": None,
+                           "directory": None, "purpose": "定位手动生成的版本化结构资料",
+                           "status": "available", "available": True, "version": "ast-version-7", "delivery": "tools"}],
             "tools": [
                 {"capability": "file_tools", "policy": "required", "status": "ready",
                  "names": ["Read", "Glob", "Grep"], "version": None, "reason": None},

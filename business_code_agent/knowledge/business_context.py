@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -31,7 +32,14 @@ class BusinessContextFiles:
         return {"items": items, "editable": self.editable}
 
     def read(self, name: str) -> dict:
-        return self._document(name, self._path(name).read_bytes().decode("utf-8"))
+        path = self._path(name)
+        return self._document(path, path.read_bytes().decode("utf-8"))
+
+    def summary(self, names: list[str] | None = None) -> dict:
+        items = self.list()["items"] if names is None else names
+        updated = max((self._path(name).stat().st_mtime for name in items), default=None)
+        return {"root": str(self.root), "documentCount": len(items),
+                "updatedAt": _iso_mtime(updated), "editable": self.editable}
 
     def save(self, name: str, *, previous: str | None, content: str) -> dict:
         if not self.editable:
@@ -48,11 +56,11 @@ class BusinessContextFiles:
                 raise BusinessContextConflict("文档已更新。请重新打开最新原文，再合并你的修改。")
             if current != content:
                 self._replace(path, content)
-        return self._document(name, content)
+            return self._document(path, content)
 
-    @staticmethod
-    def _document(name: str, content: str) -> dict:
-        return {"name": name, "content": content, "sections": markdown_sections(content)}
+    def _document(self, path: Path, content: str) -> dict:
+        return {"name": path.relative_to(self.root).as_posix(), "content": content,
+                "sections": markdown_sections(content), "modifiedAt": _iso_mtime(path.stat().st_mtime)}
 
     def _path(self, name: str) -> Path:
         if (not isinstance(name, str) or not name.endswith(".md")
@@ -100,3 +108,7 @@ def markdown_sections(content: str) -> list[dict]:
         end = next((line - 1 for line, depth, _ in headings[index + 1:] if depth <= level), len(lines))
         sections.append({"title": title, "startLine": start, "endLine": end})
     return sections
+
+
+def _iso_mtime(value: float | None) -> str | None:
+    return datetime.fromtimestamp(value, timezone.utc).isoformat() if value is not None else None

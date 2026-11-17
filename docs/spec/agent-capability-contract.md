@@ -220,7 +220,7 @@ class PreparedCapabilities:
 - 起始 RunContext 不原地修改；状态变化进入共享 RunAccess 失效记录、运行事件及最终 usage。所有工具包括 Read/Glob/Grep 共用它，不能只让发现过期的 AST 工具停用。下一轮重新预检，与旧会话身份比较。
 - 工具参数错误、某个文件消失或无命中是单次工具结果，不等于整个 File 能力失效；是否继续由模型决定。取消是运行控制，不包装成普通文件不存在。
 
-统一包装层按第 7.1 节的 AvailabilityChange 判定失效对象，而不是解析 reason 文案：涉及 required 能力/资料则抛出 RuntimeErrorBase，由服务保存 failed；仅涉及 optional 则登记失效、撤销其正文及派生证据，继续保留其他授权。其余工具检查同一失效记录，故业务资料失效后 File 也不能读取，AST 失效后直接 Read AST Markdown 同样不能绕过。
+统一包装层按第 7.1 节的 AvailabilityChange 判定失效对象。涉及 required 能力或资料时抛出 RuntimeErrorBase，由服务保存 failed。仅涉及 optional 时登记失效并撤销其正文及派生证据，继续保留其余授权。AST Reader 另按工程、版本与源码状态校验索引。
 
 ## 5. 装配协议与 bootstrap 顺序
 
@@ -320,7 +320,7 @@ AvailabilityChange 至少指定一个本轮 capability/material ID；包装层�
 
 Evidence 的封装前/后共用同一类型：提供者必须显式令 `id=None, tool_call_id=None`；运行内包装层分配唯一非空 ID、填入当前真实调用 ID，再交付给模型/Trace/引用表。边界序列化拒绝任一 ID 为空或来自提供者/模型伪造的证据，提供者不维护另一套运行上下文。`content_hash` 是实际读取文件字节的 SHA-256；text 是所交付行区间的原文。每个片段只能表示连续且完整的行，不补齐未读取的空洞。
 
-`source` 只用于源码/配置原文；仓库 README 作为项目背景归 navigation，不能仅因为所在 MaterialSource.kind=source 就升级为实现证明。需求/业务正文分别为 requirement/business_context；AST Markdown、符号/关系命中和检索排名均为 navigation。无原文的关系元数据放在 data，不制造虚假行号 Evidence。
+`source` 用于源码和配置原文。仓库 README 作为项目背景归 navigation。需求与业务正文分别为 requirement 和 business_context。符号、关系命中及检索排名均为 navigation。无原文的关系元数据放在 data。
 
 - `current=true` 只表示与本次核对时的资料一致，不是语义正确；索引快照片段不可未经当前文件核对就标为当前源码。
 - 模型实际收到的证据与 Trace 记录一致。因单次上限截断的半行/半字段片段仅是线索，不建立完整行证据；返回续读位置。
@@ -357,9 +357,9 @@ Grep 的 `path` 可以是授权根、子目录或单个文件；指定子目录�
 
 ### 7.4 Pi Runtime 原生工具（2026-11-15）
 
-`pi-v1` 使用 Pi 原生 `read`、`grep`、`find`、`ls`、`codemode`，不注册 LangChain 工具，不开放 `bash`／`edit`／`write`。`file_tools` 为 required；业务补充知识、AST、代码地图按模式为 optional，缺失只收缩本轮能力，不换 Profile、不生成索引。
+`pi-v1` 的必备工具为 `read`、`grep`、`find`、`ls`、`codemode`。业务补充知识和代码地图按模式可选，AST 在 `combined` 可选，在显式 `ast` 必需。
 
-AST 在 `combined` 或显式 `ast` 模式下按可用版本装配。只有索引和授权映射可用时，Pi 才注册 `find_code_symbol`、`get_code_symbol`、`find_code_relations`。工程、版本与允许范围由服务端提供。Pi 在发出模型请求前通过加载标识确认 AST 扩展，失败时在运行配置和 Trace 记录 `unavailable`，并使用没有 AST 工具的 Pi 进程继续。本轮会话按实际工具配置绑定。限仓问答只通过结构工具获得授权仓库的 AST 位置，全工程 Code Map 和 AST Markdown 仅供全仓问答挂载。当前实现的依据仍由 `read` 交付。见[阶段 3](agent-migration-plan.md#阶段-3ast-与结构导航)。
+AST 以带版本的结构工具资料装配到 `combined` 和 `ast`。服务端提供工程、当前版本与授权仓库。Pi 在模型请求前确认扩展加载，`combined` 可在失败时记录 `unavailable` 后使用文件工具，显式 `ast` 要求工具就绪。会话按实际能力绑定。全工程 Code Map 独立供全仓问答。源码实现依据由 `read` 交付。
 
 正常在线 API 入口固定进入 Pi；旧 Profile／Runtime 环境变量不能再覆盖这一选择。旧 Runtime 仅允许历史评测代码显式构造并注入。
 

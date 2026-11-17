@@ -184,20 +184,20 @@ class EvaluationServiceTest(unittest.TestCase):
     def test_start_completes_with_paired_state_and_report(self):
         self.service = self.make_service(ScriptedRuntime())
         eval_id, state = self.start_and_wait(self.service)
-        self.assertEqual(6, state["progress"]["answers"]["total"])
-        self.assertEqual(6, state["progress"]["answers"]["completed"])
-        self.assertEqual({"total": 6, "completed": 6, "usable": 6, "failed": 0}, state["progress"]["judge"])
+        self.assertEqual(4, state["progress"]["answers"]["total"])
+        self.assertEqual(4, state["progress"]["answers"]["completed"])
+        self.assertEqual({"total": 4, "completed": 4, "usable": 4, "failed": 0}, state["progress"]["judge"])
         rows = {(row["caseId"], row["repeat"]) for row in state["rows"]}
         self.assertEqual({("flow", 1), ("coupon", 1)}, rows)
         for row in state["rows"]:
-            self.assertEqual({"code_only", "optional", "ast"}, set(row["runs"]))
+            self.assertEqual({"code_only", "optional"}, set(row["runs"]))
         summary = state["summaries"]["model"]
         self.assertEqual(2, summary["qualityBlocks"])
         self.assertEqual(2, summary["costBlocks"])
         self.assertEqual(3, summary["aggregates"]["code_only"]["score"])
         self.assertEqual(3, summary["aggregates"]["code_only"]["possible"])
         results = json.loads((self.service.root / eval_id / "results.json").read_text())
-        self.assertEqual(6, len(results))
+        self.assertEqual(4, len(results))
         self.assertIsNotNone(results[0]["toolTrace"][0]["firstEventSeconds"])
         self.assertTrue((self.service.root / eval_id / "report.md").is_file())
 
@@ -215,7 +215,7 @@ class EvaluationServiceTest(unittest.TestCase):
         state = self.service.get_evaluation(eval_id)
         self.assertEqual("completed", state["status"])
         self.assertIsNone(state["progress"]["judge"])
-        self.assertEqual(3, state["progress"]["answers"]["completed"])
+        self.assertEqual(2, state["progress"]["answers"]["completed"])
         self.assertEqual(0, state["summaries"]["model"]["qualityBlocks"])
 
     def test_retry_failed_keeps_exact_failed_arm_and_frozen_inputs(self):
@@ -226,7 +226,7 @@ class EvaluationServiceTest(unittest.TestCase):
 
             def ask(self, question, **kwargs):
                 if not question.startswith("你是代码问答评审") and self.job.get("case", {}).get("id") == "flow" \
-                        and self.job.get("arm") == "ast":
+                        and self.job.get("arm") == "optional":
                     raise RuntimeError("controlled answer failure")
                 return super().ask(question, **kwargs)
 
@@ -235,11 +235,8 @@ class EvaluationServiceTest(unittest.TestCase):
             timeout_seconds=5, workers=2,
             runtime_factory=lambda job=None: JobRuntime(job),
         )
-        self.service.ast_service.generate()
-        self.assertTrue(wait_for(lambda: self.service.ast_service.status().get("status") == "available"))
         suite_id = self.create_suite(self.service)
-        started = self.service.start({"suiteId": suite_id, "repeats": 1,
-                                      "astVersionId": self.service.ast_service.status()["currentVersionId"]})
+        started = self.service.start({"suiteId": suite_id, "repeats": 1})
         eval_id = started["evaluationId"]
         self.assertTrue(wait_for(lambda: self.service.get_evaluation(eval_id)["status"] in FINISHED_STATUSES))
         self.assertTrue(wait_for(lambda: eval_id not in self.service._active))
@@ -247,7 +244,7 @@ class EvaluationServiceTest(unittest.TestCase):
         original_protocol = json.loads((original_dir / "protocol.json").read_text(encoding="utf-8"))
         frozen_text = (original_dir / "inputs" / "repo-0" / "src" / "Main.java").read_text(encoding="utf-8")
         self.assertEqual("failed", next(row for row in self.service.get_evaluation(eval_id)["rows"]
-                                         if row["caseId"] == "flow")["runs"]["ast"]["status"])
+                                         if row["caseId"] == "flow")["runs"]["optional"]["status"])
         suite_path = self.service._suite_path(suite_id)
         suite = json.loads(suite_path.read_text(encoding="utf-8"))
         suite["cases"][0]["question"] = "当前题库已被修改"
@@ -257,7 +254,7 @@ class EvaluationServiceTest(unittest.TestCase):
         retry = self.service.retry_failed(eval_id)
         retry_id = retry["evaluationId"]
         retry_protocol = json.loads((self.service.root / retry_id / "protocol.json").read_text(encoding="utf-8"))
-        self.assertEqual(["flow-r1-ast"], [f"{job['case']}-r{job['repeat']}-{job['arm']}"
+        self.assertEqual(["flow-r1-optional"], [f"{job['case']}-r{job['repeat']}-{job['arm']}"
                                             for job in retry_protocol["jobs"]])
         self.assertEqual(["flow"], [case["id"] for case in retry_protocol["cases"]])
         self.assertEqual(original_protocol["referencePreparation"], retry_protocol["referencePreparation"])
@@ -265,22 +262,13 @@ class EvaluationServiceTest(unittest.TestCase):
         self.assertEqual("失败任务重试", self.service.get_evaluation(retry_id)["suite"]["name"].split(" · ")[-1])
         self.assertEqual(eval_id, self.service.get_evaluation(retry_id)["settings"]["retryOf"])
         self.assertEqual("failed", next(row for row in self.service.get_evaluation(eval_id)["rows"]
-                                        if row["caseId"] == "flow")["runs"]["ast"]["status"])
+                                        if row["caseId"] == "flow")["runs"]["optional"]["status"])
         self.assertTrue(wait_for(lambda: retry_id not in self.service._active))
 
-    def test_five_arm_batch_shares_ast_and_isolates_business_flows(self):
+    def test_legacy_ast_document_comparison_is_retired(self):
         self.service = self.make_service(ScriptedRuntime())
-        ast_version_id = self.service.ast_service.status()["currentVersionId"]
-        eval_id, state = self.start_and_wait(self.service, {"comparison": "diagnostic_ast",
-                                                             "astVersionId": ast_version_id})
-        self.assertEqual(5, len(state["arms"]))
-        batch = self.service.root / eval_id
-        ast = batch / "inputs/baselines/ast"
-        hybrid = batch / "inputs/baselines/overview_ast"
-        self.assertEqual((ast / "ast/repo-0-index.md").read_text(),
-                         (hybrid / "ast/repo-0-index.md").read_text())
-        self.assertFalse((hybrid / "withdraw-flow.md").exists())
-        self.assertIn("项目总览", (hybrid / "project-overview.md").read_text())
+        with self.assertRaisesRegex(EvaluationError, "evaluate_pi.py"):
+            self.service.start({"suiteId": self.create_suite(self.service), "comparison": "diagnostic_ast"})
 
     def test_abcde_batch_freezes_each_material_arm(self):
         business_context = self.root / "knowledge" / "business-context"
@@ -337,7 +325,6 @@ class EvaluationServiceTest(unittest.TestCase):
         model_summary = state["summaries"]["model"]
         self.assertEqual(2, model_summary["qualityBlocks"])
         self.service.save_review(eval_id, answer_ids[1], {"checks": [1, 0], "issues": []})
-        self.service.save_review(eval_id, answer_ids[2], {"checks": [0, 1], "issues": []})
         state = self.service.get_evaluation(eval_id)
         review_summary = state["summaries"]["review"]
         self.assertEqual(1, review_summary["qualityBlocks"])
@@ -367,7 +354,7 @@ class EvaluationServiceTest(unittest.TestCase):
     def test_failed_judge_keeps_answer_and_requires_review(self):
         self.service = self.make_service(ScriptedRuntime(judge_ok=False))
         eval_id, state = self.start_and_wait(self.service)
-        self.assertEqual(6, state["progress"]["judge"]["failed"])
+        self.assertEqual(4, state["progress"]["judge"]["failed"])
         for row in state["rows"]:
             for run in row["runs"].values():
                 self.assertEqual("failed", run["modelStatus"])
@@ -395,9 +382,9 @@ class EvaluationServiceTest(unittest.TestCase):
         state = self.service.get_evaluation(eval_id)
         self.assertEqual("cancelled", state["status"])
         self.assertEqual(0, state["progress"]["answers"]["completed"])
-        self.assertEqual(6, state["progress"]["answers"]["cancelled"])
+        self.assertEqual(4, state["progress"]["answers"]["cancelled"])
         results = json.loads((self.service.root / eval_id / "results.json").read_text())
-        self.assertEqual(6, len(results))
+        self.assertEqual(4, len(results))
         self.assertTrue(all(item["status"] in ("cancelled", "skipped") for item in results))
 
     def test_restart_marks_running_batch_interrupted(self):
@@ -528,7 +515,7 @@ class EvaluationServiceTest(unittest.TestCase):
                                  in ("completed", "cancelled", "failed")))
         state = self.service.get_evaluation(eval_id)
         self.assertEqual("completed", state["rejudge"]["status"])
-        self.assertEqual(6, state["progress"]["judge"]["usable"])
+        self.assertEqual(4, state["progress"]["judge"]["usable"])
         history = self.service.get_case(eval_id, "flow", 1)["runs"]["code_only"]["reviewHistory"]
         self.assertEqual(1, len(history))
         self.assertEqual("failed", history[0]["status"])

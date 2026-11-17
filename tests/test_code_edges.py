@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from business_code_agent.codeintel.analysis import JavaIndexer
-from business_code_agent.evaluation.ast_docs import generate_ast_documents
+from business_code_agent.codeintel.ast.generator import generate_ast_index
 from business_code_agent.storage.schema import connect
 
 
@@ -97,8 +97,8 @@ class CodeEdgeResolutionTest(unittest.TestCase):
         self.assertIn(("demo.Pay.submit", "demo.Pay.validate"), resolved)
 
 
-class AstDocumentAnchorTest(unittest.TestCase):
-    def test_documents_render_qualified_names_and_resolved_parents(self):
+class AstIndexTest(unittest.TestCase):
+    def test_index_persists_resolved_relationships(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = root / "repo-0/src/main/java/demo/Pay.java"
@@ -112,13 +112,10 @@ public class Pay extends Base {
             parent = root / "repo-0/src/main/java/demo/Base.java"
             parent.write_text("package demo;\npublic class Base {}\n", encoding="utf-8")
             db_path = root / "out" / "index.db"
-            docs = generate_ast_documents(root, [("payment-repo", "repo-0")], db_path=db_path)
-            content = "\n".join(docs.values())
-            self.assertIn("demo.Pay — CLASS", content)
-            self.assertIn("继承: demo.Base", content)
-            self.assertIn("demo.Pay.submit", content)
-            # The persisted index keeps the resolved edges for later consumers.
-            self.assertTrue(db_path.is_file())
+            stats = generate_ast_index(root, [("payment-repo", "repo-0")], db_path=db_path)
+            self.assertEqual({"index.db"}, {p.name for p in db_path.parent.iterdir()})
+            self.assertEqual(2, stats["typeCount"])
+            self.assertEqual(1, stats["relationsByType"]["INHERITS"])
             persisted = _facts(connect(str(db_path)), "CALLS")
             self.assertIn(("demo.Pay.submit", "demo.Pay.validate"), persisted)
 

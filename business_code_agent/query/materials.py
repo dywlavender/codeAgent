@@ -1,4 +1,4 @@
-"""Describe the file roots authorized for one query turn."""
+"""Describe the file roots and indexed materials authorized for one query turn."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ _MODE_MATERIALS = {
 class MaterialSource:
     kind: str
     label: str
-    path: str
+    path: str | None
     directory: Path | None
     status: str
     version: str | None = None
@@ -39,14 +39,16 @@ class MaterialSource:
 
     @property
     def available(self) -> bool:
-        return self.directory is not None
+        return self.directory is not None or (
+            self.kind == "ast" and self.status == "available" and self.version is not None)
 
     def to_dict(self) -> dict:
         value = {
             "kind": self.kind, "label": self.label, "path": self.path,
-            "directory": str(self.directory) if self.available else None,
+            "directory": str(self.directory) if self.directory is not None else None,
             "purpose": _PURPOSES[self.kind], "status": self.status,
             "available": self.available, "version": self.version,
+            "delivery": "tools" if self.kind == "ast" else "files",
         }
         if self.repository_id:
             value["repositoryId"] = self.repository_id
@@ -89,9 +91,9 @@ class MaterialManifest:
 
         add("business_context", context_label, context)
         add("code_map", "自动代码地图", code_map)
-        # The historical AST-only workspace uses the code map mount.
-        add("ast", "AST 结构资料", code_map if mode == "ast" else "knowledge/ast",
-            ast_version, "not_mounted" if ast_status == "available" else ast_status or "missing")
+        if "ast" in kinds:
+            sources.append(MaterialSource("ast", "AST 关系索引", None, None,
+                                          ast_status or "missing", ast_version))
         add("requirements", "需求原文", "requirements")
         add("system_guide", "系统代码导航", SYSTEM_GUIDES_MOUNT)
         if "source" in kinds:
@@ -151,7 +153,7 @@ class MaterialManifest:
         return [source for source in self.sources if source.kind == "source" and not source.available]
 
     def readable(self) -> list[MaterialSource]:
-        return [source for source in self.sources if source.available]
+        return [source for source in self.sources if source.directory is not None]
 
     def labelled_roots(self) -> list[tuple[str, Path]]:
         return [(source.label, source.directory) for source in self.readable()]

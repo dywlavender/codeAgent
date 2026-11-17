@@ -1,0 +1,14 @@
+.system-guides { overflow-y: auto; }
+.system-guides > * { margin: 0 auto var(--space-3); }
+.system-guides-grid { display: grid; grid-template-columns: minmax(155px, .8fr) minmax(0, 1.7fr) minmax(0, 1.25fr); gap: var(--space-3); align-items: start; }
+.system-guide-preview, .system-guide-effective { max-height: 62vh; overflow: auto; overflow-wrap: anywhere; }
+.system-guide-preview h1 { font-size: var(--type-lg); }
+.system-guide-preview h2 { font-size: var(--type-md); }
+.system-guide-effective { margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-well); white-space: pre-wrap; font: var(--type-sm)/1.65 var(--font-code); }
+@media (max-width: 1060px) {
+  .system-guides-grid { grid-template-columns: minmax(155px, 1fr) minmax(0, 3fr); }
+  .system-guides-grid > :last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 650px) {
+  .system-guides-grid { grid-template-columns: minmax(0, 1fr); }
+}

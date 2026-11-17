@@ -81,8 +81,9 @@ class InterruptedGenerationHealTest(unittest.TestCase):
 
     def test_live_generation_is_not_healed(self):
         self.seed_generating()
-        _LIVE_GENERATIONS.add("ast-generation-x")
-        self.addCleanup(_LIVE_GENERATIONS.discard, "ast-generation-x")
+        live = (self.ast_root.resolve(), "ast-generation-x")
+        _LIVE_GENERATIONS.add(live)
+        self.addCleanup(_LIVE_GENERATIONS.discard, live)
         service = AstService(project_config=self.config, data_root=self.ast_root)
         self.assertEqual("generating", service.status()["status"])
 

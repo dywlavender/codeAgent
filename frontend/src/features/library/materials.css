@@ -1,0 +1,6 @@
+.materials-page { display: grid; grid-auto-rows: max-content; gap: var(--space-4); overflow-y: auto; }
+.materials-page > * { width: 100%; margin-inline: auto; }
+.materials-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 205px), 1fr)); gap: var(--space-3); }
+.material-origin { overflow-wrap: anywhere; }
+.material-origin div { color: var(--color-text-secondary); font-size: var(--type-sm); margin-top: var(--space-1); }
+.raw-material-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-4); margin: 0 0 var(--space-3); background: var(--color-well); border-radius: var(--radius-sm); font: var(--type-sm)/1.65 var(--font-code); }

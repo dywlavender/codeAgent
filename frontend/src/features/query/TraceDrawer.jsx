@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Empty, Segmented, Spin, Tabs } from "antd";
+import { Alert, Button, Drawer, Empty, List, Segmented, Spin, Tabs, Typography } from "antd";
 import { DownloadSimple, ArrowClockwise } from "@phosphor-icons/react";
 import { request } from "../../lib/api.js";
 import { isActiveRun } from "../../lib/query-state.js";
@@ -8,6 +8,7 @@ import "./trace.css";
 
 const FILTERS = [{ label: "全部", value: "all" }, { label: "模型", value: "model" },
   { label: "工具", value: "tool" }, { label: "调度", value: "retrieval" }];
+const AST_TOOLS = new Set(["find_code_symbol", "get_code_symbol", "find_code_relations"]);
 function parsed(value) { try { return JSON.parse(value); } catch { return null; } }
 function json(value) {
   if (typeof value !== "string") return JSON.stringify(value, null, 2);
@@ -86,11 +87,41 @@ export function TraceDrawer({ projectId, runId, onClose }) {
           <p className="trace-note">原文已读与结构证据已交付分别记录，不表示业务语义已证明。</p>
           <JsonBlock value={trace.retrievalPlan || trace.investigation || { note: "本轮没有调查事项记录" }} />
         </> },
+        ...(execution?.materials?.length ? [{ key: "materials", label: "本轮资料",
+          children: <MaterialUse run={trace.run} steps={timeline} /> }] : []),
         ...(execution?.profileId ? [{ key: "execution", label: "运行配置", children: <JsonBlock value={execution} /> }] : []),
         { key: "raw", label: "完整记录", children: <JsonBlock value={trace} /> },
       ]} />
     </>}
   </Drawer>;
+}
+
+function MaterialUse({ run, steps }) {
+  const execution = run.execution;
+  const ast = execution.tools?.find((item) => item.capability === "ast");
+  const calls = steps.filter((item) => item.kind === "tool" && item.status !== "skipped"
+    && AST_TOOLS.has(item.data.name)).length;
+  const readFiles = run.usage?.verification?.readFiles;
+  return <List dataSource={execution.materials} renderItem={(source) => {
+    const toolOnly = source.delivery === "tools";
+    const delivered = toolOnly ? ast?.status === "ready" : source.available;
+    const files = !toolOnly && source.path && Array.isArray(readFiles)
+      ? readFiles.filter((file) => file.startsWith(`${source.path}/`)) : null;
+    return <List.Item>
+      <div>
+        <Typography.Text strong>{source.label}</Typography.Text>
+        <div className="trace-note">
+          {delivered ? "已装配" : "未装配"}
+          {toolOnly ? ` · 结构工具调用 ${calls} 次`
+            : files ? ` · 交付 ${files.length} 份文件原文` : " · 原文读取记录不可用"}
+          {source.kind === "ast" && source.version && ` · ${source.version}`}
+        </div>
+        {files?.length > 0 && <details><summary>查看已读文件</summary>
+          <ul>{files.map((file) => <li key={file}><code>{file}</code></li>)}</ul>
+        </details>}
+      </div>
+    </List.Item>;
+  }} />;
 }
 
 function JsonBlock({ value }) { return <pre className="trace-code">{json(value)}</pre>; }

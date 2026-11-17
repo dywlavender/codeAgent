@@ -24,7 +24,8 @@ from .harness import EvaluationRuntime, write_json
 from .ast_service import AstService
 from .case_import import import_upload
 from .report import build_view_report, generate_report
-from .runner import (ARM_DESCRIPTIONS_ABC, ARM_DESCRIPTIONS_ABCDE, ARMS_ABC, ARMS_ABCDE, COMPARISONS,
+from .runner import (ARM_DESCRIPTIONS_AB, ARM_DESCRIPTIONS_ABCDE, ARMS_AB, ARMS_ABC, ARMS_ABCDE,
+                     AST_EVALUATION_INSTRUCTIONS, COMPARISONS, LEGACY_AST_ARMS,
                      freeze_batch, load_protocol, rejudge_output, run_batch, summarize_pairs,
                      validate_suite, resolve_project_sources)
 
@@ -491,7 +492,7 @@ class EvaluationService:
             "cli": readiness["cli"],
             "runtime": {"source": "本地 Claude Code 当前模型设置；实际响应模型名称记录在批次报告中",
                         "timeoutSeconds": self.timeout_seconds, "workers": self.workers,
-                        "comparison": {"arms": list(ARMS_ABC), "descriptions": ARM_DESCRIPTIONS_ABC},
+                        "comparison": {"arms": list(ARMS_AB), "descriptions": ARM_DESCRIPTIONS_AB},
                         "fiveArmComparison": {"arms": list(ARMS_ABCDE), "descriptions": ARM_DESCRIPTIONS_ABCDE},
                         "comparisons": COMPARISONS},
             "activeEvaluationId": active,
@@ -522,7 +523,9 @@ class EvaluationService:
         repeats = int(payload.get("repeats") or 2)
         if not 1 <= repeats <= 5:
             raise EvaluationError("轮次必须在 1 到 5 之间")
-        comparison = payload.get("comparison", "abc")
+        comparison = payload.get("comparison", "ab")
+        if comparison in {"abc", "diagnostic_ast"}:
+            raise EvaluationError(AST_EVALUATION_INSTRUCTIONS)
         if comparison not in COMPARISONS:
             raise EvaluationError("未知对照方式")
         arm_descriptions = COMPARISONS[comparison]
@@ -565,16 +568,6 @@ class EvaluationService:
                     raise EvaluationError("五组对照需要保留可读的历史 baseline 资料作为 B 组。")
                 if not readiness["codeMap"]["readable"] or not readiness["codeMap"]["documents"]:
                     raise EvaluationError("五组对照需要先完成源码同步和索引，生成可读的自动 Code Map。")
-            ast_status = self.ast_service.status()
-            requested_ast_id = str(payload.get("astVersionId") or "").strip() or None
-            ast_current = self.ast_service.version(requested_ast_id) if requested_ast_id else self.ast_service.current_version()
-            if "ast" in arm_descriptions and (not ast_current or (not requested_ast_id and ast_status.get("status") != "available")):
-                raise EvaluationError("AST 资料尚未手动生成或已经待更新，请先在 AST 管理页生成可用版本。")
-            ast_version_id = ast_current[0] if ast_current else None
-            ast_documents = {
-                str(path.relative_to(ast_current[2])): path.read_text(encoding="utf-8")
-                for path in ast_current[2].rglob("*.md")
-            } if ast_current else None
             variants = None
             if comparison == "abcde":
                 from .runner import baseline_documents
@@ -598,36 +591,6 @@ class EvaluationService:
                         **{f"generated-code-map/{key}": value for key, value in code_map_docs.items()},
                     },
                 }
-            elif ast_documents is not None and "ast" in arm_descriptions:
-                from .runner import baseline_documents
-                _, _, baseline_root, _ = resolve_project_sources(
-                    self.project_config,
-                    business_context_root=self.business_context_root,
-                    code_map_root=self.code_map_root,
-                    requirements_root=self.requirements_root,
-                )
-                baseline_docs = baseline_documents(baseline_root)
-                variants = {}
-                for arm in arm_descriptions:
-                    if arm == "code_only":
-                        variants[arm] = {}
-                    elif arm == "optional":
-                        variants[arm] = baseline_docs
-                    elif arm == "overview":
-                        overview = baseline_docs.get("project-overview.md", "")
-                        variants[arm] = {"project-overview.md": overview +
-                                         "\n\n## 本轮资料范围\n\n本轮只提供项目总览，未提供人工流程主干文件；请从源码确认实现。\n"}
-                    elif arm == "ast":
-                        variants[arm] = ast_documents
-                    elif arm == "overview_ast":
-                        overview = baseline_docs.get("project-overview.md", "")
-                        variants[arm] = {**{key: value for key, value in ast_documents.items()
-                                           if key != "project-overview.md"},
-                                         "ast-overview.md": ast_documents.get("project-overview.md", ""),
-                                         "project-overview.md": overview +
-                                         "\n\n## 可选代码结构资料\n\n[AST结构导航](ast-overview.md)：仅含机械提取的代码结构，实际行为以源码为准。\n"}
-                    else:
-                        variants[arm] = baseline_docs
             stamp = datetime.now().strftime("eval-%Y%m%d-%H%M%S")
             eval_id = stamp
             number = 1
@@ -641,9 +604,7 @@ class EvaluationService:
                     project_id=self.project_id,
                     arms=list(arm_descriptions), arm_descriptions=dict(arm_descriptions),
                     comparison=comparison, repeats=repeats, case_ids=None, judge=judge,
-                    variants=variants, ast_version_id=ast_version_id,
-                    ast_generation_seconds=(ast_current[1].get("generationSeconds") if ast_current else None),
-                    ast_generator_version=(ast_current[1].get("generatorVersion") if ast_current else None),
+                    variants=variants,
                     business_context_root=self.business_context_root, code_map_root=self.code_map_root,
                     requirements_root=self.requirements_root,
                     workers=self.workers, timeout_seconds=self.timeout_seconds,
@@ -672,10 +633,7 @@ class EvaluationService:
                              "oldBaselineDocCount": len((variants or {}).get("old_baseline", {})),
                              "codeMapDocCount": len((variants or {}).get("code_map", {})),
                              "businessContextDocCount": len((variants or {}).get("business_context", {})),
-                             "astVersionId": ast_version_id,
-                             "astStatus": ast_status.get("status") if ast_version_id else None,
-                             "retryOf": payload.get("retryOf"),
-                             "astGenerationSeconds": (ast_current[1].get("generationSeconds") if ast_current else None)},
+                             "retryOf": payload.get("retryOf")},
                 "arms": dict(arm_descriptions),
                 "cases": [{"id": case["id"], "question": case["question"],
                            "category": case.get("category") or "未分类",
@@ -718,6 +676,8 @@ class EvaluationService:
         original_dir = self._batch_dir(eval_id)
         original_protocol = load_protocol(original_dir)
         original_jobs = original_protocol.get("jobs") or []
+        if any(job["arm"] in LEGACY_AST_ARMS for job in original_jobs):
+            raise EvaluationError(AST_EVALUATION_INSTRUCTIONS)
         retry_jobs = [job for job in original_jobs
                       if f"{job['case']}-r{job['repeat']}-{job['arm']}" in failed_ids]
         if not retry_jobs:

@@ -90,7 +90,7 @@ BUSINESS_CODE_PI_TIMEOUT=600
 
 ## 工作区
 
-问答默认使用 `combined`：挂载授权源码和 README、已有需求和业务补充知识、代码地图及可用的手动 AST。资料按需读取；AST 缺失或待更新时继续使用其他可用资料。`none`、`backbone` 和 `ast` 用于显式对照。启动或问答不会隐式生成 AST 或准备混合／契约索引。
+问答默认使用 `combined`，按需读取授权源码、README、需求、业务补充知识和 Code Map，并可调用手动生成的 AST 关系索引。AST 缺失或待更新时继续使用其他可用资料。`none`、`backbone` 和 `ast` 用于显式对照。资料中心提供系统导航维护、业务知识维护、AST 关系图与原始资料查看。
 
 会话工作区的资料布局：
 
@@ -99,8 +99,8 @@ BUSINESS_CODE_PI_TIMEOUT=600
 ├── repos/<repo-id>/                → 授权仓库
 ├── requirements/                  → 需求原文
 ├── knowledge/business-context/     → 业务补充知识
-├── knowledge/generated-code-map/  → 自动代码地图
-└── knowledge/ast/                  → 可用的手动 AST（组合模式）
+├── knowledge/system-guides/        → 授权范围内的已发布系统导航
+└── knowledge/generated-code-map/   → 自动代码地图
 ```
 
 目录优先使用软链接；Windows 无法创建软链接时使用 Junction。项目资料页可查看各来源的状态。刷新资料不会同步仓库或导入知识。

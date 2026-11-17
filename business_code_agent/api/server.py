@@ -8,24 +8,35 @@ import logging
 import mimetypes
 import os
 import re
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from business_code_agent.evaluation.service import EvaluationService
+from business_code_agent.codeintel.ast.reader import AstQueryError, AstRepository
 from business_code_agent.codeintel.ast.service import AstService
 from business_code_agent.evaluation.retrieval_service import RetrievalEvaluationService
 from business_code_agent.knowledge.business_context import BusinessContextConflict, BusinessContextFiles
+from business_code_agent.knowledge.baseline import BaselineKnowledgeService
 from business_code_agent.knowledge.suggestions import InvalidSuggestion, suggest
 from business_code_agent.platform.projects import ProjectContext, ProjectRegistry, ProjectRegistryError
 from business_code_agent.query.agent.pi.models import complete_text
+from business_code_agent.query.agent.pi.events import answer_body
+from business_code_agent.query.navigation import build_navigation
 from business_code_agent.query.runtime import RuntimeErrorBase
 from business_code_agent.query.service import QueryBusyError, QueryConfigurationError, QueryRuntimeError, QueryService
-from business_code_agent.query.workspace import WorkspaceManager
+from business_code_agent.query.system_guides import (
+    draft_source_paths, guide_catalog, guide_target, guide_template, load_system_guides, render_system_guidance,
+)
+from business_code_agent.query.workspace import WorkspaceManager, _safe_name
+from business_code_agent.requirement.files import MAX_UPLOAD_BYTES, RawMaterials
 
 
 logger = logging.getLogger(__name__)
 CONTEXT_FILES_PATH = "/api/knowledge/context/files"
+GUIDES_PATH = "/api/knowledge/system-guides"
+RAW_FILES_PATH = "/api/knowledge/raw-files"
 
 
 def _user_facing_internal_error(exc: Exception) -> str:
@@ -134,6 +145,16 @@ def make_server(
             )
         return ast_services[key]
 
+    def ast_reader_for(context: ProjectContext, params: dict):
+        configured = dict(WorkspaceManager(None, project_config=context.config_path).repository_sources())
+        scope = params.get("repositoryId") or list(configured)
+        if set(scope) - configured.keys():
+            raise AstQueryError("denied", "查询范围包含未登记的仓库")
+        repositories = [AstRepository(key, configured[key], f"repos/{_safe_name(key)}")
+                        for key in dict.fromkeys(scope)]
+        return ast_for(context).reader(repositories, project_id=context.project_id,
+                                       version_id=params.get("versionId", [None])[0])
+
     def business_context_for(context: ProjectContext) -> BusinessContextFiles:
         if context.registered:
             return BusinessContextFiles(context.business_context_root)
@@ -143,6 +164,45 @@ def make_server(
         knowledge = workspace.config.get("knowledge") or {}
         editable = bool(knowledge.get("businessContextRoot")) or not knowledge.get("baselineRoot")
         return BusinessContextFiles(workspace.business_context_root, editable=editable)
+
+    def guide_configuration(context: ProjectContext):
+        workspace = WorkspaceManager(None, project_config=context.config_path)
+        mounts = {key: f"repos/{_safe_name(key)}" for key, _ in workspace.repository_sources()}
+        return workspace.config, mounts
+
+    def guides_for(context: ProjectContext):
+        config, mounts = guide_configuration(context)
+        if context.system_guides_root.is_symlink():
+            raise ValueError("系统导航目录须是当前工程的实际目录")
+        files = BusinessContextFiles(context.system_guides_root)
+        navigation = build_navigation(config, mounts, context.project_id, context.project_name)
+        return files, guide_catalog(config, navigation, set(files.list()["items"]))
+
+    def baselines_for(context: ProjectContext, db):
+        return BaselineKnowledgeService(db, project_config=context.config_path,
+                                        business_context_root=business_context_for(context).root,
+                                        projection_state=context.data_root / "business-projection.json")
+
+    def raw_files_for(context: ProjectContext) -> RawMaterials:
+        root = (context.requirements_root if context.registered else
+                WorkspaceManager(None, project_config=context.config_path).requirements_root)
+        return RawMaterials(root)
+
+    def materials_for(context: ProjectContext) -> dict:
+        guide_files, systems = guides_for(context)
+        targets = [target for system in systems for target in (system, *system["applications"])]
+        guides = guide_files.summary([target["path"] for target in targets if target["published"]])
+        guides["systemCount"] = len(systems)
+        business = business_context_for(context).summary()
+        with closing(context.open_db()) as db:
+            projection = baselines_for(context, db).projection_status()
+        raw = raw_files_for(context)
+        workspace = WorkspaceManager(None, project_config=context.config_path, code_map_root=context.code_map_root)
+        return {
+            "systemGuides": guides, "businessContext": business, "projection": projection,
+            "ast": ast_for(context).status(), "rawMaterials": {"root": str(raw.root), "items": raw.list()},
+            "sources": [s for s in workspace.source_summary() if s["kind"] in {"repository", "code_map"}],
+        }
 
     class Handler(BaseHTTPRequestHandler):
         def _project_route(self, parsed):
@@ -282,6 +342,36 @@ def make_server(
                     return
 
                 path, context = self._project_route(parsed)
+                if path == f"{GUIDES_PATH}/draft":
+                    if not self._require_admin(context):
+                        return
+                    body = self._body()
+                    _, catalog = guides_for(context)
+                    target, apps = guide_target(catalog, body.get("systemId"), body.get("applicationId"))
+                    if not apps:
+                        raise ValueError("请先为这个系统登记应用和源码仓库")
+                    scope = ({"repositoryIds": [apps[0]["repositoryId"]]} if body.get("applicationId")
+                             else {"systemIds": [target["id"]]})
+                    locations = "\n".join(f"- {item['mount']}/" for item in apps)
+                    service = self._query_service(context)
+                    result = service.query(
+                        f"请调查 {target['name']} 的代码组织，并生成一份候选 System Guide。"
+                        "先用 find 或 ls 定位应用的代表性入口，再直接调用 read 打开找到的源码文件。"
+                        "收到源码正文后再写草稿。按需继续读取 README、配置或相邻实现。"
+                        "归纳稳定的定位方法和特殊分发规则，不罗列具体接口、方法、DTO 字段或业务条款。"
+                        "输出正文为 Markdown，含标题与「## 导航摘要」，只写已核实规则。"
+                        f"要调查的应用位置\n{locations}", scope=scope, mode="none",
+                    )
+                    reads = draft_source_paths(result, apps)
+                    draft = answer_body(result.get("answer", "")).strip()
+                    if result.get("status") != "completed" or not reads or "## 导航摘要" not in draft:
+                        self._json(422, {"error": "本次调查未交付可用导航草稿，请查看调查记录后重试",
+                                         "runId": result.get("runId")})
+                        return
+                    if draft.startswith("```markdown") and draft.endswith("```"):
+                        draft = draft.removeprefix("```markdown").removesuffix("```").strip()
+                    self._json(200, {"content": draft + "\n", "sourceFiles": reads, "runId": result["runId"]})
+                    return
                 if path == "/api/knowledge/context/suggest":
                     if not self._require_admin(context):
                         return
@@ -344,13 +434,17 @@ def make_server(
                 if path == "/api/knowledge/baselines/refresh":
                     if not self._require_admin(context):
                         return
-                    from business_code_agent.knowledge.baseline import BaselineKnowledgeService
-                    service = BaselineKnowledgeService(
-                        context.open_db(), project_config=project_config,
-                        business_context_root=business_context_for(context).root,
-                    )
                     body = self._body()
-                    self._json(200, service.refresh(parser=str(body.get("parser") or "claude")))
+                    parser = str(body.get("parser") or "claude")
+                    with closing(context.open_db()) as db:
+                        baseline = baselines_for(context, db)
+                        try:
+                            refreshed = baseline.refresh(parser=parser)
+                        except Exception as exc:
+                            db.rollback()
+                            baseline.record_projection(parser, error=_user_facing_internal_error(exc))
+                            raise
+                    self._json(200, refreshed)
                     return
 
                 if path == "/api/ast/generate":
@@ -470,6 +564,26 @@ def make_server(
             try:
                 parsed = urlparse(self.path)
                 path, context = self._project_route(parsed)
+                if path.startswith(f"{RAW_FILES_PATH}/"):
+                    if not self._require_admin(context):
+                        return
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < size <= MAX_UPLOAD_BYTES:
+                        raise ValueError("资料文件应为 1 字节至 12 MB")
+                    name = unquote(path.removeprefix(f"{RAW_FILES_PATH}/"))
+                    content = self.rfile.read(size)
+                    if len(content) != size:
+                        raise ValueError("资料上传未完成")
+                    self._json(201, raw_files_for(context).upload(name, content))
+                    return
+                if path == f"{GUIDES_PATH}/file":
+                    if not self._require_admin(context):
+                        return
+                    files, catalog = guides_for(context)
+                    body = self._body()
+                    target, _ = guide_target(catalog, body.get("systemId"), body.get("applicationId"))
+                    self._json(200, files.save(target["path"], previous=body["previousContent"], content=body["content"]))
+                    return
                 if path.startswith(f"{CONTEXT_FILES_PATH}/"):
                     if not self._require_admin(context):
                         return
@@ -496,6 +610,8 @@ def make_server(
                     self._json(200, evaluations.save_review(review_match.group(1), review_match.group(2), body))
                     return
                 self._json(404, {"error": "not found"})
+            except FileExistsError:
+                self._json(409, {"error": "同名资料已经存在"})
             except BusinessContextConflict as exc:
                 self._json(409, {"error": str(exc)})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:
@@ -515,6 +631,63 @@ def make_server(
                         self._json(200, {"items": [{**legacy_context.to_dict(), "registered": False}]})
                     return
                 path, context = self._project_route(parsed)
+                if path == "/api/materials":
+                    self._json(200, materials_for(context))
+                    return
+                if path == "/api/materials/projection":
+                    with closing(context.open_db()) as db:
+                        self._json(200, baselines_for(context, db).projection_status())
+                    return
+                if path.startswith(f"{RAW_FILES_PATH}/"):
+                    files = raw_files_for(context)
+                    name = unquote(path.removeprefix(f"{RAW_FILES_PATH}/"))
+                    if parse_qs(parsed.query).get("download") == ["1"]:
+                        file = files.path(name)
+                        with file.open("rb") as stream:
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/octet-stream")
+                            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(file.name, safe=""))
+                            self.send_header("Content-Length", str(file.stat().st_size))
+                            self.end_headers()
+                            while block := stream.read(65536):
+                                self.wfile.write(block)
+                        return
+                    self._json(200, files.preview(name))
+                    return
+                if path in {GUIDES_PATH, f"{GUIDES_PATH}/file", f"{GUIDES_PATH}/preview"}:
+                    if not self._require_admin(context):
+                        return
+                    files, catalog = guides_for(context)
+                    if path == GUIDES_PATH:
+                        self._json(200, {"systems": catalog})
+                        return
+                    params = parse_qs(parsed.query)
+                    system_id = params.get("systemId", [None])[0]
+                    app_id = params.get("applicationId", [None])[0]
+                    target, apps = guide_target(catalog, system_id, app_id)
+                    if path.endswith("/file"):
+                        document = files.read(target["path"]) if target["published"] else {
+                            "name": target["path"], "content": None}
+                        self._json(200, {**document, "template": guide_template(target["name"])})
+                        return
+                    repo_id = params.get("repositoryId", [None])[0]
+                    config, mounts = guide_configuration(context)
+                    if repo_id and repo_id not in mounts:
+                        raise ValueError("请选择本工程已登记的仓库")
+                    repository_only = repo_id or (apps[0]["repositoryId"] if app_id else None)
+                    selected = {repository_only} if repository_only else {app["repositoryId"] for app in apps}
+                    navigation = build_navigation(
+                        config, {key: mount for key, mount in mounts.items() if key in selected},
+                        context.project_id, context.project_name, system_ids=() if repository_only else (system_id,),
+                    )
+                    docs = load_system_guides(context.system_guides_root, navigation)
+                    self._json(200, {
+                        "scope": {"repositoryIds": [repository_only]} if repository_only else {"systemIds": [system_id]},
+                        "guidance": render_system_guidance(navigation, docs),
+                        "documents": [doc.workspace_path for doc in docs],
+                        "applications": navigation["applications"],
+                    })
+                    return
                 if path == CONTEXT_FILES_PATH or path.startswith(f"{CONTEXT_FILES_PATH}/"):
                     if not self._require_admin(context):
                         return
@@ -554,7 +727,6 @@ def make_server(
                     return
                 chain_match = re.fullmatch(r"/api/call-chains(?:/([^/]+)(/evidence)?)?", path)
                 if chain_match:
-                    from contextlib import closing
                     from business_code_agent.codeintel.contracts.graph import ContractGraph
                     from business_code_agent.query.workspace import WorkspaceManager
 
@@ -597,13 +769,21 @@ def make_server(
                 if path == "/api/ast":
                     self._json(200, ast.status())
                     return
-                if path == "/api/ast/documents":
-                    version_id = parse_qs(parsed.query).get("versionId", [None])[0]
-                    self._json(200, ast.list_documents(version_id))
-                    return
-                if path == "/api/ast/document":
+                ast_symbol = re.fullmatch(r"/api/ast/symbols/([^/]+)/(relations|source)", path)
+                if path == "/api/ast/symbols" or ast_symbol:
                     params = parse_qs(parsed.query)
-                    self._json(200, ast.read_document(params.get("versionId", [""])[0], params.get("path", [""])[0]))
+                    reader = ast_reader_for(context, params)
+                    if not ast_symbol:
+                        payload = reader.find_symbol(params.get("query", [""])[0],
+                                                     limit=int(params.get("limit", ["20"])[0]))
+                    elif ast_symbol[2] == "relations":
+                        payload = reader.find_relations(
+                            unquote(ast_symbol[1]), relation_type=params.get("relationType", [None])[0],
+                            direction=params.get("direction", ["outgoing"])[0],
+                            limit=int(params.get("limit", ["20"])[0]))
+                    else:
+                        payload = reader.get_source(unquote(ast_symbol[1]), params.get("relationId", [None])[0])
+                    self._json(200, payload)
                     return
                 if path == "/api/evaluation-suites":
                     self._json(200, evaluations.list_suites())
@@ -655,7 +835,8 @@ def make_server(
                     from business_code_agent.knowledge.graph import KnowledgeGraphService
                     service = self._query_service(context)
                     params = parse_qs(parsed.query)
-                    self._json(200, KnowledgeGraphService(service.db).search(params.get("q", [""])[0], params.get("type", [""])[0]))
+                    graph = KnowledgeGraphService(service.db).search(params.get("q", [""])[0], params.get("type", [""])[0])
+                    self._json(200, {**graph, "projection": baselines_for(context, service.db).projection_status()})
                     return
                 if path == "/api/knowledge/entities":
                     from business_code_agent.knowledge.baseline import BaselineKnowledgeService
@@ -695,6 +876,12 @@ def make_server(
                     self._file(target)
                     return
                 self._json(404, {"error": "not found"})
+            except AstQueryError as exc:
+                status = {"missing": 404, "not_found": 404, "denied": 403,
+                          "stale": 409, "unavailable": 409}.get(exc.status, 400)
+                self._json(status, {"error": str(exc), "status": exc.status})
+            except FileNotFoundError:
+                self._json(404, {"error": "资料文件不存在"})
             except KeyError as exc:
                 self._json(404, {"error": str(exc)})
             except (ValueError, json.JSONDecodeError) as exc:

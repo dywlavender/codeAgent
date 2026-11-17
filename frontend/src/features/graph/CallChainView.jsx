@@ -104,7 +104,7 @@ export function CallChainView({ projectId }) {
   </div>;
 }
 
-function CallChainCanvas({ chain, selection, onSelect }) {
+export function CallChainCanvas({ chain, selection, onSelect, graphLabel = "接口调用链", typeLabels = TYPES }) {
   const layout = useMemo(() => callChainLayout(chain.nodes, chain.edges, chain.rootId), [chain]);
   const [view, setView] = useState({ x: 0, y: 0, w: layout.width, h: layout.height });
   const svg = useRef(null), drag = useRef(null);
@@ -142,7 +142,7 @@ function CallChainCanvas({ chain, selection, onSelect }) {
       <Button size="small" aria-label="缩小调用链" icon={<Minus size={16} />} onClick={() => zoom(1.25)} />
       <Button size="small" aria-label="适应画布" icon={<ArrowsOut size={16} />} onClick={fit}>适应</Button>
     </div>
-    <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} role="group" aria-label="接口调用链"
+    <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} role="group" aria-label={graphLabel}
       onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
       <defs><marker id={`${marker}-arrow`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
       {chain.edges.map((edge) => {
@@ -159,18 +159,19 @@ function CallChainCanvas({ chain, selection, onSelect }) {
       {chain.nodes.map((node) => {
         const p = layout.positions[node.id];
         const divider = node.label.lastIndexOf(".");
-        const owner = divider > 0 ? node.label.slice(0, divider) : node.label;
-        const method = divider > 0 ? node.label.slice(divider + 1) + "()" : "";
+        const owner = node.displayName ?? (divider > 0 ? node.label.slice(0, divider) : node.label);
+        const method = node.subtitle ?? (divider > 0 ? node.label.slice(divider + 1) + "()" : "");
+        const typeLabel = typeLabels[node.type] || node.type;
         const route = node.route || "";
         const routeBreak = route.lastIndexOf("/", 32);
         const cut = routeBreak > 8 ? routeBreak : 32;
         const routeLines = route.length > 32 ? [route.slice(0, cut), route.slice(cut)] : [route];
         return <g key={node.id} data-item="node" transform={`translate(${p.x} ${p.y})`}
           className={`call-chain-node ${node.type.toLowerCase()} ${node.state !== "current" ? "uncertain" : ""} ${selection?.id === node.id ? "selected" : ""}`}
-          tabIndex={0} role="button" aria-label={`${TYPES[node.type]} ${node.label}`}
+          tabIndex={0} role="button" aria-label={`${typeLabel} ${node.label}`}
           onClick={(e) => activate(e, { kind: "node", id: node.id })} onKeyDown={(e) => activate(e, { kind: "node", id: node.id })}>
           <rect width={CARD.width} height={CARD.height} rx="12" />
-          <text x="18" y="25" className="call-chain-node-type">{TYPES[node.type]}{node.state === "stale" ? " · 待更新" : node.state === "unavailable" ? " · 不可读取" : ""}</text>
+          <text x="18" y="25" className="call-chain-node-type">{typeLabel}{node.state === "stale" ? " · 待更新" : node.state === "unavailable" ? " · 不可读取" : ""}</text>
           <text x="18" y="53" className="call-chain-node-owner">{owner.length > 26 ? owner.slice(0, 25) + "…" : owner}</text>
           <text x="18" y="77" className="call-chain-node-method">{method.length > 30 ? method.slice(0, 29) + "…" : method}</text>
           {routeLines.map((line, i) => <text key={i} x="18" y={101 + i * 15} className="call-chain-node-route">{line.length > 32 ? line.slice(0, 31) + "…" : line}</text>)}

@@ -21,6 +21,7 @@ import { AstPage } from "./features/ast/AstPage.jsx";
 import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
 import { GraphPage } from "./features/graph/GraphPage.jsx";
 import { KnowledgeAdminPage } from "./features/knowledge-admin/KnowledgeAdminPage.jsx";
+import { SystemGuidesPage } from "./features/knowledge-admin/SystemGuidesPage.jsx";
 import { LibraryPage } from "./features/library/LibraryPage.jsx";
 import { SettingsPage } from "./features/settings/SettingsPage.jsx";
 
@@ -195,10 +196,13 @@ export default function App() {
           />
         )}
         {page !== "agent" && <AppTopbar page={page} toggleSidebar={() => setSidebarOpen((open) => !open)} />}
-        {page === "library" && <LibraryPage workspace={workspace} projectId={projects.projectId} />}
+        {page === "library" && <LibraryPage key={projects.projectId} projectId={projects.projectId}
+          onRequireUnlock={() => admin.setOpen(true)} />}
+        {page === "guides" && <SystemGuidesPage key={projects.projectId} projectId={projects.projectId} adminUnlocked={admin.unlocked}
+          onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "graph" && <GraphPage workspace={workspace} projectId={projects.projectId} />}
         {page === "evaluation" && <EvaluationPage projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
-        {page === "ast" && <AstPage projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
+        {page === "ast" && <AstPage key={projects.projectId} projectId={projects.projectId} onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "admin" && <KnowledgeAdminPage projectId={projects.projectId} adminUnlocked={admin.unlocked} onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "settings" && (
           <SettingsPage

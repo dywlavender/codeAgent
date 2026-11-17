@@ -5,14 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 from business_code_agent.platform.repositories import configured_repository_sources
+from business_code_agent.storage.connections import open_sqlite
 
 
 STAMP_CACHE_VERSION = 1
 STAMP_IGNORED_PARTS = {".git", "node_modules", "target", ".venv", "__pycache__", ".data"}
+_REQUIRED_TABLES = {"code_file", "code_symbol", "code_fact", "evidence"}
 
 
 def _read_json(path: Path, default):
@@ -106,13 +110,14 @@ def current_stamp(saved_stamp, repositories: list[tuple[str, Path]], cache_path=
 
 
 class AstMaterial:
-    STATUSES = {"missing", "generating", "available", "stale", "failed"}
+    STATUSES = {"missing", "generating", "available", "stale", "failed", "unsupported"}
 
     def __init__(self, *, project_config=None, data_root=None):
         self.project_config = Path(project_config).expanduser().resolve() if project_config else None
         config = _read_json(self.project_config, {}) if self.project_config else {}
         project = config.get("project") if isinstance(config, dict) else None
-        self.project_id = str(project.get("id") or "").strip() if isinstance(project, dict) else None
+        self.project_id = (str(project.get("id") or "").strip()
+                           if isinstance(project, dict) else "") or "default"
         if data_root:
             self.root = Path(data_root).expanduser().resolve()
         elif self.project_config:
@@ -134,7 +139,8 @@ class AstMaterial:
             return {**value, "status": value.get("status") or "missing"}
         version = self.version(current_id)
         if version is None:
-            return {**value, "status": "missing", "current": None}
+            return {**value, "status": "unsupported", "current": None,
+                    "error": "当前版本缺少可用的结构索引，请手动重新生成"}
         _, metadata, _ = version
         saved_stamp = metadata.get("sourceStamp")
         status = "stale" if saved_stamp and self._current_source_stamp(saved_stamp) != saved_stamp else "available"
@@ -163,8 +169,16 @@ class AstMaterial:
         if not version_id or not re.fullmatch(r"ast-[A-Za-z0-9_-]+", str(version_id)):
             return None
         version_id = str(version_id)
-        directory = self.versions_root / version_id / "documents"
-        metadata = _read_json(self.versions_root / version_id / "metadata.json", {})
-        if not directory.is_dir():
+        directory = self.versions_root / version_id
+        database = directory / "index.db"
+        metadata = _read_json(directory / "metadata.json", None)
+        if (not isinstance(metadata, dict) or metadata.get("versionId") != version_id
+                or metadata.get("projectId") != self.project_id
+                or not isinstance(metadata.get("sourceStamp"), dict) or not database.is_file()):
             return None
-        return version_id, metadata if isinstance(metadata, dict) else {}, directory
+        try:
+            with closing(open_sqlite(database, readonly=True)) as db:
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        except sqlite3.Error:
+            return None
+        return (version_id, metadata, database) if _REQUIRED_TABLES <= tables else None

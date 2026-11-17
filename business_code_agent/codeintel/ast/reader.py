@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path, PurePosixPath
 
 from business_code_agent.codeintel.analysis import CALLABLE_KINDS, RESOLVABLE_TYPE_KINDS, RESOLVED_EDGE_FACTS
@@ -12,12 +13,11 @@ from business_code_agent.storage.connections import open_sqlite
 
 from .material import AstMaterial
 
-_REQUIRED_TABLES = {"code_file", "code_symbol", "code_fact", "evidence"}
 _SYMBOL_COLUMNS = """s.id, s.name, s.kind, s.qualified_name, s.line_start, s.line_end,
                      c.path, c.repository_id"""
 _SYMBOLS = f"""SELECT {_SYMBOL_COLUMNS}
                FROM code_symbol s JOIN code_file c ON c.id=s.file_id"""
-_FACTS = f"""SELECT {_SYMBOL_COLUMNS}, f.fact_type, f.target,
+_FACTS = f"""SELECT {_SYMBOL_COLUMNS}, f.id AS relation_id, f.fact_type, f.target,
                     e.line_start AS fact_start, e.line_end AS fact_end
             FROM code_fact f JOIN code_symbol s ON s.id=f.symbol_id
             JOIN code_file c ON c.id=s.file_id
@@ -81,6 +81,33 @@ class AstReader:
         with self._open() as (db, allowed):
             symbol = self._location(self._symbol(db, allowed, symbol_id), allowed)
         return self._result(symbol=symbol, count=1)
+
+    def get_source(self, symbol_id: str, relation_id: str | None = None) -> dict:
+        with self._open() as (db, allowed):
+            row = self._symbol(db, allowed, symbol_id)
+            if relation_id is None:
+                location = self._location(row, allowed)
+            else:
+                kinds = (*RESOLVED_EDGE_FACTS, "CALL")
+                row = db.execute(
+                    f"{_FACTS} WHERE f.id=? AND f.symbol_id=? AND f.fact_type IN ({_marks(kinds)})",
+                    (_text(relation_id, "relationId"), row["id"], *kinds),
+                ).fetchone()
+                if row is None:
+                    raise AstQueryError("not_found", "未找到该符号的关系位置")
+                location = self._relation_location(row, allowed)["location"]
+            start = max(1, location["lineStart"] - 3)
+            end = min(start + 59, location["lineEnd"] + 3)
+            path = allowed[row["repository_id"]].root / PurePosixPath(row["path"])
+            try:
+                with path.open(encoding="utf-8", errors="replace") as stream:
+                    lines = list(islice(stream, start - 1, end))
+            except OSError as exc:
+                raise AstQueryError("unavailable", "此位置的源码暂不可读") from exc
+        text = "".join(lines)
+        return self._result(path=location["path"], lineStart=start, lineEnd=start + len(lines) - 1,
+                            focusLine=location["lineStart"], content=text[:16000],
+                            truncated=location["lineEnd"] > end or len(text) > 16000)
 
     def find_relations(self, symbol_id: str, relation_type: str | None = None,
                        direction: str = "outgoing", limit: int = 20) -> dict:
@@ -150,13 +177,10 @@ class AstReader:
             raise AstQueryError("unavailable", "本轮绑定的 AST 版本暂不可用")
         version = self.material.version(self.version_id)
         if version is None:
-            raise AstQueryError("missing", "找不到本轮绑定的 AST 版本")
-        _, metadata, documents = version
+            raise AstQueryError("missing", "此 AST 版本没有可用的结构索引，请手动重新生成")
+        _, metadata, database = version
         if metadata.get("projectId") != self.project_id or metadata.get("versionId") != self.version_id:
             raise AstQueryError("unavailable", "AST 版本或工程归属不匹配")
-        database = documents.parent / "index.db"
-        if not database.is_file():
-            raise AstQueryError("missing", "此 AST 版本没有结构索引，手动生成后可查询")
         stamp = metadata.get("sourceStamp")
         allowed, snapshot_ids = self._repository_scope(metadata)
         if verify_sources and self.material._current_source_stamp(stamp, write_cache=False) != stamp:
@@ -164,9 +188,6 @@ class AstReader:
         try:
             with closing(open_sqlite(database, readonly=True)) as db:
                 db.row_factory = sqlite3.Row
-                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if not _REQUIRED_TABLES <= tables:
-                    raise AstQueryError("unavailable", "此 AST 版本没有可用的结构索引")
                 indexed = {row[0] for row in db.execute("SELECT DISTINCT repository_id FROM code_file")}
                 if not indexed <= snapshot_ids:
                     raise AstQueryError("unavailable", "AST 索引的仓库标识与版本记录不一致")
@@ -219,7 +240,8 @@ class AstReader:
 
     def _relation_location(self, row, allowed) -> dict:
         source = self._location(row, allowed)
-        return {"relationType": row["fact_type"], "from": source, "targetName": row["target"],
+        return {"relationId": row["relation_id"], "relationType": row["fact_type"],
+                "from": source, "targetName": row["target"],
                 "location": {"path": source["path"], "lineStart": row["fact_start"],
                              "lineEnd": row["fact_end"]}}
 

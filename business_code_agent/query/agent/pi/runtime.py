@@ -168,7 +168,7 @@ class PiAgentRuntime:
                 event_callback(event)
 
         allowed_roots = tuple(source.directory for source in context.materials
-                              if source.available)
+                              if source.directory is not None)
         adapter = PiEventAdapter(emit, workspace=context.workspace,
                                  allowed_roots=allowed_roots,
                                  call_callback=call_callback)
@@ -182,7 +182,7 @@ class PiAgentRuntime:
             "CODEAGENT_PI_MOUNTS": json.dumps(
                 {str(source.path): str(Path(source.directory).resolve())
                  for source in context.materials
-                 if source.available and source.directory},
+                 if source.directory is not None},
                 ensure_ascii=False),
         }
         cancelled = False
@@ -398,19 +398,18 @@ class PiAgentRuntime:
             "requirements": "需求原文，说明业务目标",
             "business_context": "业务补充知识，解释术语、职责与业务约定",
             "code_map": "自动代码地图，只用于定位文件和符号",
-            "ast": "AST 结构资料，只用于定位，不证明实现",
             "system_guide": "系统代码导航，说明如何查找代码",
         }
         roots = "\n".join(
             f"- {source.path}/：{purposes.get(source.kind, source.kind)}"
-            for source in context.materials if source.available
+            for source in context.materials if source.directory is not None
         ) or "- 本轮没有可读资料"
         guidance = "\n".join(text for _, text in prepared.instructions if text)
         navigation = f"{context.system_guidance}\n\n" if context.system_guidance else ""
         mode_label = {
             "none": "无主干（源码与需求）",
             "backbone": "有主干（源码、需求与业务补充知识）",
-            "ast": "AST（源码、需求与结构资料）",
+            "ast": "AST（源码、需求与结构关系索引）",
             "combined": "组合资料（全部已授权资料）",
         }.get(mode or "", mode or "组合资料")
         return (

@@ -3,6 +3,7 @@ import { ArrowClockwise } from "@phosphor-icons/react";
 import { Alert, Button, Card, Empty, Flex, Input, Select, Skeleton, Space, Splitter, Tabs, Tag, Typography } from "antd";
 import { request } from "../../lib/api.js";
 import { BusinessContextEditor } from "./BusinessContextEditor.jsx";
+import { ProjectionNotice } from "./ProjectionNotice.jsx";
 
 const TYPES = [
   ["", "全部类型"], ["SYSTEM", "系统"], ["BUSINESS_TERM", "业务术语"],
@@ -14,26 +15,40 @@ const PARSERS = [
 ];
 
 export function KnowledgeAdminPage({ projectId, adminUnlocked, onRequireUnlock }) {
+  const [tab, setTab] = useState("documents");
+  const [projection, setProjection] = useState(null);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    request("/api/materials/projection", {}, controller.signal)
+      .then((data) => { if (!controller.signal.aborted) setProjection(data); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [revision, projectId]);
+  const updateProjection = () => setRevision((value) => value + 1);
+
   return (
     <div className="page-wrap">
       <Typography.Title level={4} style={{ margin: "0 auto" }}>业务补充知识维护</Typography.Title>
-      <Tabs key={projectId} style={{ margin: "0 auto" }} items={[
+      <Tabs key={projectId} activeKey={tab} onChange={setTab} style={{ margin: "0 auto" }} items={[
         {
           key: "documents",
           label: "业务文档",
-          children: <BusinessContextEditor adminUnlocked={adminUnlocked} onRequireUnlock={onRequireUnlock} />,
+          children: <><ProjectionNotice state={projection} onOpen={() => setTab("projection")} />
+            <BusinessContextEditor adminUnlocked={adminUnlocked} onRequireUnlock={onRequireUnlock} onSaved={updateProjection} /></>,
         },
         {
           key: "projection",
           label: "结构化视图",
-          children: <KnowledgeProjection onRequireUnlock={onRequireUnlock} />,
+          children: <><ProjectionNotice state={projection} />
+            <KnowledgeProjection onRequireUnlock={onRequireUnlock} onImported={updateProjection} /></>,
         },
       ]} />
     </div>
   );
 }
 
-function KnowledgeProjection({ onRequireUnlock }) {
+function KnowledgeProjection({ onRequireUnlock, onImported }) {
   const [items, setItems] = useState([]);
   const [relations, setRelations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -72,7 +87,7 @@ function KnowledgeProjection({ onRequireUnlock }) {
       });
       setSummary(result); await load();
     } catch (reason) { handleAdminError(reason); }
-    finally { setRunning(""); }
+    finally { setRunning(""); onImported?.(); }
   }
 
   function handleAdminError(reason) {

@@ -766,6 +766,7 @@ class QueryService:
             archive.workspace = workspace.path.resolve()
             archive.update_run(mode=effective_mode,
                                astVersionId=workspace.ast_version_id,
+                               astStatus=workspace.ast_status,
                                workspace=str(workspace.path),
                                materials=[{"label": label, "path": str(path)}
                                           for label, path in manifest.labelled_roots()])
@@ -791,6 +792,7 @@ class QueryService:
                 nonlocal execution, callback_sent
                 execution, session = prepared_config(active)
                 archive.update_run(execution=execution)
+                RunPreparation(manifest, active.statuses).require_tools()
                 self._apply_pi_run(conversation, run_id, effective_scope, effective_mode,
                                    workspace.ast_version_id, execution, session,
                                    runtime_name, workspace_id)
@@ -808,7 +810,6 @@ class QueryService:
                                                  workspace.ast_version_id, session, runtime_name)
             else:
                 session_id = bind_prepared(prepared)
-            RunPreparation(manifest, prepared.statuses).require_tools()
             ask_kwargs = {
                 "context": replace(context, session_id=session_id), "prepared": prepared,
                 "session_id": session_id,
@@ -993,7 +994,6 @@ class QueryService:
         code_map_source = None
         description = None
         ast_version_id = None
-        ast_source = None
         ast_status = None
         if mode in {"combined", "ast"}:
             from business_code_agent.codeintel.ast.material import AstMaterial
@@ -1007,13 +1007,10 @@ class QueryService:
             if not current and ast_status == "available":
                 ast_status = "missing"
             if not current and mode == "ast":
-                raise ValueError("AST 资料尚未生成或已经待更新，请先在 AST 管理页手动生成")
+                raise WorkspaceError(ast_state.get("error") or
+                                     "AST 索引尚未生成或已待更新，请先在 AST 管理页手动生成")
             if current:
-                ast_version_id, metadata, source = current
-                if mode == "combined":
-                    ast_source = source
-                else:
-                    code_map_source = source
+                ast_version_id, metadata, _ = current
                 description = (
                     f"{MODE_DESCRIPTIONS[mode]} AST 生成时间：{metadata.get('generatedAt') or '未知'}。"
                 )
@@ -1027,14 +1024,13 @@ class QueryService:
         return {
             "business_context_source": business_context_source,
             "code_map_source": code_map_source,
-            "ast_source": ast_source,
             "ast_status": ast_status,
             "mode_description": description,
             "ast_version_id": ast_version_id,
         }
 
     def _workspace_for_mode(self, mode: str) -> Workspace:
-        return self.workspace_manager.ensure(mode=mode, **self._mode_selection(mode))
+        return self.workspace_manager.ensure(mode=mode)
 
     def _normalize_scope(self, scope: Any) -> dict[str, list[str]] | None:
         """校验并展开查询范围；返回 None 表示不限定（全部资料）。

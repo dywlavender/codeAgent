@@ -33,6 +33,8 @@ knowledge/generated-code-map/
 
 保存后的原文直接用于下一轮包含业务补充知识的问答。资料变化会更新 Pi 会话。需要更新知识图谱或实体关系展示时，在「结构化视图」执行导入。Markdown 是业务知识的维护源。
 
+资料总览和业务关系图会显示结构化视图的导入状态。原文变化后，保存结果与上次导入内容不同时显示待更新，可继续查看已有投影。刷新投影时选择 Claude Code 或 Markdown 规则解析。
+
 管理员接口使用 `/api/projects/<projectId>/knowledge/context/files` 列出文档，并在路径后附编码后的 Markdown 相对路径读取或保存。保存请求包含 `content` 和打开时的 `previousContent`，新建文件时后者为 `null`。原文变化返回 HTTP 409。
 
 ## AI 修订建议

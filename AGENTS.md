@@ -4,9 +4,10 @@
 
 - 在线问答默认使用 `PiAgentRuntime`，正常 API 入口固定进入 Pi；`BUSINESS_CODE_AGENT_PROFILE`／`BUSINESS_CODE_AGENT_RUNTIME` 不能再把在线问答切回 LangChain/Direct/Claude。旧 Runtime 只允许评测代码显式构造并注入。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`。Pi 负责模型、工具决策与调度、上下文压缩、会话和 Agent Loop；CodeAgent 只负责授权、RunContext、Trace、取消、持久化和业务问答增强。
 - Pi 基础工具为 `read`、`grep`、`find`、`ls`、`codemode`，不开放 `bash`／`edit`／`write`。工作区仓库是软链接，Pi 自带搜索不跟随链接，因此加载只读扩展 `query/agent/pi/extension/codeagent_search.js`；扩展以授权真实根目录为搜索起点，不使用全局 `--follow`，结果路径映射回工作区，仓库内部软链接不会扩大授权范围。工作区 cwd 不是 OS 安全边界，不能把扩展当作完整沙箱。
-- AST 由 `codeintel/ast/` 管理，用户手动生成后才能用于当前源码导航。Pi 在可用版本上按本轮仓库范围注册 `find_code_symbol`、`get_code_symbol`、`find_code_relations`。启动时确认 AST 扩展已加载，失败时记录为 `unavailable` 并使用文件工具继续。用 `read` 核实具体实现。全工程 Code Map 和 AST Markdown 只挂载到全仓问答，历史 AST 页面继续可读。见[阶段 3](docs/spec/agent-migration-plan.md#阶段-3ast-与结构导航)。
+- AST 由 `codeintel/ast/` 管理，手动生成版本化 `index.db` 和元数据。Pi 的三项结构工具与关系图共用 `AstReader`，固定工程、版本和仓库范围。源码变化后停止查询旧索引。显式 `ast` 要求工具可用，`combined` 可降级为文件工具。全工程 Code Map 仍作为独立兼容资料供全仓问答。见[阶段 6](docs/spec/agent-migration-plan.md#阶段-6资料中心与代码结构可视化)。
 - Pi 的系统代码导航取自工程配置的应用位置和工程数据目录中的可选 System Guide。显式系统选择限定导航，直接选择仓库时加入其关联应用。共仓的源码权限仍以仓库为单位。只复制本轮文档，文档内容或应用映射变化时更换 Pi 会话。导航只用于定位，见[阶段 4](docs/spec/agent-migration-plan.md#阶段-4system-guide)。
 - Business Context 通过工程知识页维护 Markdown。建议使用默认 Pi 模型进行一次无工具的定向检查，管理员确认后走原文保存接口。下一轮问答按资料模式读取发布的原文，结构化视图仍显式导入。见[阶段 5](docs/spec/agent-migration-plan.md#阶段-5business-context-维护)。
+- 系统导航草稿由现有 Pi 问答在授权仓库内调查后返回，要求有目标应用的源码 Read 记录。文档发布和生效预览使用同一套工程映射。资料中心的状态按当前工程读取，运行时实际装配与交付情况以本轮 Trace 为准。
 - Pi 会话文件限定在工程数据目录 `pi-sessions/`；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档和需求使用内容指纹，源码仓库使用文件元数据修订号，资料变化会隔离旧会话；旧 LangChain 会话不直接复用。Pi 失败不回退 LangChain。配置见 `.env.example` 的 `BUSINESS_CODE_PI_*`。
 - 在线模型选择来自 Pi 自身的 `get_available_models`（`GET /api/pi/models`），只返回安全展示字段；前端按工程保存选择，请求携带 `model`，留空使用 `BUSINESS_CODE_PI_MODEL`。2026-11-16 起问答默认模型为 `deepseek/gpt-6-luna`；换模型后必须新开评测批次，不能与 glm-5.3-flash 等旧批次混跑或续跑。模型进入会话身份，切换模型会重建 Pi 会话。
 - Pi 最终答案的引用会按本轮实际交付的 `read` 原文核验路径与行区间，记录在 usage/Trace；`semanticProof=false`，核验通过不等于语义正确。空范围展开后没有仓库时，必须在调用模型前拒绝，不能回退为全部仓库。

@@ -140,9 +140,16 @@ class KnowledgeAdminApiTest(unittest.TestCase):
                                      _json_request(files, token=token, method="GET"))
                     original = _json_request(document, token=token, method="GET")
                     self.assertEqual("# alpha\r\n", original["content"])
+                    projection = f"{base}/alpha/materials/projection"
+                    self.assertEqual("not_imported", _json_request(projection, method="GET")["status"])
+                    _json_request(f"{base}/alpha/knowledge/baselines/refresh", {"parser": "markdown"}, token)
+                    self.assertEqual("synced", _json_request(projection, method="GET")["status"])
                     edited = {"previousContent": original["content"], "content": "# 新约定\n"}
                     self.assertEqual(edited["content"], _json_request(
                         document, edited, token, method="PUT")["content"])
+                    self.assertEqual("stale", _json_request(projection, method="GET")["status"])
+                    self.assertEqual("not_imported", _json_request(
+                        f"{base}/beta/materials/projection", method="GET")["status"])
                     with self.assertRaises(HTTPError) as stale:
                         _json_request(document, edited, token, method="PUT")
                     self.assertEqual(409, stale.exception.code)
@@ -205,6 +212,47 @@ class KnowledgeAdminApiTest(unittest.TestCase):
                     self.assertEqual("needs_confirmation", result["action"])
                     self.assertIsNone(result["proposalContent"])
                     self.assertEqual(approved, document.read_text())
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+    def test_system_guide_draft_requires_source_read_and_explicit_publish(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = root / "project.json"
+            config.write_text(json.dumps({
+                "project": {"id": "guides"},
+                "systems": [{"id": "core"}, {"id": "ops"}],
+                "repositories": [{"id": "loan", "localPath": "loan"}],
+                "applications": [{"id": "api", "systemId": "core", "repositoryId": "loan", "sourceRoot": "src"},
+                                 {"id": "job", "systemId": "ops", "repositoryId": "loan", "sourceRoot": "job"}],
+            }))
+            registry = ProjectRegistry(root / "platform")
+            registry.register(config)
+            server = make_server(str(root / "legacy.db"), port=0, project_registry=registry)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}/api/projects/guides/knowledge/system-guides"
+            try:
+                target = {"systemId": "core", "applicationId": "api"}
+                answer = "# 核心应用导航\n\n## 导航摘要\n\n在本应用中定位接口。"
+                reply = {"status": "completed", "answer": answer, "runId": "draft",
+                         "usage": {"verification": {"readFiles": ["repos/loan/README.md", "repos/loan/job/Job.java"]}}}
+                with patch("business_code_agent.api.server.QueryService.query", return_value=reply) as query:
+                    with self.assertRaises(HTTPError) as insufficient:
+                        _json_request(base + "/draft", target)
+                    self.assertEqual(422, insufficient.exception.code)
+                    insufficient.exception.close()
+                    reply["usage"]["verification"]["readFiles"].append("repos/loan/src/Api.java")
+                    result = _json_request(base + "/draft", target)
+                    self.assertEqual(["repos/loan/src/Api.java"], result["sourceFiles"])
+                    self.assertEqual({"repositoryIds": ["loan"]}, query.call_args.kwargs["scope"])
+                file = base + "/file?systemId=core&applicationId=api"
+                self.assertIsNone(_json_request(file, method="GET")["content"])
+                _json_request(base + "/file", {**target, "content": result["content"], "previousContent": None}, method="PUT")
+                self.assertIn("在本应用中定位接口", _json_request(base + "/preview?systemId=core", method="GET")["guidance"])
+                self.assertNotIn("在本应用中定位接口", _json_request(base + "/preview?systemId=ops", method="GET")["guidance"])
+                self.assertIn("在本应用中定位接口", _json_request(base + "/preview?systemId=ops&repositoryId=loan",
+                                                                      method="GET")["guidance"])
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 

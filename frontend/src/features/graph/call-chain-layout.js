@@ -17,21 +17,22 @@ export function callChainLayout(nodes, edges, rootId) {
   }
   const columns = new Map();
   for (const node of nodes) {
-    const column = levels.get(node.id) ?? 0;
+    const column = node.column ?? levels.get(node.id) ?? 0;
     if (!columns.has(column)) columns.set(column, []);
     columns.get(column).push(node);
   }
   const rows = Math.max(1, ...[...columns.values()].map((items) => items.length));
   const height = Math.max(430, rows * (CARD.height + 64) + 100);
   const positions = {};
+  const leftmost = Math.min(0, ...columns.keys());
   for (const [column, items] of columns) {
     items.sort((a, b) => a.label.localeCompare(b.label));
     items.forEach((node, row) => {
-      positions[node.id] = { x: 48 + column * (CARD.width + 92),
+      positions[node.id] = { x: 48 + (column - leftmost) * (CARD.width + 92),
         y: height / 2 - (items.length * (CARD.height + 64) - 64) / 2 + row * (CARD.height + 64) };
     });
   }
-  return { positions, width: Math.max(600, 96 + (Math.max(0, ...columns.keys()) + 1) * (CARD.width + 92) - 92), height };
+  return { positions, width: Math.max(600, 96 + (Math.max(0, ...columns.keys()) - leftmost + 1) * (CARD.width + 92) - 92), height };
 }
 
 export function edgeCurve(a, b) {

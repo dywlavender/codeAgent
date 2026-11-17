@@ -26,17 +26,6 @@ from business_code_agent.query.workspace import _safe_name
 FAKE_PI = Path(__file__).parent / "fixtures" / "fake_pi_rpc.py"
 
 
-class FakeAst:
-    def __init__(self, source: Path):
-        self.source = source
-
-    def status(self):
-        return {"status": "available", "currentVersionId": "ast-v1"}
-
-    def version(self, version_id):
-        return version_id, {"generatedAt": "2026-11-15T00:00:00Z"}, self.source
-
-
 class PiQueryServiceTest(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -74,15 +63,14 @@ class PiQueryServiceTest(unittest.TestCase):
         self.db = connect(self.db_path)
         self.addCleanup(self.db.close)
 
-    def service(self, scenario="normal", *, runtime=None, ast=False):
+    def service(self, scenario="normal", *, runtime=None):
         runtime = runtime or PiAgentRuntime(
             profile=PI, environment={"FAKE_PI_SCENARIO": scenario},
             command=[sys.executable, str(FAKE_PI)],
             session_root=self.root / "pi-sessions")
         return QueryService(
             self.db, db_path=self.db_path, project_config=self.config,
-            project_id="pi-service", runtime=runtime,
-            ast_material_factory=(lambda: FakeAst(self.root / "ast")) if ast else None)
+            project_id="pi-service", runtime=runtime)
 
     def test_query_persists_run_trace_and_pi_session(self):
         service = self.service()
@@ -234,26 +222,22 @@ class PiQueryServiceTest(unittest.TestCase):
         self.assertFalse((root / "repos" / "a").exists())
         self.assertTrue((root / "repos" / "b").is_dir())
 
-    def test_combined_and_ast_modes_mount_the_selected_materials(self):
-        service = self.service(ast=True)
+    def test_combined_and_ast_modes_use_a_structured_version_without_markdown(self):
+        state = self.generate_ast()
+        service = self.service()
         combined = service.query("combined", mode="combined")
-        kinds = {source["kind"] for source in combined["execution"]["materials"]}
         self.assertEqual({"source", "requirements", "business_context", "code_map", "ast"},
-                         kinds)
-        statuses = {tool["capability"]: tool for tool in combined["execution"]["tools"]}
-        self.assertEqual("missing", statuses["ast"]["status"])
-        self.assertEqual("ready", statuses["code_map"]["status"])
-        self.assertEqual("ast-v1", combined["astVersionId"])
-
+                         {source["kind"] for source in combined["execution"]["materials"]})
+        self.assertEqual(state["currentVersionId"], combined["astVersionId"])
         ast = service.query("ast", mode="ast")
-        ast_kinds = {source["kind"] for source in ast["execution"]["materials"]}
-        self.assertEqual({"source", "requirements", "ast"}, ast_kinds)
+        self.assertEqual({"source", "requirements", "ast"},
+                         {source["kind"] for source in ast["execution"]["materials"]})
         statuses = {tool["capability"]: tool for tool in ast["execution"]["tools"]}
-        self.assertEqual("missing", statuses["ast"]["status"])
+        self.assertEqual(("required", "ready"), (statuses["ast"]["policy"], statuses["ast"]["status"]))
         self.assertEqual("disabled", statuses["code_map"]["status"])
         root = service.workspace_manager.root / "pi" / _safe_name(ast["conversationId"])
-        self.assertEqual((self.root / "ast").resolve(),
-                         (root / "knowledge" / "generated-code-map").resolve())
+        self.assertFalse((root / "knowledge" / "generated-code-map").exists())
+        self.assertFalse((root / "knowledge" / "ast").exists())
 
     def generate_ast(self):
         ast = AstService(project_config=self.config)
@@ -278,8 +262,8 @@ class PiQueryServiceTest(unittest.TestCase):
             self.assertEqual("ready", ast_tool(ready)["status"])
             self.assertEqual(state["currentVersionId"], ast_tool(ready)["version"])
             self.assertIn("find_code_symbol", ready["execution"]["settings"]["tools"])
-            self.assertFalse(next(item["available"] for item in ready["execution"]["materials"]
-                                  if item["kind"] == "ast"))
+            material = next(item for item in ready["execution"]["materials"] if item["kind"] == "ast")
+            self.assertEqual(("tools", True, None), (material["delivery"], material["available"], material["directory"]))
             self.assertFalse(next(item["available"] for item in ready["execution"]["materials"]
                                   if item["kind"] == "code_map"))
             disabled = service.query("只看源码", mode="none", scope=scope)
@@ -293,6 +277,16 @@ class PiQueryServiceTest(unittest.TestCase):
             self.assertEqual([], ast_tool(stale)["names"])
             self.assertIn("read", stale["execution"]["settings"]["tools"])
             self.assertEqual("completed", stale["status"])
+            self.assertEqual("stale", service.get_trace(stale["runId"])["run"]["astStatus"])
+            self.assertEqual(state["currentVersionId"], service.get_run(ready["runId"])["astVersionId"])
+        new_state = self.generate_ast()
+        updated = service.query("查更新后的结构", mode="ast", scope=scope,
+                                conversation_id=ready["conversationId"])
+        self.assertEqual(new_state["currentVersionId"], updated["astVersionId"])
+        self.assertNotEqual(state["currentVersionId"], updated["astVersionId"])
+        self.assertNotEqual(ready["sessionId"], updated["sessionId"])
+        self.assertEqual(state["currentVersionId"], service.get_run(ready["runId"])["astVersionId"])
+
 
     def test_broken_ast_extension_falls_back_before_prompt_and_updates_run_metadata(self):
         state = self.generate_ast()

@@ -52,6 +52,7 @@ class AstReaderTest(unittest.TestCase):
         self.assertEqual("available", state["status"], state)
         self.version = state["currentVersionId"]
         self.version_root = self.material.versions_root / self.version
+        self.assertEqual({"index.db", "metadata.json"}, {p.name for p in self.version_root.iterdir()})
         self.repos = (AstRepository("z-loan", loan, "repos/z-loan"),
                       AstRepository("a-other", other, "repos/a-other"))
         self.reader = AstReader(self.material, self.version, self.repos)
@@ -92,6 +93,9 @@ class AstReaderTest(unittest.TestCase):
         ])
         self.assertTrue(any(edge["targetName"].removesuffix("()") == "client.send" and edge["status"] == "raw"
                             for edge in calls["rawCalls"]))
+        preview = self.reader.get_source(submit["symbolId"], calls["relations"][0]["relationId"])
+        self.assertEqual(("repos/z-loan/Loan.java", 5), (preview["path"], preview["focusLine"]))
+        self.assertIn("public void submit()", preview["content"])
         approve = self.match("demo.Loan.approve")
         incoming = self.reader.find_relations(approve["symbolId"], "CALLS", "incoming")
         self.assertEqual([submit["symbolId"]], [edge["from"]["symbolId"] for edge in incoming["relations"]])
@@ -118,16 +122,20 @@ class AstReaderTest(unittest.TestCase):
         with self.assertRaises(AstQueryError) as stale:
             self.reader.find_symbol("approve")
         self.assertEqual("stale", stale.exception.status)
-        self.assertTrue(self.material.list_documents(self.version)["items"])
         self.assertEqual(stamp, database.stat().st_mtime_ns)
 
     def test_legacy_version_mapping_uses_recorded_order_and_requires_an_index(self):
         path = self.version_root / "metadata.json"
         metadata = json.loads(path.read_text(encoding="utf-8"))
         metadata.pop("repositoryMap")
+        statistics = metadata.pop("statistics")
         path.write_text(json.dumps(metadata), encoding="utf-8")
+        self.assertEqual(statistics, self.material.status()["current"]["statistics"])
         self.assertEqual("repos/z-loan/Loan.java", self.match("approve")["path"])
+        (self.version_root / "documents").mkdir()
+        (self.version_root / "documents" / "index.md").write_text("历史资料")
         (self.version_root / "index.db").unlink()
+        self.assertEqual("unsupported", self.material.status()["status"])
         with self.assertRaises(AstQueryError) as missing:
             self.reader.check()
         self.assertEqual("missing", missing.exception.status)

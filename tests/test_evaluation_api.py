@@ -84,9 +84,9 @@ class EvaluationApiTest(unittest.TestCase):
                                  in ("completed", "cancelled", "failed", "interrupted")))
         state = self.get(base, f"/api/evaluations/{eval_id}")
         self.assertEqual("completed", state["status"])
-        self.assertEqual(6, state["progress"]["answers"]["total"])
+        self.assertEqual(4, state["progress"]["answers"]["total"])
         self.assertTrue(state["summaries"]["model"]["aggregates"]["optional"]["score"] is not None)
-        self.assertTrue(state["summaries"]["model"]["aggregates"]["ast"]["score"] is not None)
+        self.assertNotIn("ast", state["summaries"]["model"]["aggregates"])
 
         detail = self.get(base, f"/api/evaluations/{eval_id}/cases/flow/repeats/1")
         answer_id = detail["runs"]["code_only"]["answerId"]

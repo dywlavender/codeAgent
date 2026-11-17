@@ -357,22 +357,19 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
                          (backbone.path / "knowledge" / "business-context").resolve())
         ast = self.manager.prepare_pi(workspace_key="ast", mode="ast",
                                       code_map_source=self.ast)
-        self.assertEqual(self.ast.resolve(),
-                         (ast.path / "knowledge" / "generated-code-map").resolve())
+        self.assertFalse((ast.path / "knowledge" / "generated-code-map").exists())
         self.assertFalse((ast.path / "knowledge" / "business-context").exists())
         combined = self.manager.prepare_pi(
             workspace_key="combined", mode="combined",
-            business_context_source=self.business, code_map_source=self.code_map,
-            ast_source=self.ast)
+            business_context_source=self.business, code_map_source=self.code_map)
         self.assertEqual(self.business.resolve(),
                          (combined.path / "knowledge" / "business-context").resolve())
         self.assertEqual(self.code_map.resolve(),
                          (combined.path / "knowledge" / "generated-code-map").resolve())
-        self.assertEqual(self.ast.resolve(),
-                         (combined.path / "knowledge" / "ast").resolve())
+        (combined.path / "knowledge" / "ast").symlink_to(self.ast, target_is_directory=True)
         scoped = self.manager.prepare_pi(
             workspace_key="combined", mode="combined", repository_ids=["a"],
-            code_map_source=self.code_map, ast_source=self.ast)
+            code_map_source=self.code_map)
         self.assertEqual(combined.path, scoped.path)
         self.assertFalse((scoped.path / "knowledge" / "generated-code-map").exists())
         self.assertFalse((scoped.path / "knowledge" / "ast").exists())
@@ -386,7 +383,7 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         requirements = MaterialSource("requirements", "需求原文", "requirements", None, "missing")
         business = MaterialSource("business_context", "业务补充知识", "knowledge/business-context",
                                   self.business, "available")
-        ast = MaterialSource("ast", "AST 结构资料", "knowledge/ast", self.ast, "available")
+        ast = MaterialSource("ast", "AST 关系索引", None, None, "missing")
         code_map = MaterialSource("code_map", "自动代码地图", "knowledge/generated-code-map",
                                   self.code_map, "available")
         context = RunContext(run_id="RUN", project=project, profile=PI,

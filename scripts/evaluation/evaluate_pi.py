@@ -1019,7 +1019,7 @@ def main() -> int:
     run.add_argument("--suite", type=Path, action="append", required=True,
                      help="题库文件，可重复；多个题库必须指向同一 projectConfig")
     run.add_argument("--case", action="append", help="案例 ID，可重复；省略表示全部")
-    run.add_argument("--modes", default="none", help="逗号分隔，如 none,backbone")
+    run.add_argument("--modes", default="none", help="逗号分隔，如 none,backbone,ast")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--model", default=os.environ.get("BUSINESS_CODE_PI_MODEL") or None)
     run.add_argument("--project-config", type=Path)

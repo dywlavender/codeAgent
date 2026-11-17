@@ -21,7 +21,6 @@ from pathlib import Path
 from statistics import mean
 
 from business_code_agent.query.workspace import WorkspaceManager
-from .ast_docs import generate_ast_documents  # compatibility export; web batches receive a manual AST version
 from .harness import (EvaluationRuntime, judge_answer, judge_workspace_for, metadata_capture,
                       run_answer_job, write_json)
 from .scoring import human_review_score, model_review_score
@@ -44,11 +43,11 @@ ARM_DESCRIPTIONS_ABCDE = {
 }
 ARMS_DIAGNOSTIC = ("code_only", "overview", "optional")
 ARM_DESCRIPTIONS_DIAGNOSTIC = {**ARM_DESCRIPTIONS_AB, "overview": "同一资料 + 仅项目总览（不提供流程主干）"}
-COMPARISONS = {"ab": ARM_DESCRIPTIONS_AB, "abc": ARM_DESCRIPTIONS_ABC,
+COMPARISONS = {"ab": ARM_DESCRIPTIONS_AB,
                "abcde": ARM_DESCRIPTIONS_ABCDE,
                "diagnostic": {arm: ARM_DESCRIPTIONS_DIAGNOSTIC[arm] for arm in ARMS_DIAGNOSTIC}}
-COMPARISONS["diagnostic_ast"] = {**COMPARISONS["diagnostic"], "ast": AST_ARM_DESCRIPTION,
-    "overview_ast": "同一资料 + 相同业务总览 + AST结构地图（不提供人工流程文档）"}
+LEGACY_AST_ARMS = {"ast", "overview_ast"}
+AST_EVALUATION_INSTRUCTIONS = "AST 对照使用 scripts/evaluation/evaluate_pi.py 的 ast 模式，历史文档批次保留供查看。"
 COMPARISON_NOTES = {
     "diagnostic_ast": "五组诊断：独立AST与无主干比较；总览+AST与仅总览比较，隔离结构地图的增量作用。",
     "diagnostic": "无主干、仅总览、完整主干；分别比较定位收益与流程文档的额外收益。",
@@ -110,8 +109,8 @@ def baseline_documents(baseline_root):
             for path in sorted(baseline_root.rglob("*.md"))}
 
 
-def _arm_documents(arm, documents, inputs, ast_documents=None):
-    """Per-arm reference documents: none, the human baseline, or the AST map."""
+def _arm_documents(arm, documents, inputs):
+    """Select the business documents for a file-based comparison arm."""
     if arm in {"code_only", "raw"}:
         return {}
     if arm == "overview":
@@ -121,16 +120,6 @@ def _arm_documents(arm, documents, inputs, ast_documents=None):
                 "\n\n## 本轮资料范围\n\n本轮提供业务总览，未提供总览中链接的人工流程主干文件；"
                 "这些链接仅保留项目认知背景，不是本轮可读取入口，请从授权源码确认流程。"
                 "若本轮还提供机械结构资料，其入口会单独列在下方。\n"}
-    if arm in ("ast", "overview_ast"):
-        if ast_documents is None:
-            raise ValueError("AST 实验必须引用已经手动生成的资料版本")
-        generated = ast_documents
-        if arm == "ast":
-            return generated
-        overview = _arm_documents("overview", documents, inputs)["project-overview.md"]
-        return {**{key: value for key, value in generated.items() if key != "project-overview.md"},
-                "ast-overview.md": generated["project-overview.md"],
-                "project-overview.md": overview + "\n\n## 可选代码结构资料\n\n[AST结构导航](ast-overview.md)：仅含机械提取的代码结构，可按需读取，实际行为以源码为准。\n"}
     return documents
 
 
@@ -154,13 +143,14 @@ def plan_jobs(cases, *, arms, repeats, case_ids=None, start_repeat=1, blocks=Non
     return jobs
 
 
-def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=ARMS_ABC, arm_descriptions=None,
-                 variants=None, comparison="abc", repeats=2, case_ids=None, judge=True, workers=2,
+def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=ARMS_AB, arm_descriptions=None,
+                 variants=None, comparison="ab", repeats=2, case_ids=None, judge=True, workers=2,
                  start_repeat=1, blocks=None, limit_jobs=None, suite_ref=None, timeout_seconds=240,
-                 ast_version_id=None, ast_generation_seconds=None, ast_generator_version=None,
                  business_context_root=None,
                  code_map_root=None, baseline_root=None, requirements_root=None):
     """Create the output directory, freeze sources/rubric and write ``protocol.json``."""
+    if LEGACY_AST_ARMS.intersection(arms):
+        raise ValueError(AST_EVALUATION_INSTRUCTIONS)
     arm_descriptions = arm_descriptions or {arm: ARM_DESCRIPTIONS_ABC.get(arm, arm) for arm in arms}
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
@@ -177,10 +167,8 @@ def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=
                         ignore=shutil.ignore_patterns(".git", "node_modules", "target", ".venv", "__pycache__"))
     if resolved_requirements_root.is_dir():
         shutil.copytree(resolved_requirements_root, inputs / "requirements")
-    if variants is None and any(a in arms for a in ("ast", "overview_ast")):
-        raise ValueError("AST 实验必须引用已经手动生成的资料版本，不能在实验启动时生成")
     variants = variants if variants is not None else {
-        arm: _arm_documents(arm, documents, inputs, None) for arm in arms}
+        arm: _arm_documents(arm, documents, inputs) for arm in arms}
     for arm, files in variants.items():
         for name, content in files.items():
             target = inputs / "baselines" / arm / name
@@ -197,9 +185,7 @@ def freeze_batch(output, *, suite, cases, project_config, project_id=None, arms=
         "suite": suite,
         "suiteRef": suite_ref,
         "sourceRepositories": [{"id": rid, "snapshot": name} for rid, name in repository_names],
-        "referencePreparation": {"astGenerationSeconds": ast_generation_seconds,
-            "astGenerationInBatch": False, "astVersionId": ast_version_id,
-            "astGeneratorVersion": ast_generator_version,
+        "referencePreparation": {"astGenerationInBatch": False,
             "arms": {arm: {"documents": len(files), "characters": sum(len(v) for v in files.values()),
                             "overviewCharacters": len(files.get("project-overview.md", ""))} for arm, files in variants.items()}},
         "judgeEnabled": judge,
@@ -234,6 +220,8 @@ def run_batch(output, *, workers=None, judge=None, runtime_factory=None, cancel_
     """Execute every planned job; keep completed results on failure or cancel."""
     output = Path(output)
     protocol = load_protocol(output)
+    if any(job["arm"] in LEGACY_AST_ARMS for job in protocol["jobs"]):
+        raise ValueError(AST_EVALUATION_INSTRUCTIONS)
     cases = {case["id"]: case for case in protocol["cases"]}
     inputs = output / "inputs"
     repository_names = [(item["id"], item["snapshot"]) for item in protocol["sourceRepositories"]]

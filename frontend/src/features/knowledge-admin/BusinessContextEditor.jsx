@@ -7,7 +7,7 @@ const FILES = "/api/knowledge/context/files";
 const filePath = (name) => `${FILES}/${encodeURIComponent(name)}`;
 const isAdminError = (error) => /credential|凭证|401/i.test(error.message);
 
-export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
+export function BusinessContextEditor({ adminUnlocked, onRequireUnlock, onSaved }) {
   const [files, setFiles] = useState(null);
   const [document, setDocument] = useState(null);
   const [name, setName] = useState("");
@@ -95,6 +95,7 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
       setFiles((folder) => ({ ...folder, items: [...new Set([...folder.items, result.name])].sort() }));
       showDocument(result);
       setSaved(true);
+      onSaved?.();
     } catch (reason) {
       if (checking) checkAdminAccess(reason);
       else showError(reason);
@@ -128,12 +129,16 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock }) {
           <Flex vertical gap={10}>
             {creating && <Input aria-label="文件名" placeholder="例如 terminology.md"
               value={name} disabled={Boolean(pending)} onChange={(event) => setName(event.target.value)} />}
-            <label htmlFor="business-context-markdown">
-              <Typography.Text strong>Markdown 原文</Typography.Text>
-            </label>
+            <Flex justify="space-between" align="center" wrap gap={4}>
+              <label htmlFor="business-context-markdown"><Typography.Text strong>Markdown 原文</Typography.Text></label>
+              {document.modifiedAt && <Typography.Text type="secondary">
+                保存于 {new Date(document.modifiedAt).toLocaleString("zh-CN")}
+              </Typography.Text>}
+            </Flex>
             <Input.TextArea id="business-context-markdown" value={draft}
               readOnly={!files.editable || Boolean(pending)} rows={16}
               style={{ fontFamily: "var(--font-code)" }}
+              placeholder="写明适用系统、业务约定和资料来源"
               onChange={(event) => { setDraft(event.target.value); setSaved(false); }} />
             {files.editable && <Flex justify="end" gap={8} wrap>
               {!creating && <Button onClick={() => setChecking(true)}

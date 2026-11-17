@@ -65,6 +65,7 @@ class BaselineKnowledgeService:
     def __init__(self, db, *, project_config: str | Path | None = None,
                  business_context_root: str | Path | None = None,
                  baseline_root: str | Path | None = None,
+                 projection_state: Path | None = None,
                  extractor: BaselineExtractor | None = None):
         self.db = db
         self.project_config = Path(project_config).resolve() if project_config else None
@@ -75,12 +76,57 @@ class BaselineKnowledgeService:
         ).expanduser().resolve() if (business_context_root or baseline_root) else None
         self.config = self._load_config()
         self._extractor = extractor
+        self.projection_state = projection_state
+
+    def _document_paths(self) -> list[Path]:
+        root = self.knowledge_root()
+        return sorted(path for path in root.rglob("*.md") if path.is_file() and path.resolve() == path)
+
+    def projection_status(self) -> dict:
+        rows = self.db.execute("SELECT path,content,status,imported_at FROM business_baseline_source").fetchall()
+        imported = {row["path"]: row["content"] for row in rows if row["status"] == "ACTIVE"}
+        documents = self._document_paths()
+        paths = {str(path) for path in documents}
+        synced = paths == imported.keys()
+        if synced:
+            try:
+                synced = all(path.read_text(encoding="utf-8-sig") == imported[str(path)] for path in documents)
+            except (OSError, UnicodeError):
+                synced = False
+        last_import = max((row["imported_at"] for row in rows), default=None)
+        status = ("empty" if not documents and not imported else "not_imported" if not last_import
+                  else "synced" if synced else "stale")
+        try:
+            last = json.loads(self.projection_state.read_text(encoding="utf-8")) if self.projection_state else {}
+        except (OSError, ValueError):
+            last = {}
+        if not isinstance(last, dict) or last.get("updatedAt", "") < (last_import or ""):
+            last = {}
+        if last.get("error"):
+            status = "failed"
+        return {"status": status, "documentCount": len(documents), "importedDocumentCount": len(imported),
+                "importedAt": last_import, "parser": last.get("parser"),
+                "error": last.get("error") if status == "failed" else None}
+
+    def record_projection(self, parser: str, *, error: str | None = None) -> None:
+        if self.projection_state is None:
+            return
+        path = self.projection_state
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False)
+        temporary = Path(stream.name)
+        try:
+            with stream:
+                json.dump({"parser": parser, "updatedAt": _now(), "error": error}, stream, ensure_ascii=False)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def refresh(self, *, parser: str = "claude") -> dict[str, Any]:
         root = self.knowledge_root()
         if not root.is_dir():
             raise ValueError(f"业务补充知识目录不存在: {root}")
-        paths = sorted(root.rglob("*.md"))
+        paths = self._document_paths()
         owns_extractor = self._extractor is None
         extractor = self._extractor or self._extractor_for(parser)
         try:
@@ -128,6 +174,7 @@ class BaselineKnowledgeService:
             self.db.execute("UPDATE business_relation_v2 SET status='DEPRECATED'")
             self.db.execute("UPDATE business_entry_anchor SET status='DEPRECATED',updated_at=?", (_now(),))
         self.db.commit()
+        self.record_projection(parser)
         return {
             "root": str(root), "sourceCount": len(documents), "entityCounts": counts,
             "anchorCounts": anchor_counts,

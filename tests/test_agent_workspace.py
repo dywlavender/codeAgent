@@ -201,8 +201,6 @@ class AgentWorkspaceTest(unittest.TestCase):
             code_map = root / "generated-code-map"
             code_map.mkdir()
             (code_map / "project-index.md").write_text("自动结构索引", encoding="utf-8")
-            ast_documents = root / "ast-version"; ast_documents.mkdir()
-            (ast_documents / "project-index.md").write_text("AST 结构索引", encoding="utf-8")
             config = root / "project.json"
             config.write_text(json.dumps({"project": {"id": "split"},
                 "knowledge": {"businessContextRoot": "business-context",
@@ -219,15 +217,8 @@ class AgentWorkspaceTest(unittest.TestCase):
             self.assertNotIn("业务补充知识", none_labels)
             self.assertNotIn("自动代码地图", none_labels)
 
-            ast = manager.ensure(mode="ast", code_map_source=ast_documents, ast_version_id="ast-v1")
-            ast_sources = dict(workspace_sources(ast.path))
-            self.assertNotIn("业务补充知识", ast_sources)
-            self.assertEqual(ast_documents.resolve(), ast_sources["自动代码地图"])
-            ast_command = ClaudeCodeRuntime().build_command("定位结构", workspace=ast.path)
-            ast_prompt = ast_command[ast_command.index("--append-system-prompt") + 1]
-            self.assertIn("业务补充知识：本模式不提供", ast_prompt)
-            self.assertIn("自动代码地图：可读取", ast_prompt)
-            self.assertIn("AST 资料版本已固定", ast_prompt)
+            with self.assertRaisesRegex(RuntimeError, "evaluate_pi.py"):
+                manager.ensure(mode="ast")
 
 
 if __name__ == "__main__":

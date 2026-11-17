@@ -35,7 +35,7 @@ class ThreeModeFlowTest(unittest.TestCase):
             config = make_project(root)
             ast = AstService(project_config=config, data_root=root / ".data" / "ast")
             self.assertEqual("missing", ast.status()["status"])
-            with self.assertRaisesRegex(ValueError, "手动生成"):
+            with self.assertRaisesRegex(ValueError, "evaluate_pi.py"):
                 freeze_batch(root / "batch", suite=suite_payload(), cases=suite_payload()["cases"],
                              project_config=config, arms=["ast"], variants=None)
             self.assertEqual("missing", ast.status()["status"])
@@ -65,46 +65,6 @@ class ThreeModeFlowTest(unittest.TestCase):
                 self.assertEqual([None, None], runtime.sessions)
                 self.assertEqual("none", first["mode"])
                 self.assertEqual("backbone", second["mode"])
-            finally:
-                db.close()
-
-    def test_ast_version_change_starts_new_session_and_is_persisted(self):
-        class Runtime:
-            runtime_name = "FAKE"
-
-            def __init__(self):
-                self.sessions = []
-
-            def ask(self, question, *, workspace, session_id=None, event_callback=None,
-                    cancel_check=None, repositories=None):
-                self.sessions.append(session_id)
-                return RuntimeResult("回答", f"session-{len(self.sessions)}")
-
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            config = make_project(root)
-            ast = AstService(project_config=config)
-            ast.generate()
-            self.assertTrue(wait_for(lambda: ast.status().get("status") == "available"))
-            version_one = ast.status()["currentVersionId"]
-            db = connect(str(root / "db.sqlite"))
-            runtime = Runtime()
-            try:
-                service = QueryService(db, db_path=str(root / "db.sqlite"),
-                                       project_config=config, runtime=runtime)
-                first = service.query("第一版问题", mode="ast")
-                self.assertEqual(version_one, first["astVersionId"])
-                (root / "repo-a" / "src" / "Main.java").write_text("class Main { int v2; }\n", encoding="utf-8")
-                ast.generate()
-                self.assertTrue(wait_for(lambda: ast.status().get("status") == "available"))
-                version_two = ast.status()["currentVersionId"]
-                self.assertNotEqual(version_one, version_two)
-                second = service.query("第二版问题", conversation_id=first["conversationId"], mode="ast")
-                self.assertEqual([None, None], runtime.sessions)
-                self.assertEqual(version_two, second["astVersionId"])
-                self.assertEqual(version_one, service.get_run(first["runId"])["astVersionId"])
-                self.assertEqual(version_two, service.get_run(second["runId"])["astVersionId"])
-                self.assertEqual(version_two, service.list_runs()[0]["astVersionId"])
             finally:
                 db.close()
 

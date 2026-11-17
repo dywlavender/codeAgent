@@ -162,17 +162,17 @@ class PiBusinessContextCapability(BusinessContextCapability):
         )
 
 
-def _prepare_pi_ast(context: RunContext, expected, ast_root) -> tuple[ToolStatus, AstReader | None]:
+def _prepare_pi_ast(context: RunContext, expected, ast_root, *, required: bool) -> tuple[ToolStatus, AstReader | None]:
     if "ast" not in expected or "ast" not in context.profile.materials:
         return ToolStatus("ast", "disabled", "disabled"), None
+    policy = "required" if required else "optional"
     source = next((item for item in context.materials if item.kind == "ast"), None)
-    if source is None or not source.version or source.status not in {"available", "not_mounted"}:
+    if source is None or not source.available:
         status = source.status if source else "missing"
-        if status in {"available", "not_mounted"}:
-            status = "missing"
         reason = {"stale": "AST 资料需要手动更新", "missing": "尚无可查询的 AST 版本",
-                  "generating": "AST 正在生成", "failed": "AST 生成失败"}.get(status)
-        return ToolStatus("ast", "optional", status if status in {"missing", "stale"} else "unavailable",
+                  "generating": "AST 正在生成", "failed": "AST 生成失败",
+                  "unsupported": "历史版本缺少可用的结构索引，请重新生成"}.get(status)
+        return ToolStatus("ast", policy, status if status in {"missing", "stale"} else "unavailable",
                           reason=reason or "尚无可查询的 AST 版本"), None
     from business_code_agent.codeintel.ast.material import AstMaterial
     from business_code_agent.codeintel.ast.reader import AstQueryError, AstReader, AstRepository
@@ -182,7 +182,7 @@ def _prepare_pi_ast(context: RunContext, expected, ast_root) -> tuple[ToolStatus
                          if item.kind == "source" and item.available
                          and item.repository_id in context.repository_ids)
     if len(repositories) != len(context.repository_ids):
-        return ToolStatus("ast", "optional", "unavailable", version=source.version,
+        return ToolStatus("ast", policy, "unavailable", version=source.version,
                           reason="AST 无法映射全部授权仓库"), None
     material = AstMaterial(project_config=context.project.config_path, data_root=ast_root)
     reader = AstReader(material, source.version, repositories, project_id=context.project.project_id)
@@ -190,8 +190,8 @@ def _prepare_pi_ast(context: RunContext, expected, ast_root) -> tuple[ToolStatus
         # Workspace selection already checked source freshness for this turn.
         reader.check(verify_sources=False)
     except AstQueryError as exc:
-        return ToolStatus("ast", "optional", exc.status, version=source.version, reason=str(exc)), None
-    return ToolStatus("ast", "optional", "ready", PI_AST_TOOL_NAMES, source.version), reader
+        return ToolStatus("ast", policy, exc.status, version=source.version, reason=str(exc)), None
+    return ToolStatus("ast", policy, "ready", PI_AST_TOOL_NAMES, source.version), reader
 
 
 def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
@@ -213,7 +213,7 @@ def prepare_pi_capabilities(context: RunContext, *, version: str | None = None,
         guidance = provider.instructions(context)
         if guidance:
             instructions.append((provider.id, guidance))
-    ast_status, ast_reader = _prepare_pi_ast(context, expected, ast_root)
+    ast_status, ast_reader = _prepare_pi_ast(context, expected, ast_root, required=mode == "ast")
     statuses.append(ast_status)
     if ast_reader:
         instructions.append(("ast", "可用 find_code_symbol 定位符号，get_code_symbol 查看定义位置，"

@@ -34,7 +34,7 @@ MODE_DESCRIPTIONS = {
     "combined": "本轮组合使用基础资料、业务补充知识、已有自动代码地图和可用的手动 AST 结构资料，按问题需要检索和读取。源码确认当前实现，需求说明目标，业务补充解释项目语义，结构资料只用于定位。",
     "none": "当前模式：无主干。正常项目 README、需求原文和源码可用，不提供业务补充知识或自动代码地图。",
     "backbone": "当前模式：有主干。提供项目特有的业务补充知识，按问题需要读取；源码仍是当前实现依据。",
-    "ast": "当前模式：AST。仅提供用户手动生成的结构资料和代码索引，不提供人工业务补充知识；结构条目只用于定位，行为仍须读取源码。",
+    "ast": "当前模式：AST。提供源码、需求和手动生成的关系索引。结构工具用于定位，具体行为由源码核实。",
     "raw": "评测 A：原始项目资料。只提供源码、README 和需求原文，不提供业务补充知识或自动代码地图。",
     "old_baseline": "评测 B：历史完整主干。只用于历史对照；当前实现仍以源码核实。",
     "code_map": "评测 C：自动代码地图。只提供结构导航，不提供人工业务补充知识；行为仍须读取源码。",
@@ -102,7 +102,7 @@ def project_index(sources: list[tuple[str, Path]]) -> str:
     """
     index_documents = []
     for label, directory in sources:
-        if label not in {"业务补充知识", "业务基线", "自动代码地图", "AST 结构资料"}:
+        if label not in {"业务补充知识", "业务基线", "自动代码地图"}:
             continue
         candidate = directory / "project-index.md"
         if not candidate.is_file():
@@ -168,7 +168,6 @@ class Workspace:
     business_context_path: Path | None = None
     code_map_path: Path | None = None
     turn_context_path: Path | None = None
-    ast_path: Path | None = None
     ast_status: str | None = None
     repository_ids: tuple[str, ...] = ()
     repository_mounts: tuple[tuple[str, str], ...] = ()
@@ -188,7 +187,6 @@ class Workspace:
             "repositoriesPath": str(self.repositories_path),
             "mode": self.mode,
             "astVersionId": self.ast_version_id,
-            "astPath": str(self.ast_path) if self.ast_path else None,
             "astStatus": self.ast_status,
             "turnContextPath": str(self.turn_context_path) if self.turn_context_path else None,
             "repositoryIds": list(self.repository_ids),
@@ -350,7 +348,6 @@ class WorkspaceManager:
                    system_guides_source: Path | None = None,
                    business_context_source: str | Path | None = None,
                    code_map_source: str | Path | None = None,
-                   ast_source: str | Path | None = None,
                    ast_status: str | None = None,
                    mode_description: str | None = None,
                    ast_version_id: str | None = None) -> Workspace:
@@ -424,18 +421,11 @@ class WorkspaceManager:
         else:
             code_map_source = (Path(code_map_source).expanduser().resolve()
                                if code_map_source else None)
-        if mode in {"backbone", "none"}:
+        if mode in {"backbone", "none", "ast"}:
             code_map_source = None
-        if mode == "ast" and (not code_map_source or not code_map_source.is_dir()):
-            raise WorkspaceError("AST 资料目录不可用，请先手动生成 AST")
-        if mode != "combined":
-            ast_source = None
-        else:
-            ast_source = Path(ast_source).expanduser().resolve() if ast_source else None
         scoped = len(selected) < len(configured)
         if scoped:
             # Project-wide structure documents can name repositories outside this turn.
-            ast_source = None
             code_map_source = None
         if business_context_source:
             self._link_directory(business_context_link, business_context_source)
@@ -445,11 +435,10 @@ class WorkspaceManager:
             self._link_directory(code_map_link, code_map_source)
         else:
             self._unlink_directory(code_map_link)
-        if ast_source:
-            self._link_directory(ast_link, ast_source)
-        else:
-            self._unlink_directory(ast_link)
-        if scoped and (code_map_link.exists() or ast_link.exists()):
+        self._unlink_directory(ast_link)
+        if ast_link.exists():
+            raise WorkspaceError("无法移除工作区中旧的 AST 文档目录")
+        if scoped and code_map_link.exists():
             raise WorkspaceError("无法移除工作区中的全工程结构资料，未启动限仓问答")
         if self.requirements_root.is_dir():
             self._link_directory(requirements_link, self.requirements_root)
@@ -483,7 +472,6 @@ class WorkspaceManager:
                                    if business_context_link.is_dir() else None),
             code_map_path=code_map_link,
             turn_context_path=turn_context_file,
-            ast_path=ast_link,
             ast_status=ast_status,
             repository_ids=tuple(repository_id for repository_id, _ in selected),
             repository_mounts=tuple((repository_id, f"repos/{_safe_name(repository_id)}")
@@ -513,11 +501,10 @@ class WorkspaceManager:
     def ensure(self, *, mode: str | None = None,
                business_context_source: str | Path | None = None,
                code_map_source: str | Path | None = None,
-               ast_source: str | Path | None = None,
-               ast_status: str | None = None,
                baseline_source: str | Path | None = None,
-               mode_description: str | None = None,
-               ast_version_id: str | None = None) -> Workspace:
+               mode_description: str | None = None) -> Workspace:
+        if mode == "ast":
+            raise WorkspaceError("AST 对照通过 Pi 结构工具运行，请使用 evaluate_pi.py")
         root = self._mode_root(mode)
         root.mkdir(parents=True, exist_ok=True)
         knowledge = root / "knowledge"
@@ -530,40 +517,29 @@ class WorkspaceManager:
         code_map_link = knowledge / "generated-code-map"
         ast_link = knowledge / "ast"
         requirements_link = root / "requirements"
-        if baseline_source is not None:
-            # Historical callers used baseline_source for both the human
-            # material and the AST material. Route the latter to the new
-            # structural slot without breaking those callers.
-            if mode == "ast" and code_map_source is None:
-                code_map_source = baseline_source
-            elif business_context_source is None:
-                business_context_source = baseline_source
+        if baseline_source is not None and business_context_source is None:
+            business_context_source = baseline_source
         if business_context_source is None:
             business_context_source = self.business_context_root
         else:
             business_context_source = Path(business_context_source).expanduser().resolve()
         if code_map_source is None:
-            code_map_source = self.code_map_root if mode not in {"none", "backbone", "ast"} else None
-        elif code_map_source is not None:
+            code_map_source = self.code_map_root if mode not in {"none", "backbone"} else None
+        else:
             code_map_source = Path(code_map_source).expanduser().resolve()
         if mode in {"none", "raw"}:
             code_map_source = None
             business_context_source = None
         elif mode in {"backbone", "business_context", "old_baseline"}:
             code_map_source = None
-        elif mode in {"ast", "code_map", "code_map_context"} and (not code_map_source or not code_map_source.is_dir()):
-            message = "AST 资料目录不可用，请先手动生成 AST" if mode == "ast" else "自动代码地图不可用，请先完成源码同步和索引"
-            raise WorkspaceError(message)
-        if mode in {"ast", "code_map"}:
+        elif mode in {"code_map", "code_map_context"} and (not code_map_source or not code_map_source.is_dir()):
+            raise WorkspaceError("自动代码地图不可用，请先完成源码同步和索引")
+        if mode == "code_map":
             business_context_source = None
-        # Production mounts prepared AST separately, so it can coexist with
-        # both business context and the generated code map. Experimental modes
-        # keep their original isolated material sets.
-        ast_source = Path(ast_source).expanduser().resolve() if ast_source and mode == "combined" else None
         requirements_source = self.requirements_root
         self._link_directory(business_context_link, business_context_source) if business_context_source else self._unlink_directory(business_context_link)
         self._link_directory(code_map_link, code_map_source) if code_map_source else self._unlink_directory(code_map_link)
-        self._link_directory(ast_link, ast_source) if ast_source else self._unlink_directory(ast_link)
+        self._unlink_directory(ast_link)
         self._link_directory(requirements_link, requirements_source)
         linked_repositories = self._repository_sources()
         desired_names = {_safe_name(repository_id) for repository_id, _ in linked_repositories}
@@ -579,7 +555,7 @@ class WorkspaceManager:
         claude_file.write_text(self._claude_instructions(), encoding="utf-8")
         turn_context_file = root / TURN_CONTEXT_FILENAME
         turn_context_file.write_text(
-            self._turn_context(root, mode, mode_description, ast_version_id), encoding="utf-8"
+            self._turn_context(root, mode, mode_description, None), encoding="utf-8"
         )
         navigation = build_navigation(
             self.config,
@@ -599,12 +575,9 @@ class WorkspaceManager:
             requirements_path=requirements_link,
             repositories_path=repositories,
             mode=mode,
-            ast_version_id=ast_version_id,
             business_context_path=business_context_link,
             code_map_path=code_map_link,
             turn_context_path=turn_context_file,
-            ast_path=ast_link,
-            ast_status=ast_status,
         )
 
     def refresh(self) -> Workspace:
@@ -639,8 +612,6 @@ class WorkspaceManager:
             ("code_map", "自动代码地图", root / "knowledge" / "generated-code-map", self.code_map_root),
             ("requirements", "需求原文", root / "requirements", self.requirements_root),
         ]
-        if workspace and workspace.mode == "combined" and workspace.ast_path:
-            slots.append(("ast", "AST 结构", workspace.ast_path, workspace.ast_path.resolve()))
         slots.extend(("repository", name, root / "repos" / _safe_name(name), path)
                      for name, path in self._repository_sources())
         result = []
@@ -790,13 +761,13 @@ class WorkspaceManager:
         material_kind = "business_context" if self._new_material_layout else "baseline"
         material_label = "业务补充知识" if self._new_material_layout else "业务基线"
         provided_by_mode = {
-            "combined": {material_kind, "code_map", "ast", "requirements", "repository"},
+            "combined": {material_kind, "code_map", "requirements", "repository"},
             "none": {"requirements", "repository"},
             "raw": {"requirements", "repository"},
             "backbone": {material_kind, "requirements", "repository"},
             "business_context": {material_kind, "requirements", "repository"},
             "old_baseline": {material_kind, "requirements", "repository"},
-            "ast": {"code_map", "requirements", "repository"},
+            "ast": {"requirements", "repository"},
             "code_map": {"code_map", "requirements", "repository"},
             "code_map_context": {material_kind, "code_map", "requirements", "repository"},
         }.get(mode or "")
@@ -822,7 +793,6 @@ class WorkspaceManager:
             (material_kind, material_label,
              root / "knowledge" / ("business-context" if self._new_material_layout else "baseline")),
             ("code_map", "自动代码地图", root / "knowledge" / "generated-code-map"),
-            ("ast", "AST 结构资料", root / "knowledge" / "ast"),
             ("requirements", "需求原文", root / "requirements"),
         ]
         for kind, label, path in source_slots:

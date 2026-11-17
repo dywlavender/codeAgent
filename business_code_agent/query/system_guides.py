@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .navigation import NAVIGATION_FILE
 
@@ -15,6 +15,10 @@ _NEXT_SECTION = re.compile(r"^#{1,2}[ \t]+", re.MULTILINE)
 _APP_LOCATIONS_CHARS = 2200
 _GUIDE_RULES_CHARS = 2800
 _DOC_INLINE_CHARS = 750
+_SOURCE_SUFFIXES = {
+    ".java", ".kt", ".scala", ".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte",
+    ".py", ".go", ".rb", ".rs", ".cs", ".swift", ".c", ".cpp", ".h", ".php",
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,48 @@ class GuideDocument:
     @property
     def workspace_path(self) -> str:
         return f"{SYSTEM_GUIDES_MOUNT}/{self.relative_path}"
+
+
+def guide_catalog(config: dict, navigation: dict, existing: set[str]) -> list[dict]:
+    systems = []
+    for system in config.get("systems", []):
+        key = system["id"]
+        if not _DOCUMENT_ID.fullmatch(key):
+            continue
+        path = GuideDocument(key, None, "").relative_path
+        apps = []
+        for app in navigation["applications"]:
+            if app["systemId"] == key and _DOCUMENT_ID.fullmatch(app["id"]):
+                app_path = GuideDocument(key, app["id"], "").relative_path
+                apps.append({**app, "path": app_path, "published": app_path in existing})
+        systems.append({
+            "id": key, "name": system.get("name") or key, "path": path,
+            "published": path in existing, "applications": apps,
+        })
+    return systems
+
+
+def guide_target(catalog: list[dict], system_id: str, application_id: str | None) -> tuple[dict, list[dict]]:
+    system = next((item for item in catalog if item["id"] == system_id), None)
+    if not system:
+        raise ValueError("请选择本工程已登记的系统")
+    apps = system["applications"]
+    if not application_id:
+        return system, apps
+    app = next((item for item in apps if item["id"] == application_id), None)
+    if not app:
+        raise ValueError("应用不属于所选系统或缺少有效的仓库位置")
+    return app, [app]
+
+
+def guide_template(name: str) -> str:
+    return f"# {name}代码导航\n\n## 导航摘要\n\n## 查找规则\n\n## 例外\n"
+
+
+def draft_source_paths(result: dict, apps: list[dict]) -> list[str]:
+    reads = (result.get("usage", {}).get("verification") or {}).get("readFiles", [])
+    return [path for path in reads if PurePosixPath(path).suffix.lower() in _SOURCE_SUFFIXES
+            and any(path.startswith(app["mount"] + "/") for app in apps)]
 
 
 def load_system_guides(source: Path, navigation: dict) -> tuple[GuideDocument, ...]:

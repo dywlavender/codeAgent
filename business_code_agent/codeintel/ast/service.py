@@ -10,20 +10,26 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import sqlite3
 import tempfile
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .generator import generate_ast_documents
+from business_code_agent.storage.connections import open_sqlite
+
+from .generator import generate_ast_index, index_statistics
 from .material import STAMP_IGNORED_PARTS, AstMaterial, source_stamp
+from .reader import AstQueryError, AstReader
 
 logger = logging.getLogger(__name__)
 
 # Generation ids live in this process only. A persisted "generating" index
 # without any live generation id belongs to a dead process and can be healed.
-_LIVE_GENERATIONS: set[str] = set()
+_LIVE_GENERATIONS: set[tuple[Path, str]] = set()
+_GENERATION_LOCK = threading.Lock()
 
 
 def _now() -> str:
@@ -32,7 +38,9 @@ def _now() -> str:
 
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 class AstService(AstMaterial):
@@ -50,12 +58,14 @@ class AstService(AstMaterial):
         index seen without any live generation id belongs to a dead process
         and would otherwise block status forever.
         """
-        value = self._index()
-        if value.get("status") != "generating" or _LIVE_GENERATIONS:
-            return
-        self._save_index({**value, "status": "failed",
-                          "error": "服务重启中断了上一次生成，请重新生成",
-                          "updatedAt": _now()})
+        with _GENERATION_LOCK:
+            value = self._index()
+            if (value.get("status") != "generating"
+                    or (self.root, value.get("generationId")) in _LIVE_GENERATIONS):
+                return
+            self._save_index({**value, "status": "failed",
+                              "error": "服务重启中断了上一次生成，请重新生成",
+                              "updatedAt": _now()})
 
     def _save_index(self, value: dict) -> None:
         _write_json(self.index_path, value)
@@ -64,7 +74,15 @@ class AstService(AstMaterial):
         active = next(iter(self._active.values()), None)
         if active and active.get("status") == "generating":
             return {**self._index(), **{key: item for key, item in active.items() if key != "thread"}}
-        return super().status()
+        state = super().status()
+        current = state.get("current")
+        if current and "statistics" not in current and state["status"] in {"available", "stale"}:
+            try:
+                with closing(open_sqlite(self.versions_root / current["versionId"] / "index.db", readonly=True)) as db:
+                    state["current"] = {**current, "statistics": index_statistics(db)}
+            except sqlite3.Error:
+                pass
+        return state
 
     def current_version(self) -> tuple[str, dict, Path] | None:
         status = self.status()
@@ -73,44 +91,24 @@ class AstService(AstMaterial):
             return None
         return self.version(version_id)
 
-    def list_documents(self, version_id: str | None = None) -> dict:
-        status = self.status()
-        version_id = version_id or status.get("currentVersionId")
+    def reader(self, repositories, *, project_id: str, version_id: str | None = None) -> AstReader:
+        version_id = version_id or self._index().get("currentVersionId")
         if not version_id:
-            return {"versionId": None, "items": []}
-        version_info = self.version(version_id)
-        if not version_info:
-            raise KeyError(version_id)
-        version_id, metadata, directory = version_info
-        items = []
-        for path in sorted(directory.rglob("*.md")):
-            relative = path.relative_to(directory).as_posix()
-            items.append({"path": relative, "bytes": path.stat().st_size})
-        return {"versionId": version_id, "items": items, "metadata": metadata}
-
-    def read_document(self, version_id: str, path: str) -> dict:
-        version_info = self.version(version_id)
-        if not version_info:
-            raise KeyError(version_id)
-        version_id, _, directory = version_info
-        directory = directory.resolve()
-        target = (directory / str(path or "")).resolve()
-        if directory not in target.parents or not target.is_file():
-            raise KeyError(path)
-        return {"versionId": version_id, "path": target.relative_to(directory).as_posix(),
-                "content": target.read_text(encoding="utf-8", errors="replace")}
+            raise AstQueryError("missing", "请先生成当前工程的 AST 索引")
+        return AstReader(self, version_id, tuple(repositories), project_id=project_id)
 
     def generate(self) -> dict:
-        with self._lock:
-            active = next(iter(self._active.values()), None)
-            if active and active.get("status") == "generating":
-                return {"generationId": active["generationId"], "status": "generating", "duplicate": True}
-            generation_id = f"ast-generation-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        with self._lock, _GENERATION_LOCK:
+            index = self._index()
+            active = index.get("generationId")
+            if index.get("status") == "generating" and (self.root, active) in _LIVE_GENERATIONS:
+                return {"generationId": active, "status": "generating", "duplicate": True}
+            generation_id = datetime.now().strftime("ast-generation-%Y%m%d-%H%M%S-%f")
             value = {"generationId": generation_id, "status": "generating", "phase": "preparing", "progress": 0,
                      "startedAt": _now(), "error": None}
+            self._save_index({**index, **value})
             self._active[generation_id] = value
-            _LIVE_GENERATIONS.add(generation_id)
-            self._save_index({**self._index(), **value, "currentVersionId": self._index().get("currentVersionId")})
+            _LIVE_GENERATIONS.add((self.root, generation_id))
             thread = threading.Thread(target=self._run_generation, args=(generation_id,), daemon=True,
                                       name=f"{generation_id}")
             self._active[generation_id]["thread"] = thread
@@ -136,20 +134,17 @@ class AstService(AstMaterial):
                     repository_names.append((repository_id, name))
                     shutil.copytree(source, inputs / name,
                                     ignore=shutil.ignore_patterns(*STAMP_IGNORED_PARTS))
-                    record.update(phase=f"parsing:{repository_id}", progress=min(75, 20 + number * 15))
-                documents = generate_ast_documents(inputs, repository_names,
-                                                   db_path=version_root / "index.db")
-            document_root = version_root / "documents"
-            for name, content in documents.items():
-                target = document_root / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
+                    record.update(phase=f"snapshot:{repository_id}", progress=min(65, 20 + number * 10))
+                record.update(phase="indexing", progress=70)
+                statistics = generate_ast_index(inputs, repository_names, db_path=version_root / "index.db")
+            if self._current_source_stamp(stamp_value) != stamp_value:
+                raise ValueError("生成期间源码发生变化，请重新生成 AST")
             metadata = {
                 "projectId": self.project_id, "versionId": version_id, "generatedAt": _now(),
                 "sourceStamp": stamp_value, "sourceRepositories": stamp_value["repositories"],
                 "repositoryMap": {snapshot: repository for repository, snapshot in repository_names},
-                "documentCount": len(documents), "generationSeconds": round(time.monotonic() - started, 3),
-                "generatorVersion": 3, "indexDb": "index.db",
+                "statistics": statistics, "generationSeconds": round(time.monotonic() - started, 3),
+                "generatorVersion": 4, "indexDb": "index.db",
             }
             _write_json(version_root / "metadata.json", metadata)
             index = self._index()
@@ -166,8 +161,8 @@ class AstService(AstMaterial):
             self._save_index({**self._index(), "status": "failed", "generationId": generation_id,
                               "error": str(exc), "updatedAt": _now()})
         finally:
-            _LIVE_GENERATIONS.discard(generation_id)
-            with self._lock:
+            with self._lock, _GENERATION_LOCK:
+                _LIVE_GENERATIONS.discard((self.root, generation_id))
                 self._active.pop(generation_id, None)
 
     def _allocate_version_root(self) -> tuple[str, Path]:
