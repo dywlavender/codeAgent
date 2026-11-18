@@ -89,7 +89,7 @@ class PiQueryServiceTest(unittest.TestCase):
                          {source["kind"] for source in result["execution"]["materials"]})
         trace = service.get_trace(result["runId"])
         self.assertEqual("completed", trace["status"])
-        self.assertEqual("baseline", trace["systemPrompt"]["variant"])
+        self.assertEqual("focused", trace["systemPrompt"]["variant"])
         self.assertIn("knowledge/business-context/", trace["systemPrompt"]["text"])
         self.assertFalse(trace["requestSnapshotAvailable"])
         self.assertEqual(2, len(trace["calls"]))
@@ -213,19 +213,19 @@ class PiQueryServiceTest(unittest.TestCase):
                           statuses["business_context"]["status"]))
 
     def test_prompt_variant_change_starts_and_records_a_new_session(self):
-        baseline = self.service().query("first", mode="none")
         runtime = PiAgentRuntime(
             profile=PI, environment={"FAKE_PI_SCENARIO": "normal"},
             command=[sys.executable, str(FAKE_PI)], session_root=self.root / "pi-sessions",
-            prompt_variant="layered")
-        service = self.service(runtime=runtime)
-        candidate = service.query("candidate", mode="none", conversation_id=baseline["conversationId"])
-        self.assertNotEqual(baseline["sessionId"], candidate["sessionId"])
-        snapshot = service.get_trace(candidate["runId"])["systemPrompt"]
-        self.assertEqual("layered", snapshot["variant"])
+            prompt_variant="baseline")
+        baseline = self.service(runtime=runtime).query("first", mode="none")
+        service = self.service()
+        updated = service.query("updated", mode="none", conversation_id=baseline["conversationId"])
+        self.assertNotEqual(baseline["sessionId"], updated["sessionId"])
+        snapshot = service.get_trace(updated["runId"])["systemPrompt"]
+        self.assertEqual("focused", snapshot["variant"])
         self.assertFalse(snapshot["sessionResumed"])
         continued = service.query("follow-up", mode="none", conversation_id=baseline["conversationId"])
-        self.assertEqual(candidate["sessionId"], continued["sessionId"])
+        self.assertEqual(updated["sessionId"], continued["sessionId"])
         self.assertTrue(service.get_trace(continued["runId"])["systemPrompt"]["sessionResumed"])
         self.assertEqual("baseline", service.get_trace(baseline["runId"])["systemPrompt"]["variant"])
 

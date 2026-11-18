@@ -117,9 +117,11 @@ python -m business_code_agent.cli serve-query --db .data/unused.db --project-reg
 
 Pi 会话文件保存在工程数据目录 `pi-sessions/`。工程、范围、Profile、资料模式或版本、模型或相关 Pi 配置变化时重建会话。历史 LangChain 或 Claude 会话独立保留。
 
-现行提示词和分层候选共用 Pi Runtime。分层候选把调查、证据和作答规则放在行为段，把当前工程、资料路径与 System Guide 放在工程上下文。工具描述由各工具提供。候选用 `evaluate_pi.py run --prompt-variants baseline,layered` 与现行提示词配对运行，提示词分组进入候选会话配置。
+线上默认使用 `focused` 提示词。文档、术语与需求题按相应文档作答，实现题逐项读取支撑结论的源码。证据足够时作答。已有相关文件且还有影响答案的缺口时，读取所需区间。资料不可访问或线索用尽时说明具体缺口。工程、资料路径和 System Guide 提供本轮上下文，工具用途由工具描述提供。
 
-最终答案的临时绝对源码路径规范为工程相对路径。运行记录依据本轮 `read` 交付的原文核验引用路径和行区间，`grep` 命中只作导航。核验不判断结论是否被原文语义支持。复杂题的“目标覆盖”由模型逐项声明；每项标为已核实且至少有一条带行号引用，并且其带行号引用均通过核验时，才把该项计为 verified。全部自报项通过只说明这些声明有本轮交付依据，原问题的完整性仍需复核。
+用 `evaluate_pi.py run --prompt-variants baseline,focused` 对照原版和精简版。`layered` 可复现先前的分层实验。提示词版本进入会话配置。
+
+最终答案的临时绝对源码路径规范为工程相对路径。运行记录依据本轮 `read` 交付的原文核验引用路径和行区间，`grep` 命中只作导航。涉及多条实现关系或需交代缺口的复杂源码题，由模型逐项简述“目标覆盖”。标为已核实的项至少要有一条带行号的引用，且该项的带行号引用均通过核验，才记为 verified。原问题的答案完整性和语义正确性仍以逐项源码复核为准。
 
 `QueryService` 从 Run 创建起持续保存 Trace，记录模型调用摘要、工具输入和输出、状态、用量与错误。归档保存在工程的 `query-traces/<runId>.json`，取消或失败也保留；Pi 模型摘要不作为完整请求快照。问答页可查看和导出 Trace。旧 Runtime 的程序补查、facts／contracts 收尾和 SearchCode 不参与这条链路。
 

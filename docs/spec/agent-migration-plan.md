@@ -146,7 +146,7 @@ HTTP/DTO、审批分发和定时补偿三题的 [真实模型配对验收](../re
 
 ### Pi 问答提示词对照
 
-分层候选已完成真实 Pi 问答对照。候选在 HTTP 与 DTO 题降低了耗时和 Token，纯术语题出现额外源码调查，Fineract 有一次超时。默认使用现行提示词，候选通过评测命令启用。Trace 显示装配片段与 Pi 请求前的生效提示词。见[分层对照记录](../records/2026-11/pi-prompt-ab-20261117.md)。
+分层候选已完成真实 Pi 问答对照。候选在 HTTP 与 DTO 题降低了耗时和 Token，纯术语题出现额外源码调查，Fineract 有一次超时。该轮对照使用原版 `baseline` 与分层候选 `layered`。Trace 显示装配片段与 Pi 请求前的生效提示词。见[分层对照记录](../records/2026-11/pi-prompt-ab-20261117.md)和[现行提示词约定](architecture.md#runtime)。
 
 ### 后续：Hybrid / Contract 与旧实现收敛
 

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+from stat import S_ISREG
 
 from business_code_agent.platform.repositories import configured_repository_sources
 from business_code_agent.storage.connections import open_sqlite
@@ -28,6 +30,14 @@ def _read_json(path: Path, default):
 
 def _iso_mtime(latest: float) -> str | None:
     return datetime.fromtimestamp(latest, timezone.utc).isoformat() if latest else None
+
+
+def _source_files(root: Path):
+    for directory, subdirectories, filenames in os.walk(root):
+        subdirectories[:] = [name for name in subdirectories if name not in STAMP_IGNORED_PARTS]
+        for name in filenames:
+            if name not in STAMP_IGNORED_PARTS:
+                yield Path(directory) / name
 
 
 def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
@@ -56,15 +66,14 @@ def source_stamp(repositories: list[tuple[str, Path]], *, cache_path=None,
             continue
         cached_files = (repo_cache.get(str(root)) or {}).get("files") or {}
         entries = {}
-        for path in root.rglob("*"):
-            relative_path = path.relative_to(root)
-            if STAMP_IGNORED_PARTS.intersection(relative_path.parts) or not path.is_file():
-                continue
+        for path in _source_files(root):
             try:
                 stat = path.stat()
-                relative = relative_path.as_posix()
-            except (OSError, ValueError):
+            except OSError:
                 continue
+            if not S_ISREG(stat.st_mode):
+                continue
+            relative = path.relative_to(root).as_posix()
             files += 1
             latest = max(latest, stat.st_mtime)
             cached = cached_files.get(relative)
@@ -135,8 +144,10 @@ class AstMaterial:
         """Report the snapshot state, re-checking the source stamp saved at generation."""
         value = self._index()
         current_id = value.get("currentVersionId")
-        if not current_id or value.get("status") in {"generating", "failed"}:
-            return {**value, "status": value.get("status") or "missing"}
+        if value.get("status") in {"generating", "failed"}:
+            return value
+        if not current_id:
+            return {**value, "status": "missing"}
         version = self.version(current_id)
         if version is None:
             return {**value, "status": "unsupported", "current": None,

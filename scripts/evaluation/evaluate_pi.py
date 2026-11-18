@@ -26,7 +26,7 @@ from business_code_agent.query.agent.citations import (canonical_citation_path,
                                                        match_reference_path,
                                                        verify_references)
 from business_code_agent.query.agent.pi import PiAgentRuntime
-from business_code_agent.query.agent.pi.prompts import PROMPT_VARIANTS
+from business_code_agent.query.agent.pi.prompts import DEFAULT_PROMPT_VARIANT, PROMPT_VARIANTS
 from business_code_agent.query.agent.pi.events import answer_body
 from business_code_agent.query.profile import PI
 from business_code_agent.query.service import QueryService
@@ -562,7 +562,8 @@ def analyze_trace(trace: dict, keys=()) -> dict:
 
 def run_one(case: dict, *, mode: str, repeat: int, model: str | None,
             project_config: Path, project_id: str, timeout: float,
-            thinking: str | None, keys, output: Path, prompt_variant: str = "baseline") -> dict:
+            thinking: str | None, keys, output: Path,
+            prompt_variant: str = DEFAULT_PROMPT_VARIANT) -> dict:
     started_at = _now()
     with tempfile.TemporaryDirectory(prefix="pi-eval-") as folder:
         root = Path(folder)
@@ -955,10 +956,12 @@ def command_run(args) -> int:
     modes = [value.strip() for value in args.modes.split(",") if value.strip()]
     if not modes:
         raise ValueError("--modes 不能为空")
-    variants = list(dict.fromkeys(value.strip() for value in (args.prompt_variants or "baseline").split(",")))
+    variants = list(dict.fromkeys(
+        value.strip() for value in (args.prompt_variants or DEFAULT_PROMPT_VARIANT).split(",")))
     if any(value not in PROMPT_VARIANTS for value in variants):
-        raise ValueError("--prompt-variants 仅接受 baseline,layered")
-    prompt_config = {"promptVariants": variants if args.prompt_variants else None}
+        raise ValueError(f"--prompt-variants 仅接受 {','.join(PROMPT_VARIANTS)}")
+    prompt_config = ({"promptVariants": variants} if args.prompt_variants else
+                     {"promptVariants": None, "defaultPromptVariant": DEFAULT_PROMPT_VARIANT})
     project_id = _project_id(project_config)
     keys_by_case = load_keys(args.keys_file)
     output = args.output.expanduser().resolve()
@@ -1034,7 +1037,7 @@ def main() -> int:
                      help="题库文件，可重复；多个题库必须指向同一 projectConfig")
     run.add_argument("--case", action="append", help="案例 ID，可重复；省略表示全部")
     run.add_argument("--modes", default="none", help="逗号分隔，如 none,backbone,ast")
-    run.add_argument("--prompt-variants", help="显式对照提示词，如 baseline,layered")
+    run.add_argument("--prompt-variants", help="显式选择提示词，如 baseline,focused")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--model", default=os.environ.get("BUSINESS_CODE_PI_MODEL") or None)
     run.add_argument("--project-config", type=Path)

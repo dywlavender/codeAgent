@@ -38,12 +38,11 @@ const ACTIVE = ["running", "cancelling"];
 const FINISHED = ["completed", "cancelled", "failed", "interrupted"];
 
 function adminError(reason, onRequireUnlock) {
-  const text = String(reason?.message || "");
-  if (text.includes("401") || text.includes("credential") || text.includes("管理员")) {
+  if (reason.status === 401) {
     onRequireUnlock?.();
     return "需要管理员口令后才能执行该操作。";
   }
-  return text || "请求失败";
+  return reason.message || "请求失败";
 }
 
 function duration(seconds) {

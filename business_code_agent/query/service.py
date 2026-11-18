@@ -1001,20 +1001,17 @@ class QueryService:
 
             factory = self.ast_material_factory or (
                 lambda: AstMaterial(project_config=self.project_config, data_root=self.ast_data_root))
-            ast = factory()
-            ast_state = ast.status()
+            ast_state = factory().status()
             ast_status = ast_state["status"]
-            current = ast.version(ast_state.get("currentVersionId")) if ast_status == "available" else None
-            if not current and ast_status == "available":
-                ast_status = "missing"
-            if not current and mode == "ast":
-                raise WorkspaceError(ast_state.get("error") or
-                                     "AST 索引尚未生成或已待更新，请先在 AST 管理页手动生成")
-            if current:
-                ast_version_id, metadata, _ = current
+            if ast_status == "available":
+                ast_version_id = ast_state["currentVersionId"]
+                metadata = ast_state["current"]
                 description = (
                     f"{MODE_DESCRIPTIONS[mode]} AST 生成时间：{metadata.get('generatedAt') or '未知'}。"
                 )
+            elif mode == "ast":
+                raise WorkspaceError(ast_state.get("error") or
+                                     "AST 索引尚未生成或已待更新，请先在 AST 管理页手动生成")
             else:
                 reason = {"missing": "未生成", "stale": "待更新", "generating": "正在生成", "failed": "生成失败"}.get(ast_status, "不可用")
                 description = f"{MODE_DESCRIPTIONS[mode]} AST {reason}，本轮使用其余可用资料，不自动生成或更新。"

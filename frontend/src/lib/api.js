@@ -8,12 +8,11 @@ export function activeProjectId() {
   return typeof sessionStorage === "undefined" ? "" : sessionStorage.getItem("activeProjectId") || "";
 }
 
-function adminStorageKey(projectId = activeProjectId()) {
+function adminStorageKey(projectId) {
   return projectId ? `knowledgeAdminToken:${projectId}` : "knowledgeAdminToken";
 }
 
-function projectPath(path) {
-  const projectId = activeProjectId();
+function projectPath(path, projectId) {
   if (!projectId || path.startsWith("/api/projects")) return path;
   const relative = path.startsWith("/api/") ? path.slice(4) : path.startsWith("/") ? path : `/${path}`;
   return `/api/projects/${encodeURIComponent(projectId)}${relative}`;
@@ -22,8 +21,7 @@ function projectPath(path) {
 export async function request(path, options = {}, signal) {
   const storage = typeof sessionStorage === "undefined" ? null : sessionStorage;
   const projectId = activeProjectId();
-  const adminToken = storage?.getItem(adminStorageKey(projectId))
-    || (!projectId ? storage?.getItem("knowledgeAdminToken") : "");
+  const adminToken = storage?.getItem(adminStorageKey(projectId));
   const headers = { ...(options.headers || {}) };
   if (projectId) headers["X-Project-Id"] = projectId;
   const adminPath = path.startsWith("/api/knowledge-admin/") || path.startsWith("/api/knowledge/")
@@ -33,7 +31,7 @@ export async function request(path, options = {}, signal) {
   if (adminToken && adminPath) headers.Authorization = `Bearer ${adminToken}`;
   let response;
   try {
-    response = await fetch(projectPath(path), { ...(options || {}), headers, signal });
+    response = await fetch(projectPath(path, projectId), { ...options, headers, signal });
   } catch (error) {
     if (error?.name === "AbortError") throw new RequestAborted("请求已中止");
     throw error;
@@ -52,7 +50,7 @@ export async function streamQuery(path, payload, { signal, onEvent, onRun } = {}
   const projectId = activeProjectId();
   const headers = { "Content-Type": "application/json" };
   if (projectId) headers["X-Project-Id"] = projectId;
-  const response = await fetch(projectPath(path), {
+  const response = await fetch(projectPath(path, projectId), {
     method: "POST",
     headers,
     body: JSON.stringify(payload),

@@ -33,17 +33,22 @@ export function RetrievalEvaluation({ projectId, onRequireUnlock }) {
   }
   function failed(reason) {
     setError(reason.message);
-    if (/管理员|401|credential/.test(reason.message)) onRequireUnlock?.();
+    if (reason.status === 401) onRequireUnlock?.();
   }
   useEffect(() => {
-    let active = true;
     setSuites([]); setRuns([]); setSuiteId(null); setRunId(null); setDetail(null); setSelected(null); setWaitingAnswer(false); setCandidateStrategy(null); setStructureVersion(null);
-    // Abort stale project responses, including a project switch during an import.
     const controller = new AbortController();
     Promise.all([request("/api/retrieval-suites", {}, controller.signal), request("/api/retrieval-evaluations", {}, controller.signal)])
-      .then(([library, history]) => { if (active) { setSuites(library.items); setRuns(history.items); setConnection(library.connection); setSuiteId(library.items[0]?.id || null); setRunId(history.items[0]?.id || null); } })
-      .catch((reason) => { if (active) failed(reason); });
-    return () => { active = false; controller.abort(); };
+      .then(([library, history]) => {
+        if (controller.signal.aborted) return;
+        setSuites(library.items);
+        setRuns(history.items);
+        setConnection(library.connection);
+        setSuiteId(library.items[0]?.id || null);
+        setRunId(history.items[0]?.id || null);
+      })
+      .catch((reason) => { if (!controller.signal.aborted) failed(reason); });
+    return () => controller.abort();
   }, [projectId]); // eslint-disable-line
 
   useEffect(() => {

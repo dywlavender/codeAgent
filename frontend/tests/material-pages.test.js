@@ -58,13 +58,13 @@ after(async () => {
   }
 });
 
-async function mount(t, Component, api, page) {
+async function mount(t, Component, api, page, props = {}) {
   window.history.replaceState(null, "", `/?projectId=alpha#/${page}`);
   window.sessionStorage.clear();
   globalThis.fetch = async (path, options) => api(new URL(path, window.location.href), options);
   const root = createRoot(document.getElementById("root"));
   t.after(() => act(async () => root.unmount()));
-  await act(async () => root.render(React.createElement(Component, { projectId: "alpha" })));
+  await act(async () => root.render(React.createElement(Component, { projectId: "alpha", ...props })));
 }
 
 function textElement(selector, label, parent = document) {
@@ -238,6 +238,32 @@ test("System Guide switches navigation views and publishes an edited draft on co
   await click(textElement(".ant-tree-title", "审计应用 · 已发布"));
   assert.equal(editor().value, "已有文档");
   assert.equal(guidance(), "中台通用规则\n审计应用规则");
+});
+
+test("business knowledge opens administrator unlock only on a workbench 401", async (t) => {
+  const { BusinessContextEditor } = await vite.ssrLoadModule("/src/features/knowledge-admin/BusinessContextEditor.jsx");
+  const path = "/api/projects/alpha/knowledge/context";
+  let unlocks = 0;
+  let status = 502;
+  await mount(t, BusinessContextEditor, (url) => {
+    if (url.pathname === `${path}/files`) return Response.json({ items: ["terms.md"], editable: true });
+    if (url.pathname === `${path}/files/terms.md`) return Response.json({ name: "terms.md", content: "# 业务术语", sections: [] });
+    assert.equal(url.pathname, `${path}/suggest`);
+    return Response.json({ error: status === 502 ? "Model credential rejected (401)" : "administrator credential required" },
+      { status });
+  }, "admin", { onRequireUnlock: () => { unlocks += 1; } });
+
+  await click(textElement('[role="tab"]', "编辑 Markdown"));
+  await click(textElement("button", "检查并提出修改建议"));
+  await inputText(document.getElementById("business-context-change"), "更新业务术语");
+  const generate = () => click(textElement("button", "生成建议"));
+  await generate();
+  assert.match(document.body.textContent, /Model credential rejected/);
+  assert.equal(unlocks, 0);
+
+  status = 401;
+  await generate();
+  assert.equal(unlocks, 1);
 });
 
 test("materials overview switches projects and displays each project's projection state", async (t) => {

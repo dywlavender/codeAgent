@@ -1,5 +1,7 @@
 # 项目协作指引
 
+输入、权限和版本在对应的边界核验。同一步骤复用已核验的结果，错误分支按已有状态码或错误类型处理。
+
 ## Pi Runtime 统一问答主链（2026-11-15）
 
 - 在线问答默认使用 `PiAgentRuntime`，正常 API 入口固定进入 Pi；`BUSINESS_CODE_AGENT_PROFILE`／`BUSINESS_CODE_AGENT_RUNTIME` 不能再把在线问答切回 LangChain/Direct/Claude。旧 Runtime 只允许评测代码显式构造并注入。`QueryService._query_pi()` 统一处理 `combined`／`none`／`backbone`／`ast`。Pi 负责模型、工具决策与调度、上下文压缩、会话和 Agent Loop；CodeAgent 只负责授权、RunContext、Trace、取消、持久化和业务问答增强。
@@ -11,8 +13,9 @@
 - Pi 会话文件限定在工程数据目录 `pi-sessions/`；工程、scope、Profile、资料模式/版本或 Pi 配置变化时重建。业务文档和需求使用内容指纹，源码仓库使用文件元数据修订号，资料变化会隔离旧会话；旧 LangChain 会话不直接复用。Pi 失败不回退 LangChain。配置见 `.env.example` 的 `BUSINESS_CODE_PI_*`。
 - 在线模型选择来自 Pi 自身的 `get_available_models`（`GET /api/pi/models`），只返回安全展示字段；前端按工程保存选择，请求携带 `model`，留空使用 `BUSINESS_CODE_PI_MODEL`。2026-11-16 起问答默认模型为 `deepseek/gpt-6-luna`；换模型后必须新开评测批次，不能与 glm-5.3-flash 等旧批次混跑或续跑。模型进入会话身份，切换模型会重建 Pi 会话。
 - Pi 最终答案的引用会按本轮实际交付的 `read` 原文核验路径与行区间，记录在 usage/Trace；`semanticProof=false`，核验通过不等于语义正确。空范围展开后没有仓库时，必须在调用模型前拒绝，不能回退为全部仓库。
-- Pi 提示词分层候选通过 `evaluate_pi.py run --prompt-variants baseline,layered` 对照。组间固定模型、资料模式、授权范围和版本。Trace 独立保存 CodeAgent 装配片段及 Pi 请求前观测的系统提示词和启用工具说明，保留模型调用摘要的记录边界。
-- Pi 回答末尾的“目标覆盖”小节由模型逐条声明问题关系及其证据；`usage.investigation.goalCoverage` 只把模型标为 `[已核实]` 且该条所有带行号引用都被本轮 `read` 确认（至少一条）的目标计为 verified，缺少交付证据的声明降为 unverified；全部 verified 才把 `complete` 记为 true，未声明时为 null。该标记不是语义证明，也不能替代人工 checks；停止判断以未完成目标为依据，不以关键文件数量或工具次数阈值为准。
+- Pi 默认使用精简提示词 `focused`。只问术语、业务约定或需求时可依据对应文档。实现问题按用户所问逐项核对本轮 `read` 交付的源码，已定位到能核实该项的文件时读取相关区间。证据足够时直接作答，尚有影响结论的可查缺口时继续调查，资料不可访问或线索耗尽时说明具体缺口。
+- 用 `evaluate_pi.py run --prompt-variants baseline,focused` 对照原版和精简版。组间固定模型、资料模式、授权范围和版本。提示词版本进入会话配置，Trace 保存 CodeAgent 装配片段、Pi 请求前观测的系统提示词和启用工具说明。
+- 复杂源码问题涉及多条实现关系或需说明缺口时，用“目标覆盖”逐项简述。`usage.investigation.goalCoverage` 将模型标为 `[已核实]`、附有带行号引用且引用均由本轮 `read` 交付的目标计为 verified。缺少交付证据的声明降为 unverified，全部 verified 才把 `complete` 记为 true，未声明时为 null。答案完整性仍由逐项源码复核。
 - Pi 真实问答评测使用 `scripts/evaluation/evaluate_pi.py`，直接调用生产 `QueryService` 与 `PiAgentRuntime`；题库 checks 只留在评测侧，答案、Trace、模型/资料版本和调查计数写入独立批次。搜索与未读候选只是代理指标，不是答案正确性评分。引用按独立源码引用去重（同一 path+line 只计一次），Markdown 链接只按目标或可匹配标签生成一条记录；grep 上下文行不得作为候选文件。逐项复核用 `review` 命令生成 `checks.md`，结论固定为 pass/partial/fail，并附答案原句与工程相对证据。该命令只校验复核结构、判定词、答案原句是否出现在 `answer.md`，以及证据是否为工程相对路径；它不打开证据文件或 Trace，不核对文件/行是否存在或内容是否支持判定，语义正确性仍需人工阅读源码确认。Pi 最终答案在输出前把临时绝对路径改为工程相对路径；Pi Trace 只保存模型调用摘要，不能标记为完整请求快照。
 - 优先完成同模型、同题库、同源码的 Pi 质量基线，再按 Trace 区分未找到证据、已读但漏答与证据充足后的继续调查，用 none／backbone 验证业务知识增益。跨系统调查限同一工程授权范围。工程测试和单次实跑不能替代答案质量验收；Direct 实验不作为 Pi 的前置，旧 Runtime 删除另行确认。实现见[Pi Runtime 记录](docs/records/2026-11/pi-runtime-unification-20261115.md)。
 

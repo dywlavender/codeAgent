@@ -102,8 +102,9 @@ export function TraceDrawer({ projectId, runId, onClose }) {
 
 function PromptSnapshot({ prompt }) {
   const observed = prompt.observed || [];
+  const title = { baseline: "原版提示词", layered: "分层候选", focused: "精简提示词" }[prompt.variant] || "系统提示词";
   return <>
-    <p className="trace-note">{prompt.variant === "layered" ? "分层候选" : "现行提示词"} · {prompt.sessionResumed ? "复用会话" : "新会话"}</p>
+    <p className="trace-note">{title} · {prompt.sessionResumed ? "复用会话" : "新会话"}</p>
     {observed.length ? observed.map((snapshot, index) => <section key={index}>
       <h4>{observed.length === 1 ? "Pi 请求前的生效提示词" : `Pi 生效提示词 ${index + 1}`}</h4>
       <pre className="trace-code">{snapshot.text}</pre>

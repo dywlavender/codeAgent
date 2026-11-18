@@ -360,11 +360,14 @@ class PiEvaluationMetricsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             batch = Path(folder)
             expected = {"requestedModel": "m", "cases": ["a"], "modes": ["none"],
-                        "repeats": 2, "thinking": None}
+                        "repeats": 2, "thinking": None, "defaultPromptVariant": "focused"}
             with self.assertRaises(ValueError):
                 evaluate_pi.check_resume(batch, expected)
             (batch / "batch.json").write_text(json.dumps({**expected, "requestedModel": "x"}))
             with self.assertRaises(ValueError):
+                evaluate_pi.check_resume(batch, expected)
+            (batch / "batch.json").write_text(json.dumps({**expected, "defaultPromptVariant": "baseline"}))
+            with self.assertRaisesRegex(ValueError, "defaultPromptVariant"):
                 evaluate_pi.check_resume(batch, expected)
             (batch / "batch.json").write_text(json.dumps(expected))
             evaluate_pi.check_resume(batch, expected)
@@ -396,12 +399,12 @@ class PiEvaluationMetricsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             completed = subprocess.run([
                 sys.executable, str(SCRIPT), "run", "--suite", str(suite), "--case", "native-frontend",
-                "--prompt-variants", "baseline,layered", "--repeats", "2", "--output", folder, "--plan",
+                "--prompt-variants", "baseline,focused", "--repeats", "2", "--output", folder, "--plan",
             ], capture_output=True, text=True, timeout=30)
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertEqual([
-            "native-frontend/none/baseline/r1", "native-frontend/none/layered/r1",
-            "native-frontend/none/layered/r2", "native-frontend/none/baseline/r2",
+            "native-frontend/none/baseline/r1", "native-frontend/none/focused/r1",
+            "native-frontend/none/focused/r2", "native-frontend/none/baseline/r2",
         ], json.loads(completed.stdout)["runs"])
 
 

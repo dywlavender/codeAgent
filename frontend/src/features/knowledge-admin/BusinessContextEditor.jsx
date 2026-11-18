@@ -7,7 +7,6 @@ import { BusinessContextSuggestion } from "./BusinessContextSuggestion.jsx";
 
 const FILES = "/api/knowledge/context/files";
 const filePath = (name) => `${FILES}/${encodeURIComponent(name)}`;
-const isAdminError = (error) => /credential|凭证|401/i.test(error.message);
 
 /* 业务知识以 Markdown 原文为中心：左侧文档列表，右侧阅读/编辑；投影状态由页面右栏展示。
  * 本组件输出两个 Card（列表 + 编辑器），由父级网格拼成三栏布局。
@@ -42,7 +41,7 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock, onSaved 
   }
 
   function checkAdminAccess(reason) {
-    if (isAdminError(reason)) onRequireUnlock?.();
+    if (reason.status === 401) onRequireUnlock?.();
   }
 
   async function loadFiles(signal) {

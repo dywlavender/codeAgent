@@ -89,17 +89,20 @@ class PiRuntimeTest(unittest.TestCase):
         }]
         self.assertEqual("见 [Main.java:1](repos/a/Main.java:1)。", adapter.answer())
 
-    def test_system_prompt_requires_route_and_handler_chain(self):
+    def test_focused_prompt_uses_relevant_evidence_and_has_a_stop_condition(self):
         context, prepared, _ = self.context_and_prepared(mode="none")
-        prompt = self.runtime()._system_prompt(context, prepared, mode="none")["text"]
-        self.assertIn("找到第一个入口", prompt)
-        self.assertIn("注册点与实际处理器", prompt)
-        self.assertIn("题目要求的各项都有源码依据后停止调查", prompt)
-        self.assertIn("## 目标覆盖", prompt)
         guidance = "## 当前工程导航\n任务入口由当前系统的注册点定位。"
         prompt = self.runtime()._system_prompt(
             replace(context, system_guidance=guidance), prepared, mode="none")["text"]
         self.assertIn(guidance, prompt)
+        self.assertIn("读到支持结论的文档即可回答", prompt)
+        self.assertIn("本轮 read 返回的源码为依据", prompt)
+        self.assertIn("相关注册或映射及实际处理器", prompt)
+        self.assertIn("逐项对照用户提问和已读证据", prompt)
+        self.assertIn("已定位到能核实它的文件时，先 read 相关区间", prompt)
+        self.assertIn("资料不可访问或线索用尽时", prompt)
+        self.assertIn("复杂源码题，末尾用「## 目标覆盖」逐项简述", prompt)
+        self.assertNotIn("能力说明", prompt)
 
     def test_layered_prompt_separates_behavior_and_authorized_project_context(self):
         context, prepared, _ = self.context_and_prepared(mode="none", repositories=("a",))

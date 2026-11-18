@@ -73,8 +73,7 @@ function ProjectionPane({ revision, projection, onRequireUnlock, onImported }) {
       onImported?.();
     } catch (reason) {
       setError(reason.message);
-      if (String(reason.message).includes("凭证") || String(reason.message).includes("credential")
-        || String(reason.message).includes("401")) onRequireUnlock?.();
+      if (reason.status === 401) onRequireUnlock?.();
     } finally {
       setRunning("");
     }

@@ -26,7 +26,7 @@ from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
 from .events import PiEventAdapter
 from .models import read_model_catalog
 from .process import PiProcess, PiProcessError
-from .prompts import PROMPT_VARIANTS, system_prompt as build_system_prompt
+from .prompts import DEFAULT_PROMPT_VARIANT, PROMPT_VARIANTS, system_prompt as build_system_prompt
 from .sessions import (prepare_session_root, resolve_session_file,
                        session_root as project_session_root, validate_session_file)
 
@@ -54,7 +54,7 @@ class PiAgentRuntime:
                  command: str | list[str] | tuple[str, ...] | None = None,
                  model: str | None = None, timeout: float | None = None,
                  session_root: str | Path | None = None, thinking: str | None = None,
-                 prompt_variant: str = "baseline"):
+                 prompt_variant: str = DEFAULT_PROMPT_VARIANT):
         self.profile = profile
         if prompt_variant not in PROMPT_VARIANTS:
             raise PiConfigurationError(f"未知的 Pi 提示词版本：{prompt_variant}")

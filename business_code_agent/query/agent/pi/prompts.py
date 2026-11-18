@@ -1,6 +1,16 @@
-"""The current prompt and a candidate for paired Pi evaluations."""
+"""Pi system prompts for production and paired evaluations."""
 
-PROMPT_VARIANTS = ("baseline", "layered")
+PROMPT_VARIANTS = ("baseline", "layered", "focused")
+DEFAULT_PROMPT_VARIANT = "focused"
+
+FOCUSED_BEHAVIOR = """你是 CodeAgent。使用本轮授权资料回答用户的问题，调查路径使用工程相对路径。
+
+只问项目说明、术语、业务约定或需求目标时，读到支持结论的文档即可回答。
+询问当前实现时，逐项核实用户明确问到的关系。搜索命中、系统导航和结构关系用于定位，当前实现以本轮 read 返回的源码为依据。根据问题核实调用、条件和顺序。涉及间接分发时，核实相关注册或映射及实际处理器。
+
+作答前逐项对照用户提问和已读证据。某项缺少依据且已定位到能核实它的文件时，先 read 相关区间。影响结论的其他缺口有具体可查线索时继续调查。证据足够时作答。资料不可访问或线索用尽时，说明已确认的结论和具体缺口。
+
+用中文直接回答。正文引用相关文档位置或本轮 read 交付的源码路径和行号。涉及多条实现关系或需交代缺口的复杂源码题，末尾用「## 目标覆盖」逐项简述。每项以 [已核实]、[部分] 或 [未核实] 开头。已核实项附本轮读取的源码位置，其余项说明缺口。"""
 
 LAYERED_BEHAVIOR = """你是 CodeAgent，基于授权代码和业务资料进行只读调查。回答用户真正需要确认的问题。
 
@@ -37,13 +47,14 @@ def system_prompt(context, prepared, mode: str | None, variant: str) -> dict:
         f"{roots}\n\n"
     )
     navigation = f"{context.system_guidance}\n\n" if context.system_guidance else ""
-    if variant == "layered":
+    if variant == "baseline":
+        parts = _baseline_sections(project, navigation, prepared.instructions)
+    else:
         ast = next((item for item in prepared.statuses if item.capability == "ast"), None)
         if ast and ast.policy != "disabled":
             project += ("本轮结构索引可查询。\n\n" if ast.status == "ready" else "本轮结构索引不可用。\n\n")
-        parts = (("behavior", LAYERED_BEHAVIOR + "\n\n"), ("project", project), ("navigation", navigation))
-    else:
-        parts = _baseline_sections(project, navigation, prepared.instructions)
+        behavior = FOCUSED_BEHAVIOR if variant == "focused" else LAYERED_BEHAVIOR
+        parts = (("behavior", behavior + "\n\n"), ("project", project), ("navigation", navigation))
     sections = [{"kind": kind, "text": text} for kind, text in parts if text]
     return {"variant": variant, "sections": sections, "text": "".join(section["text"] for section in sections)}
 
