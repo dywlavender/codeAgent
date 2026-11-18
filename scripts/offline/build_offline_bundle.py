@@ -58,7 +58,11 @@ TARGET_FILES = {
         "docs/spec/offline-deployment.md",
         "docs/spec/windows-usage.md",
     ),
-    "linux": ("start-mac.sh",),
+    "linux": (
+        ".env.example",
+        "docs/spec/offline-deployment-mac-linux.md",
+        "start-mac.sh",
+    ),
 }
 
 
@@ -130,6 +134,13 @@ def _copy_project(staging: Path, *, target: str) -> None:
             "首次部署按[安装手册](docs/spec/offline-deployment.md)配置运行环境、项目资料和模型。\n\n"
             "在解压目录打开 Git Bash，执行 `bash ./start.sh`。\n\n"
             "日常启动、命令参数和日志位置见[启动手册](docs/spec/windows-usage.md)。\n",
+            encoding="utf-8",
+        )
+    elif target == "linux":
+        (staging / "README.md").write_text(
+            "# macOS / Linux 安装与启动\n\n"
+            "首次部署按[安装手册](docs/spec/offline-deployment-mac-linux.md)配置运行环境、项目资料和模型。\n\n"
+            "在解压目录执行 `bash ./start.sh`（macOS 也可用 `bash ./start-mac.sh`）。\n",
             encoding="utf-8",
         )
 

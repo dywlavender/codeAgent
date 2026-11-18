@@ -15,6 +15,7 @@
 | [知识主干自动对照验证](spec/knowledge-backbone-automation.md) | 题库配置、对照执行与报告生成的操作入口 |
 | [检索诊断约定](spec/retrieval-evaluation.md) | 冻结原文、证据标注、结构单元、混合检索／精排预算、上下文选择及 Agent／固定证据对照 |
 | [Windows 部署步骤](spec/offline-deployment.md) | 从生成项目包到首次启动、验证的完整顺序 |
+| [macOS / Linux 部署步骤](spec/offline-deployment-mac-linux.md) | Linux ZIP（macOS 共用）的环境安装、配置与启动顺序 |
 | [Windows 启动与参数参考](spec/windows-usage.md) | 部署后的日常启动、参数和日志位置 |
 | [多应用资料流程](spec/multi-application-flow.md) | 多应用项目的资料组织 |
 | [前端设计系统](spec/frontend-design-system.md) | 颜色、间距与组件约定 |

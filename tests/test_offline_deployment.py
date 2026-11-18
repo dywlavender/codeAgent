@@ -105,6 +105,27 @@ class ProjectDeploymentTest(unittest.TestCase):
             self.assertFalse(any("wheelhouse" in name for name in names))
             self.assertFalse(any("offline-repositories" in name for name in names))
 
+    def test_linux_package_contains_install_manual_and_launcher(self):
+        builder = _load_builder_module()
+        with tempfile.TemporaryDirectory() as folder:
+            archive = builder._build_package("linux", Path(folder))
+            self.assertEqual("business-code-agent-linux-project.zip", archive.name)
+            package_root = "business-code-agent-linux-project/"
+            with zipfile.ZipFile(archive) as package:
+                names = set(package.namelist())
+                readme = package.read(package_root + "README.md").decode("utf-8")
+                self.assertIn("bash ./start.sh", readme)
+                manual = "docs/spec/offline-deployment-mac-linux.md"
+                self.assertIn(f"]({manual})", readme)
+                self.assertIn(package_root + manual, names)
+                self.assertIn(package_root + ".env.example", names)
+                self.assertIn(package_root + "start-mac.sh", names)
+                self.assertNotIn(package_root + ".env", names)
+                for script in ("start.sh", "start-mac.sh", "scripts/launcher/start.sh"):
+                    self.assertNotIn(b"\r\n", package.read(package_root + script))
+            self.assertFalse(any(name.endswith((".bat", ".ps1")) for name in names))
+            self.assertFalse(any("/records/" in name for name in names))
+
     def test_builder_is_source_packager_not_dependency_bundler(self):
         builder_source = (ROOT / "scripts" / "offline" / "build_offline_bundle.py").read_text(
             encoding="utf-8",
