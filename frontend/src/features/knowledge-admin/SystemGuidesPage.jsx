@@ -167,7 +167,9 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
                 { key: "preview", label: "内容预览", children: draft
                   ? <div className="system-guide-preview"><Markdown remarkPlugins={[remarkGfm]}>{draft}</Markdown></div>
                   : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description="尚未编写内容；切换到「编辑 Markdown」使用模板或 AI 草稿" /> },
+                      description="尚未编写内容；可以使用模板或 AI 生成草稿">
+                      <Button type="primary" disabled={Boolean(pending)} onClick={() => setMode("edit")}>切换到编辑</Button>
+                    </Empty> },
                 { key: "edit", label: "编辑 Markdown", children: <Flex vertical gap={10}>
                   <Input.TextArea aria-label="系统导航 Markdown" value={draft} rows={19}
                     style={{ fontFamily: "var(--font-code)" }} readOnly={Boolean(pending)}

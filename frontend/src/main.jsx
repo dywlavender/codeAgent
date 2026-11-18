@@ -55,6 +55,9 @@ createRoot(document.getElementById("root")).render(
         Card: { borderRadiusLG: 14 },
         Splitter: { splitBarSize: 1, splitTriggerSize: 10 },
         Alert: { borderRadius: 12 },
+        /* colorPrimary 传入的是 CSS var，antd 无法据此派生选中态颜色，这里显式落到品牌令牌 */
+        Tree: { nodeSelectedBg: palette.brandSoft, nodeHoverBg: palette.muted, nodeHoverColor: palette.text },
+        Tabs: { inkBarColor: palette.brand, itemSelectedColor: palette.brandStrong },
       },
     }}
   >
