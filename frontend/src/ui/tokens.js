@@ -3,6 +3,16 @@
  * semantic source instead of introducing a second visual system.
  */
 
+/* antd 需要能解析的主色字符串来派生 hover、选中背景等衍生色；CSS var 引用无法参与
+ * 计算（会退化成深色默认）。启动时把 var 解析成实际值，tokens.css 仍是唯一来源。 */
+const CSS_VAR = /^var\((--[\w-]+)\)$/;
+
+export function resolveColor(value) {
+  const match = typeof value === "string" ? value.match(CSS_VAR) : null;
+  if (!match) return value;
+  return getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim() || value;
+}
+
 export const palette = {
   canvas: "var(--color-canvas)",
   sidebar: "var(--color-sidebar)",

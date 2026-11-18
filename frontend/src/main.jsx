@@ -2,17 +2,20 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { ConfigProvider } from "antd";
 import App from "./App.jsx";
-import { palette } from "./ui/tokens.js";
+import { palette, resolveColor } from "./ui/tokens.js";
 import "./ui/tokens.css";
 import "./ui/styles.css";
+
+/* 主色必须给 antd 可解析的实际值，否则派生色（主按钮背景、hover 等）失效 */
+const brand = resolveColor(palette.brand);
 
 createRoot(document.getElementById("root")).render(
   <ConfigProvider
     theme={{
       token: {
-        colorPrimary: palette.brand,
-        colorInfo: palette.brand,
-        colorLink: palette.brand,
+        colorPrimary: brand,
+        colorInfo: brand,
+        colorLink: brand,
         borderRadius: 10,
         fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif",
         fontSize: 13.5,
