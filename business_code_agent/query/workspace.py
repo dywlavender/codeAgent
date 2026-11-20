@@ -15,9 +15,11 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from business_code_agent.platform.repositories import configured_repository_sources, resolve_config_path
 
@@ -29,6 +31,29 @@ from .system_guides import (SYSTEM_GUIDES_MOUNT, GuideDocument, load_system_guid
 logger = logging.getLogger(__name__)
 
 TURN_CONTEXT_FILENAME = ".codeagent-turn-context.md"
+
+# Pi 只在受信任的项目内读取 .pi/mcp.json。本轮工作区的内容完全由 CodeAgent
+# 生成，因此配置随工作区一起逐轮重建，不读取工程里的静态配置。
+PI_MCP_CONFIG_PATH = ".pi/mcp.json"
+
+# CodeAgent 自有的只读业务知识 MCP 服务名与工具（与 serve-mcp 子命令对应）。
+CODEAGENT_MCP_SERVER = "codeagent"
+CODEAGENT_MCP_TOOLS = ("get_navigation", "get_system_guide",
+                       "search_business_knowledge", "read_business_knowledge")
+
+# AOCI 认知服务：问答只放行查询类工具，维护类工具默认隐藏。
+AOCI_MCP_PREFIX = "aoci_"
+AOCI_READ_TOOLS = ("aoci_search", "aoci_get_entries", "aoci_header",
+                   "aoci_overview", "aoci_rules")
+AOCI_WRITE_TOOLS = ("aoci_maintain", "aoci_update_entry", "aoci_remove_entry",
+                    "aoci_report")
+
+# 可执行文件与显式维护模式开关。维护模式不是默认行为，必须显式启用。
+AOCI_COMMAND_ENV = "BUSINESS_CODE_PI_AOCI_COMMAND"
+MCP_MAINTENANCE_ENV = "BUSINESS_CODE_PI_MCP_MAINTENANCE"
+
+# 本仓库根目录：`python -m business_code_agent.cli` 在任意工作区都可用。
+_IMPORT_ROOT = Path(__file__).resolve().parents[2]
 
 MODE_DESCRIPTIONS = {
     "combined": "本轮组合使用基础资料、业务补充知识、已有自动代码地图和可用的手动 AST 结构资料，按问题需要检索和读取。源码确认当前实现，需求说明目标，业务补充解释项目语义，结构资料只用于定位。",
@@ -174,6 +199,8 @@ class Workspace:
     navigation_applications: tuple[dict, ...] = ()
     system_guidance: str = ""
     system_guide_paths: tuple[str, ...] = ()
+    mcp_config_path: Path | None = None
+    mcp_servers: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +217,7 @@ class Workspace:
             "astStatus": self.ast_status,
             "turnContextPath": str(self.turn_context_path) if self.turn_context_path else None,
             "repositoryIds": list(self.repository_ids),
+            "mcpServers": list(self.mcp_servers),
         }
 
 
@@ -350,7 +378,8 @@ class WorkspaceManager:
                    code_map_source: str | Path | None = None,
                    ast_status: str | None = None,
                    mode_description: str | None = None,
-                   ast_version_id: str | None = None) -> Workspace:
+                   ast_version_id: str | None = None,
+                   mcp_maintenance: bool | None = None) -> Workspace:
         """Create or refresh the stable read-only view used by Pi sessions.
 
         Pi's process working directory is the only filesystem scope the model
@@ -459,6 +488,15 @@ class WorkspaceManager:
         self._copy_system_guides(root, guides)
         (root / NAVIGATION_FILE).write_text(
             json.dumps(navigation, ensure_ascii=False, indent=2), encoding="utf-8")
+        # MCP 配置按本轮授权仓库重新生成。工程里的静态 .pi/mcp.json 列的是全部
+        # 已登记仓库，直接复用会把调查范围扩大到本轮未授权的仓库。
+        mcp_config = pi_mcp_config(
+            repositories=selected,
+            project_config=self.project_config,
+            maintenance=(_mcp_maintenance_enabled() if mcp_maintenance is None
+                         else bool(mcp_maintenance)),
+        )
+        mcp_config_path = _write_pi_mcp_config(root, mcp_config)
         return Workspace(
             id=self.project_id,
             path=root,
@@ -479,6 +517,8 @@ class WorkspaceManager:
             navigation_applications=tuple(navigation["applications"]),
             system_guidance=render_system_guidance(navigation, guides),
             system_guide_paths=tuple(doc.workspace_path for doc in guides),
+            mcp_config_path=mcp_config_path,
+            mcp_servers=tuple(mcp_config["mcpServers"]),
         )
 
     def _copy_system_guides(self, workspace: Path, guides: tuple[GuideDocument, ...]) -> None:
@@ -861,3 +901,164 @@ def _safe_name(value: str) -> str:
     value = str(value or "default").strip()
     cleaned = "".join(char if char.isalnum() or char in "._-" else "_" for char in value)
     return cleaned.strip("._") or "default"
+
+
+def _aoci_command() -> str | None:
+    """Resolve the AOCI executable; an unset environment value falls back to PATH."""
+    configured = (os.environ.get(AOCI_COMMAND_ENV) or "").strip()
+    if configured:
+        return configured
+    return shutil.which("aoci")
+
+
+def _mcp_maintenance_enabled() -> bool:
+    """Whether AOCI maintenance tools may be exposed this turn (default: no).
+
+    Maintenance rewrites the repository cognition index, so ordinary question
+    answering must never reach it by accident; only an explicit opt-in does.
+    """
+    return (os.environ.get(MCP_MAINTENANCE_ENV) or "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def _pi_server_base_name(repository_id: str) -> str:
+    """Turn a repository id into a legal Pi MCP server name.
+
+    Pi accepts only ASCII ``[A-Za-z0-9_-]`` and derives the tool namespace by
+    replacing every other character with ``_``. ``-`` and ``_`` therefore denote
+    the same namespace, so build names from ``_`` alone: two servers then share
+    a namespace only when their names are equal. Lowercasing removes the last
+    ambiguity, because Pi's clash check is case-sensitive.
+    """
+
+    cleaned = "".join(
+        char if char.isascii() and char.isalnum() else "_"
+        for char in str(repository_id or "").strip().lower()
+    )
+    return f"{AOCI_MCP_PREFIX}{cleaned.strip('_') or 'default'}"
+
+
+def _pi_server_names(repository_ids: "Iterable[str]") -> dict[str, str]:
+    """Map every selected repository to a distinct, collision-free server name.
+
+    Name collisions are real because a repository id may contain characters Pi
+    rewrites, so a colliding base name gets a suffix derived from a hash of the
+    repository id. The suffix depends only on the repository id, not on the
+    order repositories were authorized in.
+    """
+
+    ordered = list(dict.fromkeys(str(item) for item in repository_ids))
+    bases = {repository_id: _pi_server_base_name(repository_id) for repository_id in ordered}
+    counts: dict[str, int] = {}
+    for base in bases.values():
+        counts[base] = counts.get(base, 0) + 1
+    names: dict[str, str] = {}
+    taken: set[str] = set()
+    for repository_id in ordered:
+        base = bases[repository_id]
+        digest = sha256(repository_id.encode("utf-8")).hexdigest()[:8]
+        name = base
+        if counts[base] > 1:
+            name = f"{base}_{digest}"
+        suffix = 2
+        while name in taken:
+            name = f"{base}_{digest}_{suffix}"
+            suffix += 1
+        taken.add(name)
+        names[repository_id] = name
+    return names
+
+
+def _exposure_map(exposed: "Iterable[str]", hidden: "Iterable[str]") -> dict[str, str]:
+    """Expose only the listed tools and hide every other tool of the server.
+
+    Hidden tools are still named explicitly, so the config states what this turn
+    may not do instead of leaving it to a reader. The ``*`` entry is the default
+    for tools neither list names, so a tool added to the server later stays
+    unavailable until the config is updated.
+    """
+
+    exposure: dict[str, str] = {"*": "hidden"}
+    exposure.update({tool: "hidden" for tool in hidden})
+    exposure.update({tool: "direct" for tool in exposed})
+    return exposure
+
+
+def pi_mcp_config(*, repositories: "Iterable[tuple[str, Path]]",
+                  project_config: Path | None,
+                  maintenance: bool = False,
+                  aoci_command: str | None = None) -> dict[str, Any]:
+    """Build the Pi MCP config for exactly the repositories of this turn.
+
+    Only the authorized repositories appear here; the project's static
+    ``.pi/mcp.json`` is never read, because it lists every configured repository
+    and would widen the investigation scope beyond what this turn authorized.
+    Query mode is the default: AOCI maintenance tools stay hidden until the
+    caller explicitly opts in.
+    """
+
+    selected = list(dict.fromkeys((str(repository_id), Path(source))
+                                  for repository_id, source in repositories))
+    servers: dict[str, Any] = {}
+    # 默认询问式问答：只放行查询类工具，维护类工具显式记为 hidden。
+    # 维护模式必须显式开启；开启后写工具才进入放行名单。
+    aoci_exposed = AOCI_READ_TOOLS + (AOCI_WRITE_TOOLS if maintenance else ())
+    aoci_hidden = () if maintenance else AOCI_WRITE_TOOLS
+    resolved = aoci_command if aoci_command is not None else _aoci_command()
+    if resolved:
+        names = _pi_server_names(repository_id for repository_id, _ in selected)
+        for repository_id, source in selected:
+            servers[names[repository_id]] = {
+                "type": "stdio",
+                "command": resolved,
+                "args": ["--repo", str(source), "mcp"],
+                "exposure": "hidden",
+                "toolExposure": _exposure_map(aoci_exposed, aoci_hidden),
+                "description": f"仓库 {repository_id} 的 AOCI 认知索引",
+            }
+    if project_config is not None:
+        servers[CODEAGENT_MCP_SERVER] = {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "business_code_agent.cli", "serve-mcp",
+                     "--project-config", str(project_config)],
+            # 子进程必须能 import business_code_agent；工作区 cwd 不是包根目录。
+            "cwd": str(_IMPORT_ROOT),
+            "exposure": "hidden",
+            "toolExposure": _exposure_map(CODEAGENT_MCP_TOOLS, ()),
+            "description": "本工程的只读业务知识检索（导航、系统指南、业务知识）",
+        }
+    return {"mcpServers": servers}
+
+
+def _write_pi_mcp_config(root: Path, config: Mapping[str, Any]) -> Path | None:
+    """Write the per-turn config, or remove a previous turn's file when empty."""
+    path = root / PI_MCP_CONFIG_PATH
+    servers = config.get("mcpServers")
+    if not isinstance(servers, Mapping) or not servers:
+        # 上一轮可能生成过：不能留下仍然生效的旧配置。
+        if path.exists():
+            path.unlink()
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def read_turn_mcp_servers(workspace: str | Path) -> tuple[str, ...]:
+    """Return the server names of the config generated for one workspace.
+
+    The runtime needs the names for its ``--tools`` allowlist. A missing or
+    unreadable file means no MCP server, which keeps the run at the strictest
+    setting instead of silently trusting an unknown config.
+    """
+
+    path = Path(workspace) / PI_MCP_CONFIG_PATH
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    servers = config.get("mcpServers")
+    if not isinstance(servers, Mapping):
+        return ()
+    return tuple(str(name) for name in servers)

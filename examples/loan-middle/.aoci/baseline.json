@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "created_at": "2026-11-19T14:06:40Z",
+  "updated_at": "2026-11-19T14:33:46Z",
+  "files": {
+    ".gitattributes": {
+      "role": "index",
+      "sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476",
+      "size": 291,
+      "normalized_sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476"
+    },
+    ".gitignore": {
+      "role": "index",
+      "sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679",
+      "size": 48,
+      "normalized_sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679"
+    },
+    ".pi/mcp.json": {
+      "role": "index",
+      "sha256": "edad74797800f02f90760e8ff857fe20657b61432a1d82838dfabe15aae215a0",
+      "size": 235,
+      "normalized_sha256": "edad74797800f02f90760e8ff857fe20657b61432a1d82838dfabe15aae215a0"
+    },
+    "AGENTS.md": {
+      "role": "index",
+      "sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8",
+      "size": 14078,
+      "normalized_sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8"
+    },
+    "README.md": {
+      "role": "index",
+      "sha256": "9b7a7fed4e7da9233e4282c6729b783d808a28d7a77cfcba6301a7aaa61aba18",
+      "size": 151,
+      "normalized_sha256": "9b7a7fed4e7da9233e4282c6729b783d808a28d7a77cfcba6301a7aaa61aba18"
+    },
+    "aoci.code.txt": {
+      "role": "index",
+      "sha256": "d1ea45cf69e82f35b47de1976654137700bbba058f0fbb6b7cbf5033f850486a",
+      "size": 2941,
+      "normalized_sha256": "d1ea45cf69e82f35b47de1976654137700bbba058f0fbb6b7cbf5033f850486a"
+    },
+    "aoci.meta.txt": {
+      "role": "index",
+      "sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a",
+      "size": 2187,
+      "normalized_sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a"
+    },
+    "aoci.txt": {
+      "role": "index",
+      "sha256": "fa539309509dba69a01d6104e56c2e024a88efcf2a91457d70b2bb849f88971e",
+      "size": 300,
+      "normalized_sha256": "fa539309509dba69a01d6104e56c2e024a88efcf2a91457d70b2bb849f88971e"
+    },
+    "pom.xml": {
+      "role": "index",
+      "sha256": "98e836c619ced52c796845e75c2ac3a8483df959b8d5428ff028fa90cc205608",
+      "size": 407,
+      "normalized_sha256": "98e836c619ced52c796845e75c2ac3a8483df959b8d5428ff028fa90cc205608"
+    },
+    "src/main/java/demo/middle/MiddleApplication.java": {
+      "role": "index",
+      "sha256": "0f7dde5b58049656f53c380204fcc2b652f017bd3d5d120071d3bf2c451bc616",
+      "size": 314,
+      "normalized_sha256": "0f7dde5b58049656f53c380204fcc2b652f017bd3d5d120071d3bf2c451bc616"
+    },
+    "src/main/java/demo/middle/controller/MiddleWithdrawController.java": {
+      "role": "index",
+      "sha256": "31c6f346c65e25c11e54608e48b7e7443df5af366777d567fe2a8c010ebc0595",
+      "size": 3147,
+      "normalized_sha256": "31c6f346c65e25c11e54608e48b7e7443df5af366777d567fe2a8c010ebc0595"
+    },
+    "src/main/java/demo/middle/model/ContractSignRequest.java": {
+      "role": "index",
+      "sha256": "4208569599796fc08e4e875feefcb9c2e82d3fab7fec20b8fa139ba1ad0a9ae5",
+      "size": 283,
+      "normalized_sha256": "4208569599796fc08e4e875feefcb9c2e82d3fab7fec20b8fa139ba1ad0a9ae5"
+    },
+    "src/main/java/demo/middle/model/TaxAuthorizationRequest.java": {
+      "role": "index",
+      "sha256": "12eedb3430ee8e182dd3e2b3129abee10bc6c95fb5ffb7695c9e101947277871",
+      "size": 136,
+      "normalized_sha256": "12eedb3430ee8e182dd3e2b3129abee10bc6c95fb5ffb7695c9e101947277871"
+    },
+    "src/main/java/demo/middle/model/WithdrawApplyRequest.java": {
+      "role": "index",
+      "sha256": "e90d833cc8cda940c047bbbaa2b750d4875d5bd28c533ca487388e36ab319db7",
+      "size": 352,
+      "normalized_sha256": "e90d833cc8cda940c047bbbaa2b750d4875d5bd28c533ca487388e36ab319db7"
+    },
+    "src/main/java/demo/middle/service/ContractService.java": {
+      "role": "index",
+      "sha256": "066008b7f1231cc03627b7be3e55a9ddb12f012a30d243888a892ef1e17d46e8",
+      "size": 417,
+      "normalized_sha256": "066008b7f1231cc03627b7be3e55a9ddb12f012a30d243888a892ef1e17d46e8"
+    },
+    "src/main/java/demo/middle/service/TaxAuthorizationService.java": {
+      "role": "index",
+      "sha256": "9a2e566188eb5d2baf44515fb996d4b66594fc78d0f369bb51a2203529bf667c",
+      "size": 442,
+      "normalized_sha256": "9a2e566188eb5d2baf44515fb996d4b66594fc78d0f369bb51a2203529bf667c"
+    },
+    "src/main/java/demo/middle/service/WithdrawApplicationService.java": {
+      "role": "index",
+      "sha256": "aab307d5002448db326c94b116c0398f756493b8b68c896dc5a092dc3f2650c6",
+      "size": 1008,
+      "normalized_sha256": "aab307d5002448db326c94b116c0398f756493b8b68c896dc5a092dc3f2650c6"
+    },
+    "src/main/java/demo/middle/service/WithdrawQueryService.java": {
+      "role": "index",
+      "sha256": "e172a15de7a43c29b58b5a61c53963c6ebae2297e9651905d20e59df7e562454",
+      "size": 1346,
+      "normalized_sha256": "e172a15de7a43c29b58b5a61c53963c6ebae2297e9651905d20e59df7e562454"
+    }
+  },
+  "managed_scope": {
+    "version": "managed-scope-baseline/v1",
+    "policy_identity": "e0f548d87fe5462c412a1c54409871a60ddf2ae5c30609258ff8739fdfcc8e76",
+    "observe_change_policy": "review_required",
+    "budget_policy_identity": "15e9b37a6c57e9bf03c9df3d0d049eb5b9a7f5540f9d34960408114e2538a32d",
+    "budget_policy": {
+      "version": "cognition-budget-policy/v1",
+      "mode": "enforce",
+      "whole_index": {
+        "target_tokens": 200000,
+        "warning_tokens": 300000,
+        "max_tokens": 400000
+      },
+      "r": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 25,
+          "max_tokens": 50
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 45,
+          "max_tokens": 90
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 90,
+          "max_tokens": 180
+        }
+      ],
+      "s": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 20,
+          "max_tokens": 40
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 40,
+          "max_tokens": 80
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 100,
+          "max_tokens": 200
+        }
+      ]
+    },
+    "apply_authorization_mode": "auto"
+  }
+}

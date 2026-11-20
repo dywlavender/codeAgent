@@ -1,0 +1,28 @@
+#AOCI-CODE-VOLUME: 1
+
+===/<repository>/===
+.gitattributes[FG1T]: F:配置Git文本文件行尾为LF | R:- | A:- | S:-
+.gitignore[FG1T]: F:排除IDE、构建产物和系统文件 | R:- | A:- | S:-
+AGENTS.md[SG3S]: F:说明AOCI仓库认知系统的使用方法 | R:- | A:- | S:-
+README.md[SG1T]: F:简要说明本仓库是贷款中台系统 | R:code:src/main/java/demo/middle/controller/MiddleWithdrawController.java | A:- | S:-
+pom.xml[FG3T]: F:Maven项目配置 | R:- | A:声明loan-middle工件、Java 17和spring-boot-starter-web依赖 | S:-
+
+===/<repository>/.pi/===
+mcp.json[FG2T]: F:配置AOCI MCP服务器连接 | R:- | A:- | S:-
+
+===/<repository>/src/main/java/demo/middle/===
+MiddleApplication.java[EB4T]: F:Spring Boot应用启动入口 | R:- | A:标注@SpringBootApplication并执行SpringApplication.run | S:-
+
+===/<repository>/src/main/java/demo/middle/controller/===
+MiddleWithdrawController.java[EB7T]: F:提款业务REST接口,提供额度查询、优惠券查询、还款方式/日期/担保公司/银行卡查询、合同签订、纳税授权和提款申请 | R:code:src/main/java/demo/middle/service/WithdrawQueryService.java,code:src/main/java/demo/middle/service/ContractService.java,code:src/main/java/demo/middle/service/TaxAuthorizationService.java,code:src/main/java/demo/middle/service/WithdrawApplicationService.java | A:通过构造器注入四个Service,映射/middle/withdraw路径下的9个端点(6个GET查询+3个POST提交) | S:-
+
+===/<repository>/src/main/java/demo/middle/model/===
+ContractSignRequest.java[DD5T]: F:合同签订请求参数 | R:- | A:包含客户ID、金额、优惠券ID、还款方式/日期、担保公司ID和银行卡ID | S:-
+TaxAuthorizationRequest.java[DD4T]: F:纳税授权请求参数 | R:- | A:包含客户ID和授权类型 | S:-
+WithdrawApplyRequest.java[DD5T]: F:提款申请请求参数 | R:- | A:包含客户ID、金额、优惠券ID、还款方式/日期、担保公司ID、银行卡ID、合同ID和纳税授权ID | S:-
+
+===/<repository>/src/main/java/demo/middle/service/===
+ContractService.java[DB5T]: F:合同签订业务逻辑 | R:code:src/main/java/demo/middle/model/ContractSignRequest.java | A:返回模拟的合同ID和签约状态 | S:-
+TaxAuthorizationService.java[DB5T]: F:纳税授权业务逻辑 | R:code:src/main/java/demo/middle/model/TaxAuthorizationRequest.java | A:返回模拟的纳税授权ID和授权状态 | S:-
+WithdrawApplicationService.java[DB6T]: F:提款申请业务逻辑 | R:code:src/main/java/demo/middle/model/WithdrawApplyRequest.java | A:校验前置条件后返回模拟的提款申请ID和受理状态 | S:contractId和taxAuthorizationId必须非空,bankCardId、repaymentMethod和repaymentDay必须非空,否则抛IllegalArgumentException
+WithdrawQueryService.java[DB6T]: F:提款前查询服务,提供额度、优惠券、还款方式、还款日期、担保公司和银行卡查询 | R:- | A:6个查询方法均返回模拟数据 | S:-

@@ -1,0 +1,27 @@
+.materials-page { display: grid; grid-auto-rows: max-content; gap: var(--space-4); overflow-y: auto; }
+.materials-page > * { width: 100%; }
+.materials-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.materials-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
+.material-origin { overflow-wrap: anywhere; }
+.raw-material-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-4); margin: 0 0 var(--space-3); background: var(--color-well); border-radius: var(--radius-sm); font: var(--type-sm)/1.65 var(--font-code); }
+
+.materials-pending-section {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-requirement-soft);
+  border: 1px solid color-mix(in srgb, var(--color-requirement) 35%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.pending-list { display: grid; gap: var(--space-2); }
+.pending-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: var(--type-sm); }
+
+.materials-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-3); }
+.material-card { display: grid; grid-auto-rows: auto; gap: var(--space-2); }
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.card-header h4 { margin: 0; font-size: var(--type-md); font-weight: 600; }
+.card-detail { font-size: var(--type-sm); color: var(--color-text-secondary); }
+.card-time { font-size: var(--type-xs); color: var(--color-text-faint); }
+.card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-top: var(--space-1); border-top: 1px solid var(--color-border); }
+.card-actions .ant-btn { display: inline-flex; align-items: center; gap: 4px; }

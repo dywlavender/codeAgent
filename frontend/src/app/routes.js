@@ -1,21 +1,21 @@
-const PAGE_IDS = ["agent", "library", "guides", "graph", "evaluation", "ast", "admin", "settings"];
+const PAGE_IDS = ["agent", "materials", "guides", "graph", "evaluation", "ast", "admin", "settings"];
 
 const PAGE_LABELS = {
-  agent: "代码问答",
-  library: "知识总览",
+  agent: "问答",
+  materials: "资料总览",
   guides: "系统导航",
   graph: "知识图谱",
-  ast: "AST 结构",
+  ast: "AST 索引",
   evaluation: "效果验证",
   admin: "业务知识",
   settings: "工程设置",
 };
 
-/* 知识中心五个页面共享顶栏面包屑；其余页面只显示自身名称。 */
-const KNOWLEDGE_CENTER = new Set(["library", "guides", "graph", "ast", "admin"]);
+/* 资料页面共享顶栏；其余页面只显示自身名称。 */
+const MATERIALS_PAGES = new Set(["materials", "guides", "graph", "ast", "admin"]);
 
 function pageGroup(page) {
-  return KNOWLEDGE_CENTER.has(page) ? "知识中心" : null;
+  return MATERIALS_PAGES.has(page) ? "资料" : null;
 }
 
 function pageFromHash() {

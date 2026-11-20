@@ -15,13 +15,14 @@ import uuid
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from business_code_agent.query.capabilities import (PI_TOOL_NAMES,
                                                     prepare_pi_capabilities)
 from business_code_agent.query.context import RunContext
 from business_code_agent.query.profile import AgentProfile
 from business_code_agent.query.runtime import RuntimeErrorBase, RuntimeResult
+from business_code_agent.query.workspace import read_turn_mcp_servers
 
 from .events import PiEventAdapter
 from .models import read_model_catalog
@@ -375,7 +376,8 @@ class PiAgentRuntime:
                 "CODEAGENT_PI_AST_IMPORT_ROOT": str(Path(__file__).resolve().parents[4]),
             })
         prompt = self._system_prompt(context, prepared, mode=mode)
-        command = self._command(root, existing, prompt["text"], prepared=prepared)
+        command = self._command(root, existing, prompt["text"], prepared=prepared,
+                                mcp_servers=self._mcp_servers(context))
         process = PiProcess(command, cwd=context.workspace, environment=env)
         try:
             process.start()
@@ -397,18 +399,39 @@ class PiAgentRuntime:
             raise
         return process, state_data, actual_model, prompt
 
-    def _command(self, root: Path, existing: Path | None, system_prompt: str, *, prepared=None) -> list[str]:
+    def _mcp_servers(self, context: RunContext) -> tuple[str, ...]:
+        """Read the servers the workspace generated for this turn.
+
+        ``prepare_pi`` writes .pi/mcp.json from the authorized repositories only,
+        so this list can never name a repository outside the current scope.
+        """
+        return read_turn_mcp_servers(context.workspace)
+
+    def _command(self, root: Path, existing: Path | None, system_prompt: str, *,
+                 prepared=None, mcp_servers: Iterable[str] = ()) -> list[str]:
+        servers = tuple(dict.fromkeys(str(name) for name in mcp_servers))
+        # builtin:mcp only reads the workspace .pi/mcp.json in a trusted
+        # project; --approve trusts this run's workspace, whose contents are
+        # fully controlled by CodeAgent. Without MCP servers the run keeps the
+        # strictest setting.
+        approve_flag = "--approve" if servers else "--no-approve"
+        tool_names = list(prepared.pi_tool_names if prepared else PI_TOOL_NAMES)
+        # An explicit --tools allowlist drops MCP tools unless their
+        # mcp__<server>__* pattern is listed.
+        tool_names.extend(f"mcp__{name}__*" for name in servers)
         command = [
             *self.command,
             "--mode", "rpc",
             "--session-dir", str(root),
             "--no-extensions", "-e", "builtin:codemode",
             "-e", str(SEARCH_EXTENSION),
-            "--no-context-files", "--no-mcp", "--no-skills",
-            "--no-prompt-templates", "--no-themes", "--no-approve",
+            "--no-context-files", "--no-skills",
+            "--no-prompt-templates", "--no-themes", approve_flag,
             "--system-prompt", system_prompt,
-            "--tools", ",".join(prepared.pi_tool_names if prepared else PI_TOOL_NAMES),
+            "--tools", ",".join(tool_names),
         ]
+        if servers:
+            command.extend(["-e", "builtin:mcp"])
         if prepared and prepared.ast_reader:
             command.extend(["-e", str(AST_EXTENSION)])
         if existing is not None:

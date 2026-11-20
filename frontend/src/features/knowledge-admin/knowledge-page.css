@@ -1,12 +1,9 @@
 .knowledge-page { gap: var(--space-3); }
-.knowledge-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.knowledge-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
 .knowledge-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
-.knowledge-heading p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
 .knowledge-grid { display: grid; grid-template-columns: minmax(205px, .85fr) minmax(0, 1.6fr) minmax(235px, .95fr); gap: var(--space-3); align-items: start; }
 .knowledge-file-rows { display: flex; flex-direction: column; gap: 2px; max-height: 52vh; overflow-y: auto; }
 .knowledge-file-rows .r-copy b { overflow-wrap: anywhere; font-weight: 600; font-size: 12px; }
-.knowledge-list-note { margin: 10px 2px 0; color: var(--color-text-faint); font-size: var(--type-xs); line-height: 1.7; }
-.knowledge-editor-foot { margin: 10px 0 0; color: var(--color-text-faint); font-size: var(--type-xs); }
 .knowledge-markdown { max-height: 60vh; overflow: auto; overflow-wrap: anywhere; font-size: var(--type-md); line-height: 1.8; }
 .knowledge-markdown h1 { font-size: var(--type-lg); }
 .knowledge-markdown h2 { font-size: var(--type-md); }
@@ -14,7 +11,6 @@
 .knowledge-markdown pre { background: var(--color-well); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-3); overflow: auto; }
 .knowledge-markdown table { border-collapse: collapse; }
 .knowledge-markdown th, .knowledge-markdown td { border: 1px solid var(--color-border); padding: 4px 8px; }
-.knowledge-projection-note { margin: 0 0 var(--space-3); color: var(--color-text-secondary); font-size: var(--type-sm); line-height: 1.6; }
 @media (max-width: 1060px) {
   .knowledge-grid { grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr); }
   .knowledge-grid > :last-child { grid-column: 1 / -1; }

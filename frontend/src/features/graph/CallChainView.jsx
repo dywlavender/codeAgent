@@ -75,27 +75,27 @@ export function CallChainView({ projectId }) {
       <Button icon={<ArrowClockwise size={16} />} onClick={() => setRefresh((n) => n + 1)}>刷新</Button>
     </div>
     {error && <Alert type="error" showIcon title={error} />}
-    {stale && <Alert type="warning" showIcon title="相关源码已变化或不可读取，当前图展示索引时的连接，请更新索引。" />}
-    {chain?.truncated && <Alert type="info" title="当前仅展示前 70 个方法节点。" />}
+    {stale && <Alert type="warning" showIcon title="源码已变化，当前为索引时快照，请更新索引" />}
+    {chain?.truncated && <Alert type="info" title="仅展示前 70 个方法节点" />}
     {error ? null : loading ? <Skeleton active paragraph={{ rows: 8 }} /> : catalog?.status === "missing"
-      ? <Empty description="尚未准备调用链索引，请先准备当前工程的契约索引，再刷新。" />
-      : !catalog?.items.length ? <Empty description="当前索引没有可展示的接口。" />
+      ? <Empty description="尚未准备契约索引，准备后刷新" />
+      : !catalog?.items.length ? <Empty description="索引中没有可展示的接口" />
         : !chain ? !error && <Skeleton active paragraph={{ rows: 7 }} />
           : <CallChainCanvas chain={chain} selection={selection} onSelect={setSelection} />}
-    {chain && <p className="call-chain-caption">静态结构导航 · 覆盖已索引的返回依赖调用 · 不代表完整运行调用链 · 点击节点或连线查看源码</p>}
+    {chain && <p className="call-chain-caption">返回依赖投影 · 点击节点或连线查看源码</p>}
     <Drawer open={Boolean(selection)} onClose={() => setSelection(null)} title={selectedNode?.label || selectedEdge?.label || "源码依据"}
       size={560} mask={false} className="call-chain-drawer">
       {selectedNode && <div className="call-chain-inspector-title"><span>{selectedNode.application}</span><code>{selectedNode.route}</code></div>}
       {selectedNode?.contractId && selectedNode.contractId !== contract && <Button onClick={() => { setContract(selectedNode.contractId); setSelection(null); }}>从此接口继续查看</Button>}
       {selectedEdge && <p className="call-chain-inspector-title">{chain.nodes.find((n) => n.id === selectedEdge.source)?.label} → {chain.nodes.find((n) => n.id === selectedEdge.target)?.label}</p>}
-      {selectedNode?.reason && <Alert type="info" title={selectedNode.label} description="索引未能确认目标连接，图中未推断目标服务。" />}
+      {selectedNode?.reason && <Alert type="info" title={selectedNode.label} description="未确认目标连接，不推断目标服务" />}
       {evidenceError ? <Alert type="error" title={evidenceError} /> : !evidence ? <Skeleton active /> : <>
-        {evidence.blocks.some((b) => b.state !== "current") && <Alert type="warning" title="下面为索引时的源码片段，当前文件已变化或不可读取。" />}
-        {!evidence.blocks.length && <Empty description="对应源码不在当前工程资料范围或无法读取。" />}
+        {evidence.blocks.some((b) => b.state !== "current") && <Alert type="warning" title="索引时片段，当前文件已变化或不可读取" />}
+        {!evidence.blocks.length && <Empty description="源码不在当前工程资料范围或无法读取" />}
         {evidence.blocks.map((block, i) => <section className="call-chain-source" key={`${block.path}:${block.start}:${i}`}>
           <div className="call-chain-source-path">{block.path}:{block.start}–{block.end}</div>
           <pre><code>{block.content}</code></pre>
-          {block.truncated && <p>片段已按行数上限截断。</p>}
+          {block.truncated && <p>片段已截断</p>}
         </section>)}
         {evidence.omittedBlocks > 0 && <p>另有 {evidence.omittedBlocks} 段依据未展示。</p>}
         <details className="call-chain-version"><summary>索引版本</summary><code>{evidence.indexVersion}</code></details>
@@ -180,6 +180,5 @@ export function CallChainCanvas({ chain, selection, onSelect, graphLabel = "接�
         </g>;
       })}
     </svg>
-    <span className="call-chain-pan-hint">拖拽平移 · 使用右上角缩放</span>
   </div>;
 }

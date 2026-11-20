@@ -1,0 +1,20 @@
+#AOCI-CODE-VOLUME: 1
+
+===/<repository>/===
+.gitattributes[FG1T]: F:确保跨平台签出的行尾一致性 | R:- | A:- | S:强制LF行尾覆盖Windows autocrlf默认设置
+.gitignore[FG1T]: F:排除IDE配置、依赖和构建产物 | R:- | A:- | S:-
+AGENTS.md[SG2S]: F:定义模型使用AOCI的完整协作规范 | R:- | A:- | S:-
+README.md[SG1T]: F:项目简介与提款入口说明 | R:code:src/pages/WithdrawApply.vue | A:- | S:-
+package.json[FG3T]: F:定义项目依赖与构建脚本 | R:- | A:- | S:使用Vue 3、Vue Router和Axios作为核心依赖，Vite作为构建工具
+
+===/<repository>/.pi/===
+mcp.json[FG2T]: F:配置AOCI MCP服务器连接 | R:- | A:- | S:路径与参数已硬编码为特定开发环境，其他环境需修改绝对路径
+
+===/<repository>/src/pages/===
+WithdrawApply.vue[EU5T]: F:提款申请流程的用户界面与业务调用 | R:code:src/utils/request.ts | A:提款流程 | S:按顺序调用9个步骤的后端接口，从查询额度到发起提款；客户编号与金额硬编码为演示值
+
+===/<repository>/src/router/===
+index.ts[EU4T]: F:配置前端路由 | R:code:src/pages/WithdrawApply.vue | A:- | S:使用HTML5 History模式，当前只注册了提款申请页面路由
+
+===/<repository>/src/utils/===
+request.ts[CG3T]: F:创建并导出Axios HTTP客户端实例 | R:- | A:- | S:baseURL为空字符串，依赖代理或同源；超时设置10秒

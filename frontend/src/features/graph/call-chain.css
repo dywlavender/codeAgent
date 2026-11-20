@@ -1,7 +1,6 @@
 .graph-feature { gap: var(--space-4); }
-.graph-feature-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.graph-feature-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
 .graph-feature-heading h1 { margin: 0; font-size: var(--type-xl); font-weight: 650; color: var(--color-text); }
-.graph-feature-heading p { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
 .call-chain-view { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; flex: 1; }
 .call-chain-toolbar { display: flex; align-items: center; gap: var(--space-3); }
 .call-chain-select { width: min(720px, calc(100% - 90px)); }
@@ -9,7 +8,6 @@
 .call-chain-canvas > svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
 .call-chain-canvas > svg:active { cursor: grabbing; }
 .call-chain-controls { position: absolute; z-index: 1; right: var(--space-4); top: var(--space-4); display: flex; gap: var(--space-2); }
-.call-chain-pan-hint { position: absolute; bottom: var(--space-3); right: var(--space-4); color: var(--color-text-faint); font-size: var(--type-xs); pointer-events: none; }
 .call-chain-caption { color: var(--color-text-faint); font-size: var(--type-sm); margin: 0; }
 .call-chain-canvas marker path { fill: var(--color-brand); }
 .call-chain-edge { cursor: pointer; outline: none; }
@@ -40,7 +38,6 @@
 .call-chain-version code { display: block; margin-top: var(--space-2); overflow-wrap: anywhere; }
 
 /* ===== AST 关系探索三栏 ===== */
-.ast-coverage-hint { margin-bottom: var(--space-3); }
 .ast-heading-stats { margin: 6px 0 0; color: var(--color-text-secondary); font-size: var(--type-sm); }
 .ast-heading-stats b { color: var(--color-text); font-weight: 650; }
 .ast-explorer { height: max(480px, calc(100dvh - 285px)); }

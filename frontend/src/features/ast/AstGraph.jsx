@@ -151,8 +151,8 @@ export function AstGraph({ versionId, repositories, onInvalidated }) {
                 <span className="r-glyph">⌘</span>
                 <span className="r-copy"><b>{item.qualifiedName}</b><small>{item.repositoryId}:{item.lineStart}</small></span>
               </button>)
-            : result ? <p className="ast-side-hint">未找到匹配符号。</p>
-              : <p className="ast-side-hint">搜索后选择一个符号开始查看关系。</p>}
+            : result ? <p className="ast-side-hint">未找到匹配符号</p>
+              : <p className="ast-side-hint">搜索符号开始查看关系</p>}
         </div>
         {error && <p className="ast-side-error">{error}</p>}
       </div>
@@ -181,9 +181,9 @@ export function AstGraph({ versionId, repositories, onInvalidated }) {
                   if (edge) openSource(edge.source, edge.relationId || edge.id);
                 }
               }} />
-          : pending ? <Skeleton active /> : <Empty description="搜索并选择一个符号开始查看关系" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-        {clueCount > 0 && <p className="call-chain-caption">虚线节点是尚未解析的调用线索（{clueCount}）；没有连线不等于不存在调用。</p>}
-        {graph?.truncated && <p className="call-chain-caption">部分关系已按单次结果上限截断。</p>}
+          : pending ? <Skeleton active /> : <Empty description="搜索并选择符号查看关系" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+        {clueCount > 0 && <p className="call-chain-caption">虚线为未解析调用线索（{clueCount}）</p>}
+        {graph?.truncated && <p className="call-chain-caption">部分关系已截断</p>}
       </div>
     </Splitter.Panel>
     <Splitter.Panel defaultSize="24%" min="18%" max="34%">
@@ -196,9 +196,9 @@ export function AstGraph({ versionId, repositories, onInvalidated }) {
               ? <React.Fragment key={number}>{String(number).padStart(4)}  {line}{"\n"}</React.Fragment>
               : null;
           })}</code></pre>
-          {source.truncated && <p>源码片段已截断。</p>}
+          {source.truncated && <p>片段已截断</p>}
         </section> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="点击画布中的节点或连线，在这里查看定义位置和调用原文" />}
+          description="点击节点或连线查看源码" />}
       </div>
     </Splitter.Panel>
   </Splitter>;

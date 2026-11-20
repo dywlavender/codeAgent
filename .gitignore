@@ -45,3 +45,20 @@ output/playwright/
 .pi/
 .workbuddy-ai/
 wf-data-snapshot-*
+
+# AOCI agent host integration (machine-bound; do not commit)
+.codex/config.toml
+.codex/config.toml.backup.*
+
+# Local scratch / tool state / offline artifacts (not source work products)
+.tmp-incr/
+.zcode/
+pi-offline/
+AGENTS.md.backup.*
+
+# Platform repo's own AOCI scaffolding is unbuilt and machine-bound; the
+# versioned demo cognition lives under examples/*/.
+/.aoci/
+/aoci.txt
+/aoci.meta.txt
+/aoci.code.txt

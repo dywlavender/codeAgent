@@ -282,19 +282,19 @@ test("materials overview switches projects and displays each project's projectio
       rawMaterials: { root: `/materials/${alpha ? "alpha" : "beta"}`,
         items: [{ name: alpha ? "审批需求.md" : "运营需求.md" }] }, sources: [],
     });
-  }, "library");
+  }, "materials");
 
-  assert.match(document.body.textContent, /需要处理：业务关系图已落后于最新业务文档/);
+  assert.match(document.body.textContent, /业务投影待更新/);
   assert.match(document.body.textContent, /知识图谱待更新/);
   assert.match(document.body.textContent, /审批需求.md/);
   await choose("选择工程", "运营工程");
   assert.equal(new URL(window.location.href).searchParams.get("projectId"), "beta");
   await act(async () => {
     const navigated = once(window, "hashchange", { signal: AbortSignal.timeout(2000) });
-    textElement('[role="menuitem"]', "知识总览").click();
+    textElement('[role="menuitem"]', "资料总览").click();
     await navigated;
   });
   assert.match(document.body.textContent, /知识图谱已同步/);
   assert.match(document.body.textContent, /运营需求.md/);
-  assert.doesNotMatch(document.body.textContent, /待更新|需要处理|审批需求.md/);
+  assert.doesNotMatch(document.body.textContent, /待更新|审批需求.md/);
 });

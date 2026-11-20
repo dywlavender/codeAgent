@@ -1,0 +1,28 @@
+#AOCI-CODE-VOLUME: 1
+
+===/<repository>/===
+.gitattributes[XV1T]: F:强制LF换行以保证AOCI字节一致性校验 | R:- | A:- | S:-
+.gitignore[XV1T]: F:排除IDE配置、依赖目录和构建产物 | R:- | A:- | S:-
+AGENTS.md[SG2S]: F:AOCI仓库认知使用指南 | R:code:aoci.txt | A:- | S:-
+README.md[SG1T]: F:项目简介 | R:code:src/main/java/demo/channel/controller/ChannelWithdrawController.java,code:src/main/java/demo/channel/client/LoanMiddleClient.java | A:- | S:-
+pom.xml[FV4T]: F:Maven项目定义与依赖声明 | R:- | A:- | S:依赖Spring Boot Web和OpenFeign
+
+===/<repository>/.pi/===
+mcp.json[XV1T]: F:配置AOCI MCP服务器连接 | R:- | A:- | S:-
+
+===/<repository>/src/main/java/demo/channel/===
+ChannelApplication.java[EG5T]: F:Spring Boot应用入口 | R:- | A:- | S:@EnableFeignClients启用Feign客户端扫描
+
+===/<repository>/src/main/java/demo/channel/client/===
+LoanMiddleClient.java[IN6T]: F:贷款中台服务的Feign客户端接口 | R:code:src/main/java/demo/channel/model/ContractSignRequest.java,code:src/main/java/demo/channel/model/TaxAuthorizationRequest.java,code:src/main/java/demo/channel/model/WithdrawApplyRequest.java | A:集成适配 | S:服务名loan-middle，统一路径前缀/middle/withdraw
+
+===/<repository>/src/main/java/demo/channel/controller/===
+ChannelWithdrawController.java[EB7T]: F:提款流程的HTTP入口控制器 | R:code:src/main/java/demo/channel/service/ChannelWithdrawService.java,code:src/main/java/demo/channel/model/ContractSignRequest.java,code:src/main/java/demo/channel/model/TaxAuthorizationRequest.java,code:src/main/java/demo/channel/model/WithdrawApplyRequest.java | A:入口边界 | S:统一路径前缀/api/withdraw，所有调用委托给service层
+
+===/<repository>/src/main/java/demo/channel/model/===
+ContractSignRequest.java[DB3T]: F:合同签署请求参数 | R:- | A:数据状态 | S:-
+TaxAuthorizationRequest.java[DB3T]: F:税务授权请求参数 | R:- | A:数据状态 | S:-
+WithdrawApplyRequest.java[DB4T]: F:提款申请请求参数 | R:- | A:数据状态 | S:聚合所有提款流程所需字段
+
+===/<repository>/src/main/java/demo/channel/service/===
+ChannelWithdrawService.java[AB6T]: F:提款业务服务层 | R:code:src/main/java/demo/channel/client/LoanMiddleClient.java | A:应用编排 | S:所有业务方法直接透传给LoanMiddleClient

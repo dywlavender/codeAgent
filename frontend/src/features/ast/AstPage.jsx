@@ -67,41 +67,34 @@ export function AstPage({ projectId, onRequireUnlock }) {
   const current = status?.current;
   const [label, color] = AST_STATUS[status?.status] || AST_STATUS.missing;
   const stats = current?.statistics;
-  /* 关系解析覆盖有限时提前说明边界：没有连线不等于不存在调用。 */
-  const lowCoverage = status?.status === "available" && stats && (stats.relationCount ?? 0) < 10;
   const graph = status?.status === "available"
     ? <AstGraph key={status.currentVersionId} versionId={status.currentVersionId}
         repositories={current?.sourceRepositories || []} onInvalidated={refresh} />
-    : <Empty description="生成可用的结构索引后即可查询符号及相邻关系。"
+    : <Empty description="生成索引后可查询符号关系"
         image={Empty.PRESENTED_IMAGE_SIMPLE}>
         <Button onClick={() => setTab("index")}>查看索引状态</Button>
       </Empty>;
 
   return <div className="page-wrap ast-page" style={{ overflowY: "auto" }}>
-    <Flex justify="space-between" align="center" wrap gap={8} style={{ margin: "0 auto" }}>
+    <Flex justify="space-between" align="center" wrap gap={8}>
       <div className="page-heading compact-heading">
         <div>
           <h1>AST 结构</h1>
-          <p>快速定位类与方法、查询调用与继承关系；具体实现以源码为准。</p>
           {stats && <p className="ast-heading-stats">已索引 <b>{stats.symbolCount}</b> 符号 · <b>{stats.relationCount}</b> 条已解析关系
             <Tag color={color} style={{ marginLeft: 8 }}>{label}</Tag></p>}
         </div>
       </div>
       <Flex gap={8}>
-        <Button icon={<ArrowClockwise size={15} />} onClick={refresh}>刷新状态</Button>
+        <Button icon={<ArrowClockwise size={15} />} onClick={refresh}>刷新</Button>
         <Button type="primary" icon={<Code size={15} />} onClick={generate}
           loading={generating || status?.status === "generating"}>
           {status?.currentVersionId ? "重新生成" : "生成 AST"}
         </Button>
       </Flex>
     </Flex>
-    {error && <Alert type="error" showIcon title={error} style={{ margin: "12px auto" }} />}
-    <Tabs style={{ margin: "0 auto" }} activeKey={tab} onChange={setTab} items={[
-      { key: "explore", label: "关系探索", children: <>
-        {lowCoverage && <Alert className="ast-coverage-hint" type="warning" showIcon
-          title="已解析关系数量较少。没有连线不等于不存在调用；可继续查看调用线索并使用代码问答读取源码。" />}
-        {graph}
-      </> },
+    {error && <Alert type="error" showIcon title={error} style={{ marginTop: 12 }} />}
+    <Tabs activeKey={tab} onChange={setTab} items={[
+      { key: "explore", label: "关系探索", children: graph },
       { key: "index", label: "索引管理", children: status
         ? <div className="ast-grid">
             <Card className="panel-card ast-status-card">
@@ -121,7 +114,6 @@ export function AstPage({ projectId, onRequireUnlock }) {
                     <Code size={14} /><span>{repo.id}</span><small title={repo.path}>{repo.path}</small>
                   </div>)
                 : <span className="muted-text">生成后显示所用源码仓库</span>}</div>
-              <p className="panel-help">Java 使用 tree-sitter。Web 符号和调用线索来自现有模式解析器。</p>
             </Card>
           </div>
         : <Skeleton active /> },

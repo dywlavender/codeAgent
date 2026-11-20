@@ -147,7 +147,6 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock, onSaved 
             </button>)}
           </div>
         : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无业务文档" />}
-      <p className="knowledge-list-note">Markdown 是业务原文；结构化图谱只是它的投影，不是另一套维护源。</p>
     </Card>
     <Card title={creating ? "新建业务文档" : document?.name || "业务原文"} size="small" className="knowledge-editor">
       {error && <Alert type="error" showIcon title="操作未完成" description={error}
@@ -155,9 +154,9 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock, onSaved 
           if (document && !creating) openFile(document.name);
           else if (canLeaveDraft()) loadFiles();
         }}>重新加载</Button>} />}
-      {saved && <Alert type="success" showIcon title="已保存业务文档；业务图谱需显式更新投影" />}
+      {saved && <Alert type="success" showIcon title="已保存" />}
       {files && !files.editable && <Alert type="info" showIcon title="历史业务基线只读"
-        description="迁移到业务补充知识目录后可在这里编辑。" />}
+        description="迁移到业务补充知识目录后可编辑" />}
       {pending === "load" ? <Skeleton active paragraph={{ rows: 8 }} />
         : !document ? files && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无业务文档" />
           : creating || !files.editable ? editorBody
@@ -167,8 +166,6 @@ export function BusinessContextEditor({ adminUnlocked, onRequireUnlock, onSaved 
                   : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容，切换到编辑开始编写" /> },
                 { key: "edit", label: "编辑 Markdown", children: editorBody },
               ]} />}
-      {!creating && document && <p className="knowledge-editor-foot">
-        保存原文不会自动更新业务图谱；需要展示时再执行「更新投影」。</p>}
     </Card>
     {checking && <BusinessContextSuggestion document={document} onClose={() => setChecking(false)}
       onEdit={(content) => { setDraft(content); setSaved(false); setChecking(false); setMode("edit"); }}

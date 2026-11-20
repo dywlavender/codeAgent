@@ -22,7 +22,7 @@ import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
 import { GraphPage } from "./features/graph/GraphPage.jsx";
 import { KnowledgeAdminPage } from "./features/knowledge-admin/KnowledgeAdminPage.jsx";
 import { SystemGuidesPage } from "./features/knowledge-admin/SystemGuidesPage.jsx";
-import { LibraryPage } from "./features/library/LibraryPage.jsx";
+import { MaterialsPage } from "./features/materials/MaterialsPage.jsx";
 import { SettingsPage } from "./features/settings/SettingsPage.jsx";
 
 const { Content } = Layout;
@@ -196,7 +196,7 @@ export default function App() {
           />
         )}
         {page !== "agent" && <AppTopbar page={page} toggleSidebar={() => setSidebarOpen((open) => !open)} />}
-        {page === "library" && <LibraryPage key={projects.projectId} projectId={projects.projectId}
+        {page === "materials" && <MaterialsPage key={projects.projectId} projectId={projects.projectId}
           onRequireUnlock={() => admin.setOpen(true)} />}
         {page === "guides" && <SystemGuidesPage key={projects.projectId} projectId={projects.projectId} adminUnlocked={admin.unlocked}
           onRequireUnlock={() => admin.setOpen(true)} />}

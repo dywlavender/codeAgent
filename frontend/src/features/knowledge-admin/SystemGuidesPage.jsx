@@ -12,12 +12,6 @@ function targetParams(system, app) {
   return { systemId: system.id, ...(app ? { applicationId: app.id } : {}) };
 }
 
-const SCOPE_NOTES = {
-  system: ["系统视角", "系统通用导航 + 本系统下应用导航。未发布草稿不参与问答。"],
-  application: ["应用视角", "所属系统的通用规则 + 当前应用的补充导航。"],
-  repository: ["仓库视角", "显示该仓库关联的应用与对应系统规则；源码访问仍按仓库授权。"],
-};
-
 export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) {
   const [systems, setSystems] = useState(null);
   const [target, setTarget] = useState(null);
@@ -99,7 +93,7 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
       setDocument({ ...document, ...saved });
       setDraft(saved.content);
       setEvidence([]);
-      setMessage("已发布系统导航");
+      setMessage("已发布");
       const [{ systems: data }] = await Promise.all([request(BASE), refreshPreview(target)]);
       setSystems(data);
     });
@@ -115,7 +109,7 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
       setEvidence(suggestion.sourceFiles);
       setDraftRun(suggestion.runId);
       setMode("edit");
-      setMessage("草稿已生成，核对后可发布；草稿不直接生效");
+      setMessage("草稿已生成，发布后生效");
     });
   }
 
@@ -131,13 +125,9 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
     .filter((item) => item.published).length;
   const repositoryIds = [...new Set((systems || []).flatMap((system) =>
     system.applications.map((app) => app.repositoryId)))];
-  const scope = preview?.scope || {};
-  const scopeKind = scope.repositoryIds?.length ? "repository"
-    : scope.applicationIds?.length ? "application" : "system";
-  const [scopeLabel, scopeNote] = SCOPE_NOTES[scopeKind];
   return <div className="page-wrap system-guides">
     <div className="guides-heading">
-      <div><h1>系统导航</h1><p>按系统和应用维护代码查找规则；这些文档用于导航，不代替源码事实。</p></div>
+      <h1>系统导航</h1>
       {systems?.length ? <Flex gap={8} wrap>
         <Tag bordered={false}>已发布 {publishedCount} 份</Tag>
         <Button disabled={!target || Boolean(pending)} loading={pending === "draft"} onClick={() => {
@@ -159,16 +149,14 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
               disabled={Boolean(pending)} onSelect={(_, info) => {
                 if (info.selected && discard()) work("load", () => loadTarget(info.node.params));
               }} />
-            <p className="guide-tree-note">选择左侧系统或应用查看它自己的导航内容；不会自动复制其他应用的入口列表。</p>
           </Card>
           <Card title={document?.name || "导航文档"} size="small" className="system-guide-editor">
             {document ? <Flex vertical gap={10}>
               <Tabs size="small" activeKey={mode} onChange={setMode} items={[
                 { key: "preview", label: "内容预览", children: draft
                   ? <div className="system-guide-preview"><Markdown remarkPlugins={[remarkGfm]}>{draft}</Markdown></div>
-                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description="尚未编写内容；可以使用模板或 AI 生成草稿">
-                      <Button type="primary" disabled={Boolean(pending)} onClick={() => setMode("edit")}>切换到编辑</Button>
+                  : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未编写内容">
+                      <Button type="primary" disabled={Boolean(pending)} onClick={() => setMode("edit")}>编辑</Button>
                     </Empty> },
                 { key: "edit", label: "编辑 Markdown", children: <Flex vertical gap={10}>
                   <Input.TextArea aria-label="系统导航 Markdown" value={draft} rows={19}
@@ -188,7 +176,6 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
                   {draftRun && <Button type="link" onClick={() => setShowTrace(true)}>查看草稿调查</Button>}
                 </Flex> },
               ]} />
-              <p className="system-guide-foot">已发布版本与编辑草稿分离：草稿发布后才参与问答导航。</p>
             </Flex> : <Skeleton active />}
           </Card>
           <Card title="实际生效的导航" size="small" extra={<Tag bordered={false}>只读</Tag>}>
@@ -197,18 +184,12 @@ export function SystemGuidesPage({ projectId, adminUnlocked, onRequireUnlock }) 
                 options={[{ value: "", label: target?.applicationId ? "应用视角" : "系统视角" },
                   ...repositoryIds.map((id) => ({ value: id, label: `仓库视角 · ${id}` }))]}
                 onChange={(value) => work("preview", () => refreshPreview(target, value))} />
-              <div className="guide-scope-note"><b>{scopeLabel}</b><p>{scopeNote}</p></div>
-              <dl className="guide-kv">
-                <dt>使用方式</dt><dd>作为本轮问答的导航摘要；完整文档可按需读取</dd>
-                <dt>事实依据</dt><dd>定位线索，不能代替当前源码内容</dd>
-                <dt>管理方式</dt><dd>管理员修改并确认后发布</dd>
-              </dl>
               {preview?.guidance ? <>
                 <pre className="system-guide-effective">{preview.guidance}</pre>
                 {preview.documents.length > 0 && <Typography.Text type="secondary">
-                  可按需读取 {preview.documents.length} 份导航文档
+                  可读取 {preview.documents.length} 份文档
                 </Typography.Text>}
-              </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此范围未登记可装配的应用导航" />}
+              </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此范围暂无生效导航" />}
             </Flex>
           </Card>
         </div>}

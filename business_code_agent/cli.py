@@ -120,6 +120,12 @@ def main() -> None:
     serve_query.add_argument("--project-config", help="项目和仓库配置，用于生成 Claude 工作区")
     serve_query.add_argument("--project-registry", help="平台工程注册表目录；启用后按工程独立路由数据库和资料")
     serve_query.add_argument("--project-id", help="注册表模式下的默认工程 ID")
+    serve_mcp = sub.add_parser(
+        "serve-mcp", help="以 stdio 启动只读业务知识 MCP 服务，供 Pi/Codex/Claude Code 等 Agent 使用",
+    )
+    serve_mcp.add_argument("--project-config", help="单工程模式必填；一次启动只绑定该工程")
+    serve_mcp.add_argument("--project-registry", help="平台工程注册表目录；一次启动只绑定其中一个工程")
+    serve_mcp.add_argument("--project-id", help="注册表模式下要绑定的工程 ID；留空使用默认工程")
     project_register = sub.add_parser("project-register", help="把项目配置登记到平台工程注册表")
     project_register.add_argument("--registry", required=True, help="平台数据目录")
     project_register.add_argument("--config", required=True, help="项目配置文件")
@@ -141,6 +147,13 @@ def main() -> None:
         parser.error(str(exc))
     if args.command == "serve-query":
         _warn_runtime_configuration()
+    if args.command == "serve-mcp":
+        if args.project_registry and args.project_config:
+            parser.error("serve-mcp 的 --project-config 与 --project-registry 只能二选一")
+        if args.project_id and not args.project_registry:
+            parser.error("serve-mcp 的 --project-id 需要与 --project-registry 一起使用")
+        if not args.project_registry and not args.project_config:
+            parser.error("serve-mcp 需要 --project-config 或 --project-registry")
     project_context = None
     if args.command in {"sync-project", "baseline-refresh"} and args.project_registry:
         if not args.project_id:
@@ -266,6 +279,20 @@ def main() -> None:
             args.db, args.host, args.port, project_config=args.project_config,
             project_registry=args.project_registry, project_id=args.project_id,
         )
+    elif args.command == "serve-mcp":
+        from business_code_agent.mcp.server import McpSdkUnavailable, serve as serve_mcp
+        try:
+            serve_mcp(
+                project_config=args.project_config,
+                project_registry=args.project_registry,
+                project_id=args.project_id,
+            )
+        except (McpSdkUnavailable, ValueError) as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        except KeyError as exc:
+            print(f"[ERROR] 工程注册表中没有工程 {exc.args[0] if exc.args else ''}", file=sys.stderr)
+            raise SystemExit(1) from None
     elif args.command == "project-register":
         from business_code_agent.platform.projects import ProjectRegistry
         context = ProjectRegistry(args.registry).register(

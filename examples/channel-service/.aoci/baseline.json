@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "created_at": "2026-11-19T14:06:40Z",
+  "updated_at": "2026-11-19T14:24:58Z",
+  "files": {
+    ".gitattributes": {
+      "role": "index",
+      "sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476",
+      "size": 291,
+      "normalized_sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476"
+    },
+    ".gitignore": {
+      "role": "index",
+      "sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679",
+      "size": 48,
+      "normalized_sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679"
+    },
+    ".pi/mcp.json": {
+      "role": "index",
+      "sha256": "520776ecf7f1035e5f52b75c7b17a90bfb8702d57ec68763980b5cec33be767a",
+      "size": 239,
+      "normalized_sha256": "520776ecf7f1035e5f52b75c7b17a90bfb8702d57ec68763980b5cec33be767a"
+    },
+    "AGENTS.md": {
+      "role": "index",
+      "sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8",
+      "size": 14078,
+      "normalized_sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8"
+    },
+    "README.md": {
+      "role": "index",
+      "sha256": "b661c959ae56595a1d551d84a0b8f818d3da64212cad3a44384daefaf9b0fe04",
+      "size": 159,
+      "normalized_sha256": "b661c959ae56595a1d551d84a0b8f818d3da64212cad3a44384daefaf9b0fe04"
+    },
+    "aoci.code.txt": {
+      "role": "index",
+      "sha256": "52f45e4b70f2396b1130ea245be7884f32bf4d93854d001523eb13b1b91cd064",
+      "size": 2344,
+      "normalized_sha256": "52f45e4b70f2396b1130ea245be7884f32bf4d93854d001523eb13b1b91cd064"
+    },
+    "aoci.meta.txt": {
+      "role": "index",
+      "sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a",
+      "size": 2187,
+      "normalized_sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a"
+    },
+    "aoci.txt": {
+      "role": "index",
+      "sha256": "22942d155ee8ffea581eb264694c0813f2e6c982151efbd7b827ade71f505ca9",
+      "size": 304,
+      "normalized_sha256": "22942d155ee8ffea581eb264694c0813f2e6c982151efbd7b827ade71f505ca9"
+    },
+    "pom.xml": {
+      "role": "index",
+      "sha256": "9ec43048d637e68d3446056e21777359a29194156b766ab76ef7ec6bdb689bed",
+      "size": 545,
+      "normalized_sha256": "9ec43048d637e68d3446056e21777359a29194156b766ab76ef7ec6bdb689bed"
+    },
+    "src/main/java/demo/channel/ChannelApplication.java": {
+      "role": "index",
+      "sha256": "36f90d3ec01c3a678dac8c5d3c9122c1d8fcbf59d8bbfd4e3ce65dada3d708b5",
+      "size": 400,
+      "normalized_sha256": "36f90d3ec01c3a678dac8c5d3c9122c1d8fcbf59d8bbfd4e3ce65dada3d708b5"
+    },
+    "src/main/java/demo/channel/client/LoanMiddleClient.java": {
+      "role": "index",
+      "sha256": "a404c7192a63b98a2275f29879c05b901914081327a29c9c9951c19bacfca849",
+      "size": 1564,
+      "normalized_sha256": "a404c7192a63b98a2275f29879c05b901914081327a29c9c9951c19bacfca849"
+    },
+    "src/main/java/demo/channel/controller/ChannelWithdrawController.java": {
+      "role": "index",
+      "sha256": "325fb73a3e041fd3dbbb438792e67a3b01f30288858119be631b9d0991f998a1",
+      "size": 2365,
+      "normalized_sha256": "325fb73a3e041fd3dbbb438792e67a3b01f30288858119be631b9d0991f998a1"
+    },
+    "src/main/java/demo/channel/model/ContractSignRequest.java": {
+      "role": "index",
+      "sha256": "64f6deab6e53db4d310496c6ccc4d3316798c51f1f0918508d8a5ce981641ed4",
+      "size": 284,
+      "normalized_sha256": "64f6deab6e53db4d310496c6ccc4d3316798c51f1f0918508d8a5ce981641ed4"
+    },
+    "src/main/java/demo/channel/model/TaxAuthorizationRequest.java": {
+      "role": "index",
+      "sha256": "9dd83ae78125ea867ddee45687c84b17d89cbc27b5e2f9af8859a647b7263e2b",
+      "size": 137,
+      "normalized_sha256": "9dd83ae78125ea867ddee45687c84b17d89cbc27b5e2f9af8859a647b7263e2b"
+    },
+    "src/main/java/demo/channel/model/WithdrawApplyRequest.java": {
+      "role": "index",
+      "sha256": "59101bf0ba2224758fa921a24719272036148ab6d66e0cfec979ffbe9c46eb80",
+      "size": 353,
+      "normalized_sha256": "59101bf0ba2224758fa921a24719272036148ab6d66e0cfec979ffbe9c46eb80"
+    },
+    "src/main/java/demo/channel/service/ChannelWithdrawService.java": {
+      "role": "index",
+      "sha256": "ec271281f227781094c65032209880617d7dfa2fcb1f395a5695244868c85779",
+      "size": 1656,
+      "normalized_sha256": "ec271281f227781094c65032209880617d7dfa2fcb1f395a5695244868c85779"
+    }
+  },
+  "managed_scope": {
+    "version": "managed-scope-baseline/v1",
+    "policy_identity": "e0f548d87fe5462c412a1c54409871a60ddf2ae5c30609258ff8739fdfcc8e76",
+    "observe_change_policy": "review_required",
+    "budget_policy_identity": "15e9b37a6c57e9bf03c9df3d0d049eb5b9a7f5540f9d34960408114e2538a32d",
+    "budget_policy": {
+      "version": "cognition-budget-policy/v1",
+      "mode": "enforce",
+      "whole_index": {
+        "target_tokens": 200000,
+        "warning_tokens": 300000,
+        "max_tokens": 400000
+      },
+      "r": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 25,
+          "max_tokens": 50
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 45,
+          "max_tokens": 90
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 90,
+          "max_tokens": 180
+        }
+      ],
+      "s": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 20,
+          "max_tokens": 40
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 40,
+          "max_tokens": 80
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 100,
+          "max_tokens": 200
+        }
+      ]
+    },
+    "apply_authorization_mode": "auto"
+  }
+}

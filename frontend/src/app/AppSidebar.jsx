@@ -5,7 +5,7 @@
 
 import React from "react";
 import {
-  BookOpen, ChatCircleDots, Flask, Gear, Graph, Lock, Plus, ShieldCheck, SidebarSimple,
+  BookOpen, ChatCircleDots, Flask, Gear, Graph, Lock, Plus, ShieldCheck, SidebarSimple, Stack, TreeStructure,
 } from "@phosphor-icons/react";
 import { Avatar, Badge, Button, Flex, Layout, Menu, Select, Typography } from "antd";
 import { RecentConversations } from "../features/query/RecentConversations.jsx";
@@ -61,26 +61,14 @@ export function AppSidebar({
           selectedKeys={[page]}
           onClick={({ key }) => navigate(key)}
           items={[
-            {
-              type: "group",
-              label: "知识中心",
-              children: [
-                { key: "library", icon: <BookOpen size={16.5} />, label: "知识总览" },
-                ...(admin.zoneVisible ? [{ key: "guides", icon: <BookOpen size={16.5} />, label: "系统导航" }] : []),
-                { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
-                { key: "ast", icon: <Graph size={16.5} />, label: "AST 结构" },
-                ...(admin.zoneVisible ? [{ key: "admin", icon: <ShieldCheck size={16.5} />, label: "业务知识" }] : []),
-              ],
-            },
-            {
-              type: "group",
-              label: "其他",
-              children: [
-                { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "代码问答" },
-                { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
-                { key: "settings", icon: <Gear size={16.5} />, label: "工程设置" },
-              ],
-            },
+            { key: "agent", icon: <ChatCircleDots size={16.5} />, label: "问答" },
+            { key: "materials", icon: <Stack size={16.5} />, label: "资料总览" },
+            ...(admin.zoneVisible ? [{ key: "guides", icon: <BookOpen size={16.5} />, label: "系统导航" }] : []),
+            ...(admin.zoneVisible ? [{ key: "admin", icon: <ShieldCheck size={16.5} />, label: "业务知识" }] : []),
+            { key: "ast", icon: <TreeStructure size={16.5} />, label: "AST 索引" },
+            { key: "graph", icon: <Graph size={16.5} />, label: "知识图谱" },
+            { key: "evaluation", icon: <Flask size={16.5} />, label: "效果验证" },
+            { key: "settings", icon: <Gear size={16.5} />, label: "工程设置" },
           ]}
         />
         <RecentConversations history={history} query={query} />

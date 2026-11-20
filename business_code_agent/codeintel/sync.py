@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import json
 import shutil
@@ -155,11 +156,7 @@ def sync_repository(config: RepositoryConfig) -> dict:
             f"仓库 {config.repository_id} 的 origin 与配置不一致: {target}"
         )
 
-    changes = _git(target, "status", "--porcelain", "--untracked-files=normal")
-    if changes:
-        raise ProjectSyncError(
-            f"仓库 {config.repository_id} 存在未提交修改，请先处理后再同步: {target}"
-        )
+    _raise_on_local_changes(config, target)
 
     branch = _current_branch(target)
     if config.branch and branch != config.branch:
@@ -188,6 +185,181 @@ def sync_repository(config: RepositoryConfig) -> dict:
     raise ProjectSyncError(
         f"仓库 {config.repository_id} 的本地分支与远端已经分叉，请人工处理: {target}"
     )
+
+
+def _raise_on_local_changes(config: RepositoryConfig, target: Path) -> None:
+    """Refuse to sync a checkout that has real uncommitted work.
+
+    AOCI writes ``aoci.txt``/``aoci.*.txt``/``AGENTS.md``/``.gitattributes``
+    and the ``.aoci/`` directory into a repository.  Those files legitimately
+    appear as uncommitted changes right after ``aoci init``, and treating them
+    like ordinary edits made ``sync-project`` fail on every launch until a
+    human committed them.  They stay allowed *only* in a repository that
+    actually carries AOCI cognition; every other repository keeps the
+    original rule, so local edits are never merged into a fetched revision
+    silently.
+    """
+    changes = list(_uncommitted_changes(target))
+    if not changes:
+        return
+
+    if _is_aoci_repository(target):
+        rejected = [change for change in changes if not _is_allowed_aoci_change(change)]
+        if not rejected:
+            logger.info("仓库 %s 仅有 AOCI 资产未提交变更，按白名单放行", config.repository_id)
+            return
+        detail = "、".join(change.describe() for change in rejected)
+        raise ProjectSyncError(
+            f"仓库 {config.repository_id} 存在未提交修改，请先处理后再同步: {target}；"
+            f"不在 AOCI 白名单内的改动路径: {detail}"
+        )
+
+    detail = "、".join(change.describe() for change in changes)
+    raise ProjectSyncError(
+        f"仓库 {config.repository_id} 存在未提交修改，请先处理后再同步: {target}；"
+        f"改动路径: {detail}"
+    )
+
+
+@dataclass(frozen=True)
+class GitChange:
+    """One ``git status --porcelain`` record.
+
+    ``status`` keeps both XY columns; ``paths`` holds every affected path,
+    because a rename touches the old and the new name and both must be
+    judged by the whitelist.
+    """
+
+    status: str
+    paths: tuple[str, ...]
+
+    def describe(self) -> str:
+        return f"{self.status.strip() or '?'} {' -> '.join(self.paths)}"
+
+
+def _uncommitted_changes(repository: Path) -> list[GitChange]:
+    """Parse ``git status --porcelain --untracked-files=normal`` leniently.
+
+    ``--untracked-files=normal`` collapses an entirely untracked directory
+    into a single ``dir/`` record, so the parser must treat a trailing slash
+    as a directory prefix rather than a literal file name.
+    """
+    output = _git_unstripped(repository, "status", "--porcelain", "--untracked-files=normal")
+    changes: list[GitChange] = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        if len(line) < 3:
+            changes.append(GitChange(line.ljust(2)[:2], (line,)))
+            continue
+        status, payload = line[:2], line[3:]
+        if "R" in status or "C" in status:
+            source, destination = _split_rename_payload(payload)
+            if destination is not None:
+                changes.append(GitChange(status, (_unquote_git_path(source), _unquote_git_path(destination))))
+                continue
+        changes.append(GitChange(status, (_unquote_git_path(payload),)))
+    return changes
+
+
+def _split_rename_payload(payload: str) -> tuple[str, str | None]:
+    """Split ``old -> new`` while keeping quoted paths intact.
+
+    Git quotes any path that contains `` -> `` itself, so the separator is
+    only searched outside double quotes; splitting on the first `` -> ``
+    would otherwise cut a filename such as ``"a -> b.java"`` in half.  When
+    no separator is found the record is treated as a plain path.
+    """
+    quoted = False
+    index = 0
+    while index < len(payload):
+        character = payload[index]
+        if character == '"':
+            quoted = not quoted
+            index += 1
+            continue
+        if character == "\\" and quoted:
+            index += 2
+            continue
+        if not quoted and payload.startswith(" -> ", index):
+            return payload[:index], payload[index + 4:]
+        index += 1
+    return payload, None
+
+
+_AOCI_TEXT_ASSET = re.compile(r"aoci(?:\.[A-Za-z0-9_-]+)*\.txt", re.IGNORECASE)
+
+
+def _is_aoci_repository(target: Path) -> bool:
+    """Recognize a checkout that carries AOCI cognition assets."""
+    if (target / "aoci.txt").is_file():
+        return True
+    return (target / ".aoci").is_dir() and any(
+        (target / name).is_file()
+        for name in ("aoci.meta.txt", "aoci.code.txt", "aoci.database.txt")
+    )
+
+
+def _is_allowed_aoci_change(change: GitChange) -> bool:
+    """Decide whether every path of one change is an AOCI asset.
+
+    A rename such as ``aoci.txt -> src/aoci.txt`` must not slip through: the
+    whole record is only allowed when *both* sides are assets.
+    """
+    return all(_is_allowed_aoci_asset(path) for path in change.paths)
+
+
+def _is_allowed_aoci_asset(path: str) -> bool:
+    """Whitelist AOCI cognition assets and their generated index sidecars."""
+    name = path.replace("\\", "/")
+    while name.startswith("./"):
+        name = name[2:]
+    if name in {"AGENTS.md", ".gitattributes"}:
+        return True
+    # ``.aoci/`` is covered by its own .gitignore, but a repository without
+    # that file (or a freshly initialized one) can report the directory itself.
+    if name == ".aoci" or name.startswith(".aoci/"):
+        return True
+    if "/" in name:
+        # An AOCI asset nested somewhere else is a real edit, not tool output.
+        return False
+    return _AOCI_TEXT_ASSET.fullmatch(name) is not None
+
+
+def _unquote_git_path(value: str) -> str:
+    """Undo the C-style quoting Git applies to unusual paths.
+
+    Git wraps paths containing non-ASCII, control characters, quotes or
+    backslashes in double quotes and escapes the bytes; a path literally
+    containing `` -> `` is quoted as well, which keeps the rename separator
+    unambiguous.
+    """
+    if len(value) < 2 or not value.startswith('"') or not value.endswith('"'):
+        return value
+    body = value[1:-1]
+    escapes = {"a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
+               '"': '"', "\\": "\\"}
+    decoded = bytearray()
+    index = 0
+    while index < len(body):
+        character = body[index]
+        if character == "\\" and index + 1 < len(body):
+            following = body[index + 1]
+            if following in escapes:
+                decoded.extend(escapes[following].encode("utf-8"))
+                index += 2
+                continue
+            octal = re.match(r"[0-7]{1,3}", body[index + 1:])
+            if octal:
+                decoded.append(int(octal.group(), 8) & 0xFF)
+                index += 1 + len(octal.group())
+                continue
+            decoded.extend(following.encode("utf-8"))
+            index += 2
+            continue
+        decoded.extend(character.encode("utf-8"))
+        index += 1
+    return decoded.decode("utf-8", "replace")
 
 
 def _result(config: RepositoryConfig, branch: str, status: str) -> dict:
@@ -229,6 +401,25 @@ def _git(repository: Path | None, *arguments: str) -> str:
         detail = process.stderr.strip() or process.stdout.strip() or "未知 Git 错误"
         raise ProjectSyncError(detail)
     return process.stdout.strip()
+
+
+def _git_unstripped(repository: Path, *arguments: str) -> str:
+    """Run Git and keep stdout byte-for-byte instead of stripping it.
+
+    ``git status --porcelain`` encodes the file state in the first two
+    columns, so the leading space of `` M src/Entry.java`` is meaningful.
+    ``_git`` strips the whole output, which shifts that first record to
+    ``M src/Entry.java`` and makes fixed-column parsing read ``rc/Entry.java``.
+    ``errors="replace"`` keeps a repository with a non-UTF-8 file name from
+    raising ``UnicodeDecodeError`` here.
+    """
+    command = ["git", "-C", str(repository), *arguments]
+    process = subprocess.run(command, capture_output=True, text=True,
+                             errors="replace", check=False)
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip() or "未知 Git 错误"
+        raise ProjectSyncError(detail)
+    return process.stdout
 
 
 def _resolve_from_config(config_path: Path, value: str) -> Path:

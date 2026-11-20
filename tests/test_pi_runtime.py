@@ -21,7 +21,12 @@ from business_code_agent.query.materials import MaterialManifest, MaterialSource
 from business_code_agent.query.profile import PI, resolve_profile
 from business_code_agent.query.runtime import RuntimeErrorBase
 from business_code_agent.query.service import _default_runtime
-from business_code_agent.query.workspace import WorkspaceError, WorkspaceManager
+from business_code_agent.query.workspace import (AOCI_COMMAND_ENV, AOCI_READ_TOOLS,
+                                                 AOCI_WRITE_TOOLS, CODEAGENT_MCP_SERVER,
+                                                 CODEAGENT_MCP_TOOLS, MCP_MAINTENANCE_ENV,
+                                                 WorkspaceError, WorkspaceManager,
+                                                 _pi_server_names, _write_pi_mcp_config,
+                                                 pi_mcp_config, read_turn_mcp_servers)
 
 
 FAKE_PI = Path(__file__).parent / "fixtures" / "fake_pi_rpc.py"
@@ -425,6 +430,233 @@ class PiWorkspaceAndCapabilitiesTest(unittest.TestCase):
         self.assertEqual("missing", statuses["ast"].status)
         self.assertEqual("ready", statuses["code_map"].status)
         self.assertEqual("disabled", statuses["search_code"].status)
+
+
+class PiMcpConfigTest(unittest.TestCase):
+    """Pi 的 MCP 配置必须按本轮授权仓库生成，不能读取仓库级静态配置。"""
+
+    AOCI = "/opt/aoci/bin/aoci"
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.repositories = ("loan-middle", "channel-h5", "channel-service")
+        for repository_id in self.repositories:
+            source = self.root / "sources" / repository_id
+            source.mkdir(parents=True)
+            (source / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+        self.config = project_config(self.root, self.repositories)
+        self.manager = WorkspaceManager(project_config=self.config,
+                                        workspace_root=self.root / "workspaces")
+        self.project = ProjectContext("pi-test", "Pi Test", self.config, self.root,
+                                      self.root / "knowledge.db", True)
+        # AOCI 在 PATH 上是否存在与断言无关：显式给定可执行文件，结果才可复现。
+        patcher = patch.dict(os.environ, {AOCI_COMMAND_ENV: self.AOCI})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def workspace(self, repositories, **kwargs):
+        return self.manager.prepare_pi(workspace_key="conversation-mcp", mode="none",
+                                       repository_ids=list(repositories), **kwargs)
+
+    def config_of(self, workspace) -> dict:
+        path = workspace.path / ".pi" / "mcp.json"
+        self.assertTrue(path.is_file(), f"未生成 {path}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def aoci_servers(self, workspace) -> dict:
+        servers = self.config_of(workspace)["mcpServers"]
+        return {name: entry for name, entry in servers.items()
+                if name != CODEAGENT_MCP_SERVER}
+
+    def runtime(self):
+        return PiAgentRuntime(
+            profile=PI, environment={"FAKE_PI_SCENARIO": "normal"},
+            command=[sys.executable, str(FAKE_PI)],
+            session_root=self.root / "pi-sessions")
+
+    def test_single_repository_generates_only_that_repository_server(self):
+        workspace = self.workspace(["loan-middle"])
+        servers = self.aoci_servers(workspace)
+        self.assertEqual(["aoci_loan_middle"], list(servers))
+        self.assertEqual(
+            ["--repo", str((self.root / "sources" / "loan-middle").resolve()), "mcp"],
+            servers["aoci_loan_middle"]["args"])
+        self.assertEqual(self.AOCI, servers["aoci_loan_middle"]["command"])
+        serialized = json.dumps(self.config_of(workspace), ensure_ascii=False)
+        # 未授权的仓库既不能作为 server 出现，也不能作为路径泄漏到配置里。
+        self.assertNotIn("channel-h5", serialized)
+        self.assertNotIn("channel-service", serialized)
+        self.assertEqual(("aoci_loan_middle", CODEAGENT_MCP_SERVER), workspace.mcp_servers)
+
+    def test_two_repositories_generate_two_servers(self):
+        workspace = self.workspace(["loan-middle", "channel-h5"])
+        self.assertEqual(["aoci_channel_h5", "aoci_loan_middle"],
+                         sorted(self.aoci_servers(workspace)))
+        self.assertNotIn("channel-service",
+                         json.dumps(self.config_of(workspace), ensure_ascii=False))
+
+    def test_scope_change_rewrites_the_config_without_leftovers(self):
+        first = self.workspace(["loan-middle", "channel-h5"])
+        self.assertEqual(2, len(self.aoci_servers(first)))
+        second = self.workspace(["channel-service"])
+        self.assertEqual(first.path, second.path)
+        self.assertEqual(["aoci_channel_service"], list(self.aoci_servers(second)))
+        self.assertNotIn("loan-middle",
+                         json.dumps(self.config_of(second), ensure_ascii=False))
+        self.assertNotIn("aoci_loan_middle", self.config_of(second)["mcpServers"])
+
+    def test_codeagent_tools_are_exposed_to_the_query_turn(self):
+        servers = self.config_of(self.workspace(["loan-middle"]))["mcpServers"]
+        entry = servers[CODEAGENT_MCP_SERVER]
+        self.assertEqual(["direct" if tool in CODEAGENT_MCP_TOOLS else "hidden"
+                          for tool in CODEAGENT_MCP_TOOLS],
+                         [entry["toolExposure"][tool] for tool in CODEAGENT_MCP_TOOLS])
+        self.assertEqual("hidden", entry["toolExposure"]["*"])
+        self.assertIn("serve-mcp", entry["args"])
+        self.assertIn(str(self.config.resolve()), entry["args"])
+
+    def test_query_mode_hides_aoci_maintenance_tools(self):
+        entry = self.aoci_servers(self.workspace(["loan-middle"]))["aoci_loan_middle"]
+        # server 级 exposure 必须是 hidden，否则未被 toolExposure 点名的工具会外泄。
+        self.assertEqual("hidden", entry["exposure"])
+        for tool in AOCI_READ_TOOLS:
+            self.assertEqual("direct", entry["toolExposure"][tool], tool)
+        for tool in AOCI_WRITE_TOOLS:
+            self.assertEqual("hidden", entry["toolExposure"][tool], tool)
+        self.assertEqual("hidden", entry["toolExposure"]["*"])
+
+    def test_maintenance_mode_releases_aoci_writing_tools(self):
+        workspace = self.workspace(["loan-middle"], mcp_maintenance=True)
+        entry = self.aoci_servers(workspace)["aoci_loan_middle"]
+        for tool in AOCI_WRITE_TOOLS:
+            self.assertEqual("direct", entry["toolExposure"][tool], tool)
+        self.assertEqual("hidden", entry["toolExposure"]["*"])
+
+    def test_maintenance_mode_is_opt_in_through_the_environment(self):
+        with patch.dict(os.environ, {MCP_MAINTENANCE_ENV: "1"}):
+            enabled = self.aoci_servers(self.workspace(["loan-middle"]))["aoci_loan_middle"]
+        self.assertEqual("direct", enabled["toolExposure"]["aoci_maintain"])
+        # 默认（未设置）必须是问答模式。
+        with patch.dict(os.environ, {MCP_MAINTENANCE_ENV: "0"}):
+            disabled = self.aoci_servers(self.workspace(["loan-middle"]))["aoci_loan_middle"]
+        self.assertEqual("hidden", disabled["toolExposure"]["aoci_maintain"])
+
+    def test_server_names_stay_unique_when_repository_ids_normalize_alike(self):
+        config = project_config(self.root, ("a-b", "a_b", "a.b", "仓库一"))
+        for repository_id in ("a-b", "a_b", "a.b", "仓库一"):
+            (self.root / "sources" / repository_id).mkdir(parents=True)
+        manager = WorkspaceManager(project_config=config, workspace_root=self.root / "ws2")
+        identifiers = ["a-b", "a_b", "a.b", "仓库一"]
+        workspace = manager.prepare_pi(workspace_key="collide", mode="none",
+                                       repository_ids=identifiers)
+        servers = json.loads((workspace.path / ".pi" / "mcp.json")
+                             .read_text(encoding="utf-8"))["mcpServers"]
+        # 四个仓库规范化后同名或全被替换，必须全部保留且互不冲突：
+        # Pi 会拒绝与已存在 server 共享命名空间的第二个 server。
+        names = [name for name in servers if name != CODEAGENT_MCP_SERVER]
+        self.assertEqual(4, len(names))
+        self.assertEqual(4, len(set(names)))
+        for name in names:
+            # Pi 的 SERVER_NAME 是纯 ASCII 正则，中文仓库 ID 不能出现在名字里。
+            self.assertRegex(name, r"^[A-Za-z0-9_-]+$")
+        sources = {entry["args"][1] for entry in servers.values() if "args" in entry
+                   and "--repo" in entry["args"]}
+        self.assertEqual({str((self.root / "sources" / item).resolve())
+                          for item in identifiers}, sources)
+        # 名字必须稳定：换一轮授权顺序，同一仓库仍落到同名 server。
+        again = manager.prepare_pi(workspace_key="collide", mode="none",
+                                   repository_ids=["a.b", "a-b"])
+        repeat = json.loads((again.path / ".pi" / "mcp.json")
+                            .read_text(encoding="utf-8"))["mcpServers"]
+        by_source = {entry["args"][1]: name for name, entry in repeat.items()
+                     if "args" in entry and "--repo" in entry["args"]}
+        for name, entry in servers.items():
+            if name == CODEAGENT_MCP_SERVER or entry["args"][1] not in by_source:
+                continue
+            self.assertEqual(name, by_source[entry["args"][1]])
+
+    def test_generated_server_names_satisfy_pi_rules(self):
+        """名字必须满足 Pi 的 SERVER_NAME 正则，且不产生命名空间冲突。"""
+        identifiers = ["a-b", "a_b", "a.b", "仓库一", "default"]
+        config = project_config(self.root, identifiers)
+        for repository_id in identifiers:
+            (self.root / "sources" / repository_id).mkdir(parents=True)
+        manager = WorkspaceManager(project_config=config, workspace_root=self.root / "ws4")
+        workspace = manager.prepare_pi(workspace_key="rules", mode="none",
+                                       repository_ids=identifiers)
+        servers = json.loads((workspace.path / ".pi" / "mcp.json")
+                             .read_text(encoding="utf-8"))["mcpServers"]
+        self.assertEqual(len(identifiers) + 1, len(servers))
+        # mcpNamespace()：'-' 与 '_' 落在同一命名空间，Pi 会拒绝后来者。
+        namespaces = [name.replace("-", "_") for name in servers]
+        self.assertEqual(len(set(namespaces)), len(namespaces))
+        for name in servers:
+            self.assertRegex(name, r"^[A-Za-z0-9_-]+$")
+            self.assertLessEqual(len(name), 64)
+
+    def test_look_alike_repository_ids_get_distinct_server_names(self):
+        # 大小写不同或全为非 ASCII 的仓库 ID 规范化后可能同名。Pi 的 server 表是
+        # 字典，同名会静默覆盖掉一个 server，所以这里必须给出不同名字。
+        look_alike = _pi_server_names(["Loan-Middle", "loan-middle"])
+        self.assertEqual(2, len(set(look_alike.values())))
+        for name in look_alike.values():
+            self.assertRegex(name, r"^[A-Za-z0-9_-]+$")
+        non_ascii = _pi_server_names(["仓库一", "仓库二"])
+        self.assertEqual(2, len(set(non_ascii.values())))
+        for name in non_ascii.values():
+            self.assertRegex(name, r"^[A-Za-z0-9_-]+$")
+        # 同一个仓库 ID 无论授权顺序如何都得到同一个名字。
+        self.assertEqual(_pi_server_names(["b", "a"]), _pi_server_names(["a", "b"]))
+
+    def test_command_trusts_the_workspace_only_when_mcp_servers_exist(self):
+        workspace = self.workspace(["loan-middle"])
+        command = self.runtime()._command(
+            self.root / "pi-sessions", None, "system prompt",
+            mcp_servers=workspace.mcp_servers)
+        self.assertIn("--approve", command)
+        self.assertNotIn("--no-approve", command)
+        self.assertIn("builtin:mcp", command)
+        tools = command[command.index("--tools") + 1]
+        self.assertIn("mcp__aoci_loan_middle__*", tools)
+        self.assertIn("mcp__codeagent__*", tools)
+        self.assertIn("read,grep,find,ls,codemode", tools)
+
+    def test_command_without_mcp_servers_keeps_the_strict_fallback(self):
+        command = self.runtime()._command(
+            self.root / "pi-sessions", None, "system prompt", mcp_servers=())
+        self.assertIn("--no-approve", command)
+        self.assertNotIn("--approve", command)
+        self.assertNotIn("builtin:mcp", command)
+        tools = command[command.index("--tools") + 1]
+        self.assertNotIn("mcp__", tools)
+
+    def test_no_aoci_executable_yields_no_aoci_server(self):
+        with patch.dict(os.environ, {AOCI_COMMAND_ENV: ""}), \
+                patch("business_code_agent.query.workspace.shutil.which", return_value=None):
+            workspace = self.workspace(["loan-middle"])
+        servers = self.config_of(workspace)["mcpServers"]
+        self.assertEqual([CODEAGENT_MCP_SERVER], list(servers))
+        # 仍有一个可用的 CodeAgent server，因此本轮依然要信任工作区。
+        self.assertEqual((CODEAGENT_MCP_SERVER,), workspace.mcp_servers)
+
+    def test_no_project_config_leaves_no_generated_config(self):
+        # 没有工程配置就没有 CodeAgent server；AOCI 也不可用时本轮完全没有 MCP。
+        config = pi_mcp_config(
+            repositories=[("loan-middle", self.root / "sources" / "loan-middle")],
+            project_config=None, maintenance=False, aoci_command="")
+        self.assertEqual({}, config["mcpServers"])
+        # 生成时若没有任何 server，文件必须被移除而不是留下空的旧配置。
+        root = self.root / "empty"
+        root.mkdir()
+        path = root / ".pi" / "mcp.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"mcpServers": {"stale": {}}}), encoding="utf-8")
+        self.assertIsNone(_write_pi_mcp_config(root, config))
+        self.assertFalse(path.exists())
+        self.assertEqual((), read_turn_mcp_servers(root))
+        self.assertTrue(self.config.is_file())
 
 
 class PiProfileAndDefaultRuntimeTest(unittest.TestCase):

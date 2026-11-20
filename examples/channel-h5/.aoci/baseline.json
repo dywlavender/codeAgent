@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "created_at": "2026-11-19T14:06:40Z",
+  "updated_at": "2026-11-19T14:27:22Z",
+  "files": {
+    ".gitattributes": {
+      "role": "index",
+      "sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476",
+      "size": 291,
+      "normalized_sha256": "21fa16a2122e2b0360b47502c577428b645437e08e9e87ffba661f84853cb476"
+    },
+    ".gitignore": {
+      "role": "index",
+      "sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679",
+      "size": 48,
+      "normalized_sha256": "3efbf0633f9348856f953c6e1e6086686e38a039895e008e92f82367e13bb679"
+    },
+    ".pi/mcp.json": {
+      "role": "index",
+      "sha256": "0308cfdb2fa8e28d8495d923df80ad3d3d2025ce9d848fcb88d83f08fb57a25d",
+      "size": 234,
+      "normalized_sha256": "0308cfdb2fa8e28d8495d923df80ad3d3d2025ce9d848fcb88d83f08fb57a25d"
+    },
+    "AGENTS.md": {
+      "role": "index",
+      "sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8",
+      "size": 14078,
+      "normalized_sha256": "8dfc9de92509cb22289cefa4ad652c5df2d079221b407b6a67572d5ef75007e8"
+    },
+    "README.md": {
+      "role": "index",
+      "sha256": "f8dfa8a9aabdb32a32c3f2f564cc26bfdadb9d0aa4ee42e88f03991193889001",
+      "size": 92,
+      "normalized_sha256": "f8dfa8a9aabdb32a32c3f2f564cc26bfdadb9d0aa4ee42e88f03991193889001"
+    },
+    "aoci.code.txt": {
+      "role": "index",
+      "sha256": "d4fa5421f1c9e9d9c0211d606860d7ca96b8a194b3dfc1b1d8da35bd7888e705",
+      "size": 1398,
+      "normalized_sha256": "d4fa5421f1c9e9d9c0211d606860d7ca96b8a194b3dfc1b1d8da35bd7888e705"
+    },
+    "aoci.meta.txt": {
+      "role": "index",
+      "sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a",
+      "size": 2187,
+      "normalized_sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a"
+    },
+    "aoci.txt": {
+      "role": "index",
+      "sha256": "6e29789ae5d77c51c8718e32719ed05cf4f44b6e48df12816a0494635a76e1cb",
+      "size": 299,
+      "normalized_sha256": "6e29789ae5d77c51c8718e32719ed05cf4f44b6e48df12816a0494635a76e1cb"
+    },
+    "package.json": {
+      "role": "index",
+      "sha256": "9d1b96c016c7f7294ead53cf67286500dec8e293bcde40556027daa0fc2677a0",
+      "size": 347,
+      "normalized_sha256": "9d1b96c016c7f7294ead53cf67286500dec8e293bcde40556027daa0fc2677a0"
+    },
+    "src/pages/WithdrawApply.vue": {
+      "role": "index",
+      "sha256": "53e0ab77978aa98d56bd7793a00ba1651ab997253ef41787f18a6b3e093d618c",
+      "size": 2265,
+      "normalized_sha256": "53e0ab77978aa98d56bd7793a00ba1651ab997253ef41787f18a6b3e093d618c"
+    },
+    "src/router/index.ts": {
+      "role": "index",
+      "sha256": "a6acd4212ec921044f3c0d5d79fbcce639f758fd1002f432030c7ee9d001e983",
+      "size": 306,
+      "normalized_sha256": "a6acd4212ec921044f3c0d5d79fbcce639f758fd1002f432030c7ee9d001e983"
+    },
+    "src/utils/request.ts": {
+      "role": "index",
+      "sha256": "c3db6b481aedbe65ca390f8c414de3f3079fb3e6d9a79e298c41f658e795f0f9",
+      "size": 121,
+      "normalized_sha256": "c3db6b481aedbe65ca390f8c414de3f3079fb3e6d9a79e298c41f658e795f0f9"
+    }
+  },
+  "managed_scope": {
+    "version": "managed-scope-baseline/v1",
+    "policy_identity": "e0f548d87fe5462c412a1c54409871a60ddf2ae5c30609258ff8739fdfcc8e76",
+    "observe_change_policy": "review_required",
+    "budget_policy_identity": "15e9b37a6c57e9bf03c9df3d0d049eb5b9a7f5540f9d34960408114e2538a32d",
+    "budget_policy": {
+      "version": "cognition-budget-policy/v1",
+      "mode": "enforce",
+      "whole_index": {
+        "target_tokens": 200000,
+        "warning_tokens": 300000,
+        "max_tokens": 400000
+      },
+      "r": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 25,
+          "max_tokens": 50
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 45,
+          "max_tokens": 90
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 90,
+          "max_tokens": 180
+        }
+      ],
+      "s": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 20,
+          "max_tokens": 40
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 40,
+          "max_tokens": 80
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 100,
+          "max_tokens": 200
+        }
+      ]
+    },
+    "apply_authorization_mode": "auto"
+  }
+}

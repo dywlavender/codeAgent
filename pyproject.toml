@@ -14,6 +14,9 @@ dependencies = [
 # Re-enable 0.26 once upstream fixes the GC lifetime declarations.
 tree-sitter = ["tree-sitter>=0.25,<0.26", "tree-sitter-java>=0.23", "tree-sitter-javascript>=0.25", "tree-sitter-typescript>=0.23"]
 retrieval = ["numpy>=2.3,<3", "onnxruntime>=1.23,<2", "tokenizers>=0.22,<1", "huggingface-hub>=0.36,<2"]
+# 只读业务知识 MCP 服务（serve-mcp）。MCP SDK 只在需要该能力时安装，
+# 基础依赖和离线包不引入它及其传输层依赖。
+mcp = ["mcp>=2.3,<3"]
 
 [project.scripts]
 business-code-agent = "business_code_agent.cli:main"

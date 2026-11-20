@@ -29,8 +29,8 @@ export function KnowledgeAdminPage({ projectId, adminUnlocked, onRequireUnlock }
   return (
     <div className="page-wrap knowledge-page">
       <div className="knowledge-heading">
-        <div><h1>业务知识</h1><p>维护代码无法直接说明的业务术语、规则和约定；业务图谱由这些文档按需投影。</p></div>
-        <Button href="#/graph">在知识图谱中查看 →</Button>
+        <h1>业务知识</h1>
+        <Button href="#/graph">查看图谱</Button>
       </div>
       <ProjectionNotice state={projection} />
       <div className="knowledge-grid">
@@ -82,7 +82,6 @@ function ProjectionPane({ revision, projection, onRequireUnlock, onImported }) {
   const [statusLabel, statusColor] = PROJECTION_STATUS[projection?.status] || PROJECTION_STATUS.empty;
   return <Card title="结构化投影" size="small" extra={<Tag color={statusColor}>{statusLabel}</Tag>}
     className="knowledge-projection">
-    <p className="knowledge-projection-note">这里展示文档派生的结构化状态；业务事实以人工维护的原文为准。</p>
     <dl className="guide-kv">
       <dt>已导入来源</dt><dd>{projection?.importedDocumentCount ?? "—"}</dd>
       <dt>实体与规则</dt><dd>{counts ? counts.entities : "…"}</dd>
@@ -98,13 +97,12 @@ function ProjectionPane({ revision, projection, onRequireUnlock, onImported }) {
     {error && <Alert type="error" showIcon title="操作未完成" description={error} closable
       onClose={() => setError("")} style={{ marginTop: 12 }} />}
     {summary && <ImportSummary value={summary} />}
-    <Button type="link" href="#/evaluation" style={{ marginTop: 10, paddingLeft: 0 }}>验证问答效果 →</Button>
   </Card>;
 }
 
 function ImportSummary({ value }) {
   const counts = value.entityCounts || {}; const anchors = value.anchorCounts || {};
-  return <Alert type="success" showIcon title={`已导入 ${value.sourceCount ?? "-"} 份业务补充知识`}
-    description={`知识 ${Object.values(counts).reduce((sum, item) => sum + Number(item || 0), 0)} 条；调查入口 ${anchors.ACTIVE || 0} 个，候选 ${anchors.CANDIDATE || 0} 个，未解析 ${anchors.UNRESOLVED || 0} 个`}
+  return <Alert type="success" showIcon title={`已导入 ${value.sourceCount ?? "-"} 份文档`}
+    description={`知识 ${Object.values(counts).reduce((sum, item) => sum + Number(item || 0), 0)} 条 · 调查入口 ${anchors.ACTIVE || 0} 个`}
     style={{ marginTop: 12 }} />;
 }
